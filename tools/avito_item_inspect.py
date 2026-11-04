@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only inspection of ONE existing Avito item. Never changes or removes anything.
 
-The fixed target 449877076 comes from the owner's verified project history.
+The fixed target 8347570435 comes from the owner's verified project history.
 No personal profile data, bearer tokens or credential values are printed.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-TARGET_ITEM_ID = 449877076
+TARGET_ITEM_ID = 8347570435
 BASE = "https://api.avito.ru"
 MAX_BYTES = 65536
 TIMEOUT = 20
@@ -141,8 +141,8 @@ def inspect(client_id, client_secret, transport=network):
             if isinstance(item.get(key), dict):
                 item = item[key]
         actual_id = item.get("id", item.get("item_id"))
-        if actual_id is not None and str(actual_id) != str(TARGET_ITEM_ID):
-            return fail("item", status, "id_mismatch")
+        if str(actual_id) != str(TARGET_ITEM_ID):
+            return fail("item", status, "id_missing_or_mismatch")
         title = item.get("title")
         if isinstance(title, str):
             title_matches = any(s in title.casefold() for s in
