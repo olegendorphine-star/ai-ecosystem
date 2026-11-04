@@ -2,6 +2,7 @@ name: Avito item 8347570435 — single read-only inspection
 
 # One opt-in inspection, triggered only by adding this file to its task branch.
 # No DELETE, no edits, no messages, no ad status changes.
+# Detail response without ID is corroborated using exact-item list search.
 # Re-run after aligning the offline fail-closed ID mismatch assertion.
 # Fallback on 422: bounded pagination across own account listings (max 15 reads).
 on:
