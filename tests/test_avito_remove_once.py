@@ -39,6 +39,12 @@ class RemoveOnceTests(unittest.TestCase):
         self.assertNotIn("FAKE-SECRET", json.dumps(result))
         self.assertNotIn("FAKE-TOKEN", json.dumps(result))
 
+    def test_assistant_title_passes_same_guard_as_prior_readonly_check(self):
+        send, methods = self.make_send(title="Личный ИИ-ассистент", after_empty=True)
+        result = app.remove_once("id", "secret", send)
+        self.assertEqual(result["outcome"], "not_in_active_list_after_archive_request")
+        self.assertEqual(methods.count("DELETE"), 1)
+
     def test_title_mismatch_blocks_delete(self):
         send, methods = self.make_send(title="Продам велосипед")
         result = app.remove_once("id", "secret", send)
