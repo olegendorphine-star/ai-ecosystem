@@ -1,0 +1,42 @@
+name: Avito item 449877076 — single read-only inspection
+
+# One opt-in inspection, triggered only by adding this file to its task branch.
+# No DELETE, no edits, no messages, no ad status changes.
+on:
+  push:
+    branches:
+      - feature/avito-item-inspect-2026-11-04
+    paths:
+      - .github/workflows/avito-item-inspect-once.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avito-item-inspect-once-2026-11-04
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: ${{ github.repository == 'olegendorphine-star/ai-ecosystem' && github.ref == 'refs/heads/feature/avito-item-inspect-2026-11-04' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout own task branch (no retained Git credentials)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test read-only guard and no secret disclosure offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_avito_item_inspect.py' -v
+      - name: Read exactly one historical item from own account
+        shell: bash
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          AVITO_INSPECT_ONE_ITEM: 'YES'
+        run: |
+          set -euo pipefail
+          python3 tools/avito_item_inspect.py
