@@ -52,6 +52,50 @@ def fail(stage, status=None, code="unexpected_response"):
             "http_status": status, "outcome": code, "changed": False}
 
 
+def list_fallback(token, transport):
+    """Scan own listings in supported statuses, without printing unrelated listings.
+
+    At most 15 GETs (5 statuses, <=3 pages each) and no mutation.
+    A failed or truncated scan is inconclusive, not proof of absence.
+    """
+    for state in ("active", "old", "removed", "blocked", "rejected"):
+        for page in (1, 2, 3):
+            qs = urllib.parse.urlencode({"status": state, "page": page, "per_page": 99})
+            req = urllib.request.Request(BASE + "/core/v1/items?" + qs,
+                method="GET", headers={
+                    "Authorization": "Bearer " + token,
+                    "Accept": "application/json",
+                })
+            try:
+                status, payload = get(req, transport)
+            except Exception:
+                return fail("item_list", code="list_transport_or_parse_error")
+            if status != 200:
+                return fail("item_list", status, "list_status_unavailable")
+            entries = payload.get("resources")
+            if not isinstance(entries, list):
+                return fail("item_list", status, "list_schema_unknown")
+            for item in entries:
+                if not isinstance(item, dict):
+                    continue
+                found_id = item.get("id", item.get("item_id"))
+                if str(found_id) != str(TARGET_ITEM_ID):
+                    continue
+                title = item.get("title")
+                match = (any(s in title.casefold() for s in
+                    ("экосистем", "ассистент", "искусственн", "ии-"))
+                    if isinstance(title, str) else None)
+                return {"target_item_id": TARGET_ITEM_ID, "stage": "item_list",
+                        "http_status": status, "outcome": "owned_item_found_in_list",
+                        "item_status": state, "project_title_match": match,
+                        "changed": False}
+            if len(entries) < 99:
+                break
+        else:
+            return fail("item_list", 200, "pagination_limit_inconclusive")
+    return fail("item_list", 200, "not_found_in_scanned_statuses")
+
+
 def inspect(client_id, client_secret, transport=network):
     if not client_id or not client_secret:
         return fail("token", code="credentials_missing")
@@ -88,8 +132,8 @@ def inspect(client_id, client_secret, transport=network):
             return fail("profile", status, "profile_id_invalid")
         path = f"/core/v1/accounts/{int(user_id)}/items/{TARGET_ITEM_ID}/"
         status, item_response = get(auth_get(path), transport)
-        if status == 404:
-            return fail("item", status, "not_found_or_not_accessible")
+        if status in (404, 422):
+            return list_fallback(token, transport)
         if status != 200:
             return fail("item", status, "item_read_failed")
         item = item_response
@@ -129,7 +173,7 @@ def main():
                      os.environ.get("AVITO_CLIENT_SECRET", ""))
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if result["outcome"] in {
-        "owned_item_found", "not_found_or_not_accessible"
+        "owned_item_found", "owned_item_found_in_list", "not_found_in_scanned_statuses"
     } else 1
 
 
