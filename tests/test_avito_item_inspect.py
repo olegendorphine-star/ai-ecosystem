@@ -47,10 +47,58 @@ class InspectTests(unittest.TestCase):
         self.assertNotIn("12345", json.dumps(result))
 
     def test_missing_item_not_same_as_permanently_deleted(self):
-        fake, requests = self.fake_api(item_status=404)
+        calls = []
+        def fake(req):
+            calls.append(req)
+            if len(calls) == 1:
+                return 200, b'{"access_token":"TEST_TOKEN"}'
+            if len(calls) == 2:
+                return 200, b'{"id":12345}'
+            if len(calls) == 3:
+                return 404, b'{"message":"not found"}'
+            self.assertIn("status=", req.full_url)
+            return 200, b'{"resources":[]}'
         result = app.inspect("id", "secret", fake)
-        self.assertEqual(result["outcome"], "not_found_or_not_accessible")
-        self.assertEqual(len(requests), 3)
+        self.assertEqual(result["outcome"], "not_found_in_scanned_statuses")
+        self.assertEqual(len(calls), 8)
+        self.assertFalse(result["changed"])
+
+    def test_422_fallback_lists_owned_item(self):
+        calls = []
+        def fake(req):
+            calls.append(req)
+            if len(calls) == 1:
+                return 200, b'{"access_token":"TEST_TOKEN"}'
+            if len(calls) == 2:
+                return 200, b'{"id":12345}'
+            if len(calls) == 3:
+                return 422, b'{"error":"unprocessable"}'
+            self.assertEqual(req.get_method(), "GET")
+            self.assertIn("status=active", req.full_url)
+            return 200, json.dumps({"resources":[
+                {"id": app.TARGET_ITEM_ID, "title":"Персональная ИИ-экосистема"}]}).encode()
+        result = app.inspect("id", "secret", fake)
+        self.assertEqual(result["outcome"], "owned_item_found_in_list")
+        self.assertTrue(result["project_title_match"])
+        self.assertEqual(result["item_status"], "active")
+        self.assertFalse(result["changed"])
+        self.assertEqual(len(calls), 4)
+
+    def test_422_fallback_failed_list_inconclusive(self):
+        calls = []
+        def fake(req):
+            calls.append(req)
+            if len(calls) == 1:
+                return 200, b'{"access_token":"TEST_TOKEN"}'
+            if len(calls) == 2:
+                return 200, b'{"id":12345}'
+            if len(calls) == 3:
+                return 422, b'{"error":"unprocessable"}'
+            return 403, b'{"error":"forbidden"}'
+        result = app.inspect("id", "secret", fake)
+        self.assertEqual(result["outcome"], "list_status_unavailable")
+        self.assertEqual(result["http_status"], 403)
+        self.assertEqual(len(calls), 4)
 
     def test_mismatch_item_id(self):
         fake, _ = self.fake_api(item_id=222)
