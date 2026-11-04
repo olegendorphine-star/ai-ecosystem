@@ -1,0 +1,38 @@
+# Credentials, secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+**/secrets/
+**/credentials/
+*token*.json
+*credentials*.json
+
+# Personal/customer data, runtime logs and local databases
+*.sqlite
+*.sqlite3
+*.db
+*.db-*
+*.jsonl
+*.log
+logs/
+data/
+results/
+backups/
+exports/
+
+# Python and editors
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+
+# Bundles
+*.zip
+*.tar.gz
