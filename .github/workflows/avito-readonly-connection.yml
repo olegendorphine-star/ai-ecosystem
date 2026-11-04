@@ -1,0 +1,65 @@
+name: Avito API — manual read-only connection check
+
+# Only manual runs from the repository's default branch are allowed.
+# This workflow does not publish ads, send messages, or change Avito data.
+on:
+  workflow_dispatch:
+    inputs:
+      approve_readonly:
+        description: 'I authorize ONE Avito token request and ONE GET of my own profile'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avito-readonly-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: ${{ inputs.approve_readonly == true && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout reviewed repository code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Offline tests before any network call
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_avito*.py' -v
+          python3 tools/avito_preflight.py
+
+      - name: Check repository secrets are configured
+        shell: bash
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import sys
+          names = ('AVITO_CLIENT_ID', 'AVITO_CLIENT_SECRET')
+          missing = [name for name in names if not os.environ.get(name)]
+          if missing:
+              print('Missing repository secret name(s): ' + ', '.join(missing))
+              sys.exit(2)
+          print('Credentials present in protected GitHub Actions secrets; values not displayed')
+          PY
+
+      - name: Authenticate and read own profile only
+        shell: bash
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          AVITO_ALLOW_READONLY_PREFLIGHT: 'YES'
+        run: |
+          set -euo pipefail
+          python3 tools/avito_preflight.py --live
