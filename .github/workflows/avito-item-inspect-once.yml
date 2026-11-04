@@ -1,4 +1,4 @@
-name: Avito item 449877076 — single read-only inspection
+name: Avito item 8347570435 — single read-only inspection
 
 # One opt-in inspection, triggered only by adding this file to its task branch.
 # No DELETE, no edits, no messages, no ad status changes.
@@ -6,7 +6,7 @@ name: Avito item 449877076 — single read-only inspection
 on:
   push:
     branches:
-      - feature/avito-item-inspect-2026-11-04
+      - feature/avito-item-8347570435-check-2026-11-04
     paths:
       - .github/workflows/avito-item-inspect-once.yml
 
@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   inspect:
-    if: ${{ github.repository == 'olegendorphine-star/ai-ecosystem' && github.ref == 'refs/heads/feature/avito-item-inspect-2026-11-04' }}
+    if: ${{ github.repository == 'olegendorphine-star/ai-ecosystem' && github.ref == 'refs/heads/feature/avito-item-8347570435-check-2026-11-04' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
