@@ -1,4 +1,4 @@
-"""Offline-only tests for a bounded, read-only inspection of one Avito item."""
+"""Offline-only tests for a bounded, read-only inspection of user's specified Avito item."""
 import json
 import os
 import sys
