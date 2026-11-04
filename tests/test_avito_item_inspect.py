@@ -103,8 +103,29 @@ class InspectTests(unittest.TestCase):
     def test_mismatch_item_id(self):
         fake, _ = self.fake_api(item_id=222)
         result = app.inspect("id", "secret", fake)
-        self.assertEqual(result["outcome"], "id_missing_or_mismatch")
+        self.assertEqual(result["outcome"], "id_mismatch")
         self.assertFalse(result["changed"])
+
+    def test_detail_without_id_requires_list_membership(self):
+        calls = []
+        def fake(req):
+            calls.append(req)
+            if len(calls) == 1:
+                return 200, b'{"access_token":"TEST_TOKEN"}'
+            if len(calls) == 2:
+                return 200, b'{"id":12345}'
+            if len(calls) == 3:
+                return 200, b'{"status":"active","stats":{}}'
+            self.assertIn("status=active", req.full_url)
+            return 200, json.dumps({"resources":[{
+                "id":app.TARGET_ITEM_ID,
+                "title":"Персональная ИИ-экосистема",
+                "status":"active"
+            }]}).encode()
+        result = app.inspect("id", "secret", fake)
+        self.assertEqual(result["outcome"], "owned_item_found_in_list")
+        self.assertTrue(result["project_title_match"])
+        self.assertEqual(len(calls), 4)
 
     def test_wrong_title_not_assumed(self):
         fake, _ = self.fake_api(title="Продам велосипед")
