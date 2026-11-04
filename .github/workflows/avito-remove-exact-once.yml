@@ -2,6 +2,7 @@ name: Avito 8347570435 — single owner-authorized archive request
 
 # One-shot run triggered only when this workflow file is first added to this exact branch.
 # Never retries DELETE; checks exact item ID and project title directly before the request.
+# Reattempt permitted: previous attempt stopped BEFORE DELETE due to too-narrow title matcher.
 on:
   push:
     branches:
