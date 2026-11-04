@@ -15,7 +15,7 @@ import urllib.request
 
 API = "https://api.avito.ru"
 ITEM_ID = 8347570435
-TITLE_MARKER = "экосистем"
+TITLE_MARKERS = ("экосистем", "ассистент", "искусственн", "ии-")
 MAX_PAGES = 3
 PAGE_SIZE = 99
 MAX_BYTES = 65536
@@ -72,7 +72,7 @@ def active_listing(token, send):
             title = item.get("title")
             if not isinstance(title, str):
                 return "found", False
-            return "found", TITLE_MARKER in title.casefold()
+            return "found", any(marker in title.casefold() for marker in TITLE_MARKERS)
         if len(items) < PAGE_SIZE:
             return "missing", None
     return "inconclusive", None
