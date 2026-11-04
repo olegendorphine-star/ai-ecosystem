@@ -141,8 +141,11 @@ def inspect(client_id, client_secret, transport=network):
             if isinstance(item.get(key), dict):
                 item = item[key]
         actual_id = item.get("id", item.get("item_id"))
+        if actual_id is None:
+            # Some item-detail responses omit the ID; never infer the target from URL.
+            return list_fallback(token, transport)
         if str(actual_id) != str(TARGET_ITEM_ID):
-            return fail("item", status, "id_missing_or_mismatch")
+            return fail("item", status, "id_mismatch")
         title = item.get("title")
         if isinstance(title, str):
             title_matches = any(s in title.casefold() for s in
