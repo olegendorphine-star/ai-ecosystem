@@ -103,7 +103,7 @@ class InspectTests(unittest.TestCase):
     def test_mismatch_item_id(self):
         fake, _ = self.fake_api(item_id=222)
         result = app.inspect("id", "secret", fake)
-        self.assertEqual(result["outcome"], "id_mismatch")
+        self.assertEqual(result["outcome"], "id_missing_or_mismatch")
         self.assertFalse(result["changed"])
 
     def test_wrong_title_not_assumed(self):
