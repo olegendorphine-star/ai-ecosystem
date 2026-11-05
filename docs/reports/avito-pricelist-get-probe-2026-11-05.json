@@ -1,0 +1,24 @@
+{
+  "account_mutations": 0,
+  "ad_upload_requests": 0,
+  "body_markers": {
+    "error_phrase": true,
+    "pending_phrase": false,
+    "price_list_reference": false,
+    "xml_formally_invalid_phrase": false,
+    "xml_formally_valid_phrase": true
+  },
+  "charges_rub": 0,
+  "check_id": "6aec57e6213afa1bce7d3974",
+  "compression": "none",
+  "content_type": "text/html",
+  "endpoint": "public_xml_checker_result",
+  "http_status": 200,
+  "messages_read": 0,
+  "messages_sent": 0,
+  "parse_type": "html_fragment_or_invalid_xml",
+  "prefix_hex": "3c61727469636c65",
+  "response_size": 2102,
+  "schema": "avito.xml_checker.response_probe.v1",
+  "validator_submissions": 0
+}
