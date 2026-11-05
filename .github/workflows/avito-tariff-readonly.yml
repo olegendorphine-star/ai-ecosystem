@@ -1,0 +1,73 @@
+name: Avito paid tariff evidence audit read only
+on:
+  push:
+    branches: ["audit/avito-tariff-readonly-2026-11-05"]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read own tariff billing evidence without purchases or mutations
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.parse,urllib.error,datetime
+          api='https://api.avito.ru'
+          body=urllib.parse.urlencode({'grant_type':'client_credentials','client_id':os.environ['AVITO_CLIENT_ID'],'client_secret':os.environ['AVITO_CLIENT_SECRET']}).encode()
+          try:
+              with urllib.request.urlopen(urllib.request.Request(api+'/token/',data=body,headers={'Content-Type':'application/x-www-form-urlencoded'},method='POST'),timeout=25) as response:
+                  token=json.load(response)['access_token']
+          except urllib.error.HTTPError as e:
+              print('AUTH_HTTP',e.code)
+              raise SystemExit(1)
+          headers={'Authorization':'Bearer '+token,'Accept':'application/json','Content-Type':'application/json'}
+          try:
+              with urllib.request.urlopen(urllib.request.Request(api+'/core/v1/accounts/self',headers=headers),timeout=25) as r:
+                  account=json.load(r)
+              print('ACCOUNT_STATUS',200)
+              print('ACCOUNT_FIELD_KEYS',sorted(account.keys()))
+              for key in ['tariff','tariffName','tariff_type','subscription','subscriptionName','subscriptionLevel','businessAccount','accountType']:
+                  if key in account: print('ACCOUNT_TARIFF_FIELD',key,str(account[key])[:200])
+          except urllib.error.HTTPError as e:
+              print('ACCOUNT_STATUS',e.code)
+          windows=[('2026-10-01T00:00:00','2026-10-08T00:00:00'),
+            ('2026-10-08T00:00:00','2026-10-15T00:00:00'),
+            ('2026-10-15T00:00:00','2026-10-22T00:00:00'),
+            ('2026-10-22T00:00:00','2026-10-29T00:00:00'),
+            ('2026-10-29T00:00:00','2026-11-05T00:00:00')]
+          for a,b in windows:
+              data=json.dumps({'dateTimeFrom':a,'dateTimeTo':b}).encode()
+              req=urllib.request.Request(api+'/core/v1/accounts/operations_history/',data=data,headers=headers,method='POST')
+              try:
+                  with urllib.request.urlopen(req,timeout=30) as r:
+                      result=json.load(r)
+                  operations=result.get('operations',[])
+                  if not isinstance(operations,list):operations=[]
+                  print('PERIOD',a[:10],b[:10],'HTTP',200,'OPERATIONS_COUNT',len(operations))
+                  matches=[]
+                  for operation in operations:
+                      typ=str(operation.get('serviceType') or '').lower()
+                      name=str(operation.get('serviceName') or '')
+                      operation_name=str(operation.get('operationName') or '')
+                      haystack=(typ+' '+name+' '+operation_name).lower()
+                      if any(w in haystack for w in ('tariff','subscription','подписк','тариф','размещени','пакет','bundle')):
+                          matches.append({k:operation.get(k) for k in ('serviceType','serviceName','operationName','operationType','amountRub','updatedAt') if operation.get(k) is not None})
+                  for match in matches[:15]:
+                      print('TARIFF_RELATED_OPERATION',json.dumps(match,ensure_ascii=False)[:650])
+              except urllib.error.HTTPError as e:
+                  print('PERIOD',a[:10],b[:10],'HTTP',e.code,'RETRY_AFTER',e.headers.get('Retry-After','not-provided'))
+                  if e.code==429:break
+          try:
+              with urllib.request.urlopen(urllib.request.Request(api+'/autoload/v2/profile',headers=headers),timeout=25) as r:
+                  profile=json.load(r)
+              print('AUTOLOAD_ENABLED',profile.get('autoload_enabled'))
+              print('AUTOLOAD_MODE',profile.get('uploadMode'))
+              print('AUTOLOAD_FEED_COUNT',len(profile.get('feeds_data') or []))
+              print('AUTOLOAD_FIELDS',sorted(profile.keys()))
+          except urllib.error.HTTPError as e:
+              print('AUTOLOAD_HTTP',e.code)
+          PY
