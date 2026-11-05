@@ -3,7 +3,22 @@
   <Ad>
     <Id>ai-assistant-memory-moscow-001</Id>
     <AvitoId>8347570435</AvitoId>
-    <Category>Услуги</Category>
+    <Category>Предложение услуг</Category>
+    <ServiceType>Деловые услуги</ServiceType>
+    <ServiceSubtype>IT, дизайн, тексты</ServiceSubtype>
+    <ServiceSubspecies>Программирование, настройка CRM</ServiceSubspecies>
+    <Specialty>Программирование</Specialty>
+    <WhatServices>Работа и разработка ИИ, нейронных сетей</WhatServices>
+    <Specialisation>Разработка чат-ботов</Specialisation>
+    <Place>Удалённо</Place>
+    <WorkWithContract>Нет</WorkWithContract>
+    <Consultations>Есть</Consultations>
+    <Prepayment>Нет</Prepayment>
+    <TechnicalSupport>Да</TechnicalSupport>
+    <WorkingWithAI>Да</WorkingWithAI>
+    <ContactMethod>По телефону и в сообщениях</ContactMethod>
+    <Address>Москва</Address>
+    <ListingFee>Package</ListingFee>
     <Title>Персональная ИИ-экосистема — для бизнеса и жизни</Title>
     <Description>Персональная ИИ-экосистема — для бизнеса и жизни
 
