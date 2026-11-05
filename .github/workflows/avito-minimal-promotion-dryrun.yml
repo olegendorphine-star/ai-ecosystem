@@ -2,6 +2,7 @@ name: Avito minimum promotion safe DRY RUN (zero spend)
 on:
   push:
     branches: ["test/avito-minimum-promotion-dryrun-2026-11-05"]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
