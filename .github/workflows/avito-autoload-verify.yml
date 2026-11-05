@@ -1,0 +1,41 @@
+name: Avito autoload — verify publication
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify Avito autoload result
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          base="https://api.avito.ru"
+          body=urllib.parse.urlencode({"grant_type":"client_credentials","client_id":os.environ["AVITO_CLIENT_ID"],"client_secret":os.environ["AVITO_CLIENT_SECRET"]}).encode()
+          req=urllib.request.Request(base+"/token/",data=body,headers={"Content-Type":"application/x-www-form-urlencoded"},method="POST")
+          with urllib.request.urlopen(req,timeout=30) as r: token=json.load(r)["access_token"]
+          h={"Authorization":"Bearer "+token,"Accept":"application/json"}
+          def get(path):
+              with urllib.request.urlopen(urllib.request.Request(base+path,headers=h),timeout=30) as r:
+                  return r.status,json.load(r)
+          s,p=get("/autoload/v2/profile")
+          print("profile_http",s,"enabled",p.get("autoload_enabled"),"feeds",len(p.get("feeds_data") or []))
+          s,u=get("/autoload/v4/uploads/last_successful")
+          print("last_successful_http",s,"keys",sorted(u.keys())[:20])
+          s,i=get("/autoload/v4/uploads/last_successful/items")
+          raw=i.get("items",i.get("resources",[])) if isinstance(i,dict) else []
+          if isinstance(raw,dict): raw=raw.get("items",[])
+          found=[]
+          for x in raw if isinstance(raw,list) else []:
+              if str(x.get("avito_id",x.get("avitoId",x.get("id",""))))=="8347570435":
+                  found.append(x)
+          print("target_8347570435_found",bool(found),"items_count",len(raw) if isinstance(raw,list) else 0)
+          PY
