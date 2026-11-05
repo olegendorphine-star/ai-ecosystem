@@ -1,0 +1,25 @@
+name: Avito PriceList — controlled SPb rollout integrity
+on:
+  pull_request:
+    paths:
+      - 'docs/avito-feed.xml'
+      - 'tests/test_avito_pricelist_rollout.py'
+      - '.github/workflows/avito-spb-pricelist-integrity.yml'
+  push:
+    branches: ["main"]
+    paths:
+      - 'docs/avito-feed.xml'
+
+permissions:
+  contents: read
+
+jobs:
+  compare_xml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify Moscow unchanged, SPb only and no paid actions
+        run: python3 -m unittest discover -s tests -p 'test_avito_pricelist_rollout.py' -v
