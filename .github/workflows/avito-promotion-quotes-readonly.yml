@@ -1,0 +1,62 @@
+name: Avito promotion quote and services read only 2026-11-05
+on:
+  push:
+    branches: ["audit/avito-promotion-prices-readonly-2026-11-05"]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch only current item promotion prices and enabled services
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os, json, urllib.parse, urllib.request, urllib.error
+          root='https://api.avito.ru'
+          q=urllib.parse.urlencode({'grant_type':'client_credentials','client_id':os.environ['AVITO_CLIENT_ID'],'client_secret':os.environ['AVITO_CLIENT_SECRET']}).encode()
+          with urllib.request.urlopen(urllib.request.Request(root+'/token/',data=q,method='POST',headers={'Content-Type':'application/x-www-form-urlencoded'}),timeout=30) as r:token=json.load(r)['access_token']
+          headers={'Authorization':'Bearer '+token,'Accept':'application/json','Content-Type':'application/json'}
+          def ask(label,path,body=None):
+              method='POST' if body is not None else 'GET'
+              request=urllib.request.Request(root+path,headers=headers,method=method,data=json.dumps(body,ensure_ascii=False).encode() if body is not None else None)
+              try:
+                  with urllib.request.urlopen(request,timeout=30) as r:
+                      raw=r.read(100000)
+                      j=json.loads(raw) if raw.strip() else {}
+                      print('READ_ONLY_RESPONSE',label,'HTTP',r.status,'DATA',json.dumps(j,ensure_ascii=False)[:16000],flush=True)
+                      return j
+              except urllib.error.HTTPError as e:
+                  err=e.read(3500).decode('utf-8','replace')
+                  print('READ_ONLY_ERROR',label,'HTTP',e.code,'RESPONSE',err[:2500],flush=True)
+              except Exception as e:
+                  print('READ_ONLY_ERROR',label,type(e).__name__,str(e)[:600],flush=True)
+              return None
+          with urllib.request.urlopen(urllib.request.Request(root+'/core/v1/accounts/self',headers=headers),timeout=30) as r:
+              acct=json.load(r)
+          user_id=acct.get('id')
+          assert isinstance(user_id,int) or (str(user_id).isdigit()),'Account missing numeric id'
+          listings=ask('active_items','/core/v1/items?status=active&per_page=99&page=1')
+          active=(listings or {}).get('resources') or []
+          ids=[int(x.get('id')) for x in active if str(x.get('id','')).isdigit() and x.get('status')=='active']
+          print('ACTIVE_ITEM_COUNT',len(ids),'ACTIVE_IDS',ids,flush=True)
+          if 8347570435 not in ids: print('WARNING_MOSCOW_NOT_ACTIVE',flush=True)
+          if not ids:
+              print('NO_ITEMS_SKIP_PRICE_QUERY',flush=True)
+              raise SystemExit(0)
+          # Requesting a quote is read-only, even though the endpoint uses HTTP POST.
+          offers=ask('VAS_PRICES','/core/v1/accounts/'+str(user_id)+'/vas/prices',{'itemIds':ids})
+          if isinstance(offers,list):
+              for item in offers:
+                  print('VAS_QUOTE_ITEM',item.get('itemId'),'OPTIONS',json.dumps(item.get('vas') or [],ensure_ascii=False)[:9000],
+                        'STICKERS',json.dumps(item.get('stickers') or [],ensure_ascii=False)[:4000],flush=True)
+          else:print('VAS_QUOTE_FORMAT',type(offers).__name__,flush=True)
+          ask('PROMOTION_SERVICE_DICTIONARY','/promotion/v1/items/services/dict',{})
+          ask('ALREADY_ENABLED_PROMOTIONS_V2','/promotion/v2/items/services/get',{'itemIds':ids})
+          ask('AVAILABLE_BBIP_BUDGET_SUGGESTIONS','/promotion/v1/items/services/bbip/suggests/get',{'itemIds':ids})
+          ask('PROMOTION_ORDER_HISTORY','/promotion/v1/items/services/orders/get',{'pagination':{'page':1,'perPage':10}})
+          print('AUDIT_COMPLETED_NO_PAID_API_CALLED',True,flush=True)
+          PY
