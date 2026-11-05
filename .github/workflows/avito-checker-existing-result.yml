@@ -1,0 +1,62 @@
+name: Avito PriceList — inspect prior public checker result without resubmission
+on:
+  pull_request:
+    paths:
+      - 'tools/avito_checker_result_probe.py'
+      - 'tests/test_avito_checker_result_probe.py'
+      - '.github/workflows/avito-checker-existing-result.yml'
+  push:
+    branches: ["main"]
+    paths:
+      - '.github/workflows/avito-checker-existing-result.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Pure offline tests
+        run: python3 -m unittest discover -s tests -p 'test_avito_checker_result_probe.py' -v
+
+  inspect:
+    needs: test
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'RUN_ONCE_AVITO_CHECKER_GET_ONLY_2026_11_05') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: true
+      - name: Read existing public checker report, without new POST
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(date -u +%F)" != "2026-11-05" ]]; then
+            echo "DATE_GUARD_STOP_NO_API_CALL"
+            exit 0
+          fi
+          python3 tools/avito_checker_result_probe.py docs/reports/avito-pricelist-get-probe-2026-11-05.json
+      - name: Commit sanitized public format report
+        shell: bash
+        run: |
+          set -euo pipefail
+          file='docs/reports/avito-pricelist-get-probe-2026-11-05.json'
+          if [[ ! -f "$file" ]]; then
+            exit 0
+          fi
+          git add -- "$file"
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "report: safe classification of existing Avito checker response"
+          git push origin HEAD:main
