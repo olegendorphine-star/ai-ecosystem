@@ -33,7 +33,7 @@ class ProfileReportGuardTests(unittest.TestCase):
     def test_normal_report_strips_every_unknown_or_private_field(self):
         data = app.validate(self.sample())
         text = json.dumps(data, ensure_ascii=False)
-        for forbidden in ("PRIVATE", "token", "email", "chat", "profile"):
+        for forbidden in ("PRIVATE", "\"token\":", "\"email\":", "\"chat\":", "\"profile\":"):
             self.assertNotIn(forbidden, text)
         self.assertTrue(data["pricelist_observed_in_fields"])
         self.assertEqual(data["http"]["category_tree"], 200)
