@@ -1,86 +1,31 @@
-name: Avito official XML checker non-publishing test
+name: Avito XML checker retrieve existing report only
 on:
   push:
     branches: ["test/avito-official-xmlcheck-2026-11-05"]
 permissions:
   contents: read
 jobs:
-  validate:
+  result:
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
-      - name: Submit one public XML feed to official validation only
+      - name: Read existing official validator report without new submission
         run: |
           python3 - <<'PY'
-          import urllib.request,urllib.error,json,time,urllib.parse,xml.etree.ElementTree as ET
-          base='https://autoload.avito.ru'
-          feed='https://olegendorphine-star.github.io/ai-ecosystem/avito-feed.xml'
-          with urllib.request.urlopen(feed,timeout=25) as response:
-              data=response.read()
-              root=ET.fromstring(data)
-          ads=root.findall('Ad')
-          assert len(ads)==1
-          a=ads[0]
-          assert a.findtext('Id')=='ai-assistant-memory-moscow-001'
-          assert a.findtext('AvitoId')=='8347570435'
-          assert a.findtext('Price')=='5000'
-          assert a.findtext('AdStatus')=='Free'
-          assert len(a.findall('./Images/Image'))==6
-          print('PREVALIDATION',len(data),'bytes','1_existing_listing','6_images','no_paid_promotion')
-          req=urllib.request.Request(
-            base+'/api/v2/public/xml_checker/from_url/',
-            data=feed.encode('utf-8'),
-            method='POST',
-            headers={
-              'Content-Type':'text/plain;charset=UTF-8',
-              'Accept':'application/json',
-              'Origin':base,
-              'Referer':base+'/format/xmlcheck/',
-              'User-Agent':'Mozilla/5.0'
-            }
-          )
-          try:
-              with urllib.request.urlopen(req,timeout=30) as response:
-                  raw=response.read(250000)
-                  print('OFFICIAL_VALIDATOR_SUBMIT_STATUS',response.status,'CONTENT_TYPE',response.headers.get('Content-Type',''))
-          except urllib.error.HTTPError as err:
-              raw=err.read(1500).decode('utf-8','replace')
-              print('OFFICIAL_VALIDATOR_SUBMIT_HTTP',err.code,'RESPONSE',raw[:700])
-              raise SystemExit(2)
-          try:
-              obj=json.loads(raw)
-          except ValueError:
-              print('OFFICIAL_VALIDATOR_NON_JSON',raw[:500])
-              raise SystemExit(3)
-          print('OFFICIAL_VALIDATOR_RESPONSE',json.dumps(obj,ensure_ascii=False)[:2700])
-          if isinstance(obj,dict):
-              keys=list(obj)
-              print('TOP_KEYS',keys)
-              candidates=[obj.get(k) for k in ('id','task_id','request_id','uuid','key','token') if isinstance(obj.get(k),(str,int))]
-              for k in ('result','data','response'):
-                  val=obj.get(k)
-                  if isinstance(val,dict):
-                      candidates += [val.get(w) for w in ('id','task_id','request_id','uuid','key') if isinstance(val.get(w),(str,int))]
-              candidates=[str(x) for x in candidates if x]
-              if candidates:
-                  task_id=candidates[0]
-                  if len(task_id)>150 or '/' in task_id:
-                      print('RESULT_ID_UNSAFE')
-                      raise SystemExit(0)
-                  url=base+'/api/v2/public/xml_checker/result/'+urllib.parse.quote(task_id,safe='')+'/'
-                  report_ready=False
-                  for attempt in range(20):
-                      time.sleep(6)
-                      try:
-                          with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json','Referer':base+'/format/xmlcheck/'}),timeout=25) as response:
-                              parsed=json.load(response)
-                          print('OFFICIAL_VALIDATOR_RESULT_ATTEMPT',attempt+1,json.dumps(parsed,ensure_ascii=False)[:10000])
-                          if isinstance(parsed,dict) and (parsed.get('status') in ('done','completed','complete','success','error') or parsed.get('result') not in (None,[],{})):
-                              report_ready=True
-                              break
-                      except urllib.error.HTTPError as err:
-                          print('OFFICIAL_VALIDATOR_POLL_HTTP',err.code)
-                          if err.code==429:break
-                  print('OFFICIAL_REPORT_READY',report_ready)
-                  if not report_ready:raise SystemExit(5)
+          import json,time,urllib.request,urllib.error
+          url='https://autoload.avito.ru/api/v2/public/xml_checker/result/6aec2f3a135917229b21cf87/'
+          for attempt in range(7):
+              try:
+                  req=urllib.request.Request(url,headers={'Accept':'application/json','Referer':'https://autoload.avito.ru/format/xmlcheck/','User-Agent':'Mozilla/5.0'})
+                  with urllib.request.urlopen(req,timeout=15) as response:
+                      data=json.load(response)
+                  print('REPORT_RESPONSE',attempt+1,json.dumps(data,ensure_ascii=False)[:16000],flush=True)
+                  msgs=data.get('messages') or []
+                  pending=any('в работе' in str(m.get('text','')).lower() for m in msgs)
+                  if not pending:
+                      print('REPORT_READY',True,flush=True)
+                      break
+              except (urllib.error.HTTPError,urllib.error.URLError,TimeoutError) as exc:
+                  print('REPORT_REQUEST_ERROR',attempt+1,type(exc).__name__,getattr(exc,'code',''),flush=True)
+              if attempt<6: time.sleep(8)
           PY
