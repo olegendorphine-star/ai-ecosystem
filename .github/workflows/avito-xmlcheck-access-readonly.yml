@@ -44,6 +44,10 @@ jobs:
                               js=rr.read(300000).decode('utf-8','replace')
                           print('JS_ASSET',asset,'LEN',len(js))
                           if asset.endswith('xml_checker.js'):
+                              for pattern in ('uploadUrl(', 'sendRequest(', 'JSON.stringify(', 'new FormData', 'append(', 'URLSearchParams', 'inputUrl', 'inputLink', 'querySelector', 'getAttribute', 'result_url'):
+                                  positions=[m.start() for m in re.finditer(re.escape(pattern),js,re.I)]
+                                  for k in positions[:4]:print('JS_CONTEXT',pattern,json.dumps(js[max(0,k-380):min(len(js),k+800)],ensure_ascii=False))
+                          if asset.endswith('xml_checker.js'):
                               for pattern in ('xml_checker/from_url','xml_checker/from_file','xml_checker/from_text','csrf','submitUrl','formData'):
                                   for m in list(re.finditer(re.escape(pattern),js,re.I))[:5]:print('ENDPOINT_CONTEXT',pattern,js[max(0,m.start()-750):min(len(js),m.start()+550)].replace('\\n',' ')[:1300])
                           for pattern in ('XMLHttpRequest','fetch(','.ajax(','method:',"'POST'",'xmlcheck','/format/'):
