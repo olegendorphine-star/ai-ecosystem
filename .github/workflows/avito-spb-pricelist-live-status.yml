@@ -9,6 +9,15 @@ on:
     branches: ["main"]
     paths:
       - '.github/workflows/avito-spb-pricelist-live-status.yml'
+  schedule:
+    - cron: '23 08 * * *'
+  workflow_dispatch:
+    inputs:
+      approve_readonly:
+        description: 'One-time safe read-only status check, without chat or payments'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,7 +37,7 @@ jobs:
 
   read_and_report:
     needs: offline_tests
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'RUN_ONCE_AVITO_SPB_PRICELIST_STATUS_2026_11_05') }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.approve_readonly == true) || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_ONCE_AVITO_MONITOR_V2_2026_11_05'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -44,17 +53,17 @@ jobs:
           AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
         run: |
           set -euo pipefail
-          if [[ "$(date -u +%F)" != "2026-11-05" ]]; then
-            echo "READ_ONLY_DATE_GUARD_EXPIRED"
+          if [[ "${{ github.event_name }}" == "push" && "$(date -u +%F)" != "2026-11-05" ]]; then
+            echo "ONE_SHOT_DATE_GUARD_EXPIRED"
             exit 0
           fi
           python3 tools/avito_spb_pricelist_live_status.py \
-            docs/reports/avito-spb-pricelist-live-status-2026-11-05.json
+            docs/reports/avito-spb-pricelist-live-latest.json
       - name: Publish sanitized read-only status
         shell: bash
         run: |
           set -euo pipefail
-          path='docs/reports/avito-spb-pricelist-live-status-2026-11-05.json'
+          path='docs/reports/avito-spb-pricelist-live-latest.json'
           if [[ ! -f "$path" ]]; then
             exit 0
           fi
@@ -64,5 +73,5 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "report: read-only SPb PriceList rollout state"
+          git commit -m "report: latest read-only Avito SPb PriceList monitor"
           git push origin HEAD:main
