@@ -45,7 +45,9 @@ jobs:
               try:
                   with urllib.request.urlopen(req,timeout=30) as r:
                       result=json.load(r)
-                  operations=result.get('operations',[])
+                  print('HISTORY_TOP_KEYS',sorted(result.keys()) if isinstance(result,dict) else type(result).__name__)
+                  wrapper=result.get('result',{}) if isinstance(result,dict) else {}
+                  operations=result.get('operations',wrapper.get('operations',[])) if isinstance(result,dict) else []
                   if not isinstance(operations,list):operations=[]
                   print('PERIOD',a[:10],b[:10],'HTTP',200,'OPERATIONS_COUNT',len(operations))
                   matches=[]
