@@ -2,6 +2,7 @@
 """One-shot read-only verification of the live SPb PriceList rollout."""
 from __future__ import annotations
 import json
+from datetime import datetime, timezone
 import os
 import sys
 import urllib.error
@@ -82,9 +83,23 @@ def active_check(payload: Any) -> dict[str, Any]:
                 and str(x.get("id")) == "8347570435"), None)
     spb = next((x for x in res if isinstance(x, dict)
                 and "sankt-peterburg" in str(x.get("url", "")).lower()), None)
-    return {"moscow_active": bool(mos and mos.get("status") == "active" and mos.get("price") == 5000),
-            "spb_active": bool(spb and spb.get("status") == "active" and spb.get("price") == 5000),
-            "active_page_count": len(res)}
+    result = {"moscow_active": bool(mos and mos.get("status") == "active" and mos.get("price") == 5000),
+              "spb_active": bool(spb and spb.get("status") == "active" and spb.get("price") == 5000),
+              "active_page_count": len(res)}
+    # Listing IDs and canonical public URLs are public advertising metadata.
+    # Do not expose raw URLs, query parameters, contact details or API payloads.
+    if isinstance(spb, dict):
+        item_id = spb.get("id")
+        if type(item_id) is int and 0 < item_id < 1000000000000000:
+            result["spb_public_ad_id"] = item_id
+        raw_url = spb.get("url")
+        if isinstance(raw_url, str):
+            parsed = urllib.parse.urlsplit(raw_url)
+            if (parsed.scheme == "https" and parsed.hostname in ("avito.ru", "www.avito.ru")
+                    and parsed.port is None and parsed.path.startswith("/sankt-peterburg/")
+                    and ".." not in parsed.path and len(parsed.path) <= 250):
+                result["spb_public_url"] = "https://www.avito.ru" + parsed.path
+    return result
 
 
 def upload_check(current: Any, items: Any) -> dict[str, Any]:
@@ -109,7 +124,8 @@ def upload_check(current: Any, items: Any) -> dict[str, Any]:
 
 def inspect() -> dict[str, Any]:
     summary: dict[str, Any] = {
-        "schema": "avito.spb.pricelist.live-read.v1",
+        "schema": "avito.spb.pricelist.live-read.v2",
+        "checked_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "account_mutations": 0, "messages_read": 0, "messages_sent": 0,
         "charges_rub": 0, "autoload_posts": 0,
     }
