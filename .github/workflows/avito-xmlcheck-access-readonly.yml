@@ -43,6 +43,9 @@ jobs:
                           with urllib.request.urlopen(urllib.request.Request('https://autoload.avito.ru'+asset,headers={'User-Agent':'Mozilla/5.0'}),timeout=20) as rr:
                               js=rr.read(300000).decode('utf-8','replace')
                           print('JS_ASSET',asset,'LEN',len(js))
+                          if asset.endswith('xml_checker.js'):
+                              for pattern in ('xml_checker/from_url','xml_checker/from_file','xml_checker/from_text','csrf','submitUrl','formData'):
+                                  for m in list(re.finditer(re.escape(pattern),js,re.I))[:5]:print('ENDPOINT_CONTEXT',pattern,js[max(0,m.start()-750):min(len(js),m.start()+550)].replace('\\n',' ')[:1300])
                           for pattern in ('XMLHttpRequest','fetch(','.ajax(','method:',"'POST'",'xmlcheck','/format/'):
                               starts=[m.start() for m in list(re.finditer(re.escape(pattern),js,re.I))[:6]]
                               for k in starts:print('JS_HINT',asset,pattern,js[max(0,k-120):min(len(js),k+230)].replace('\\n',' ')[:340])
