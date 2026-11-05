@@ -55,6 +55,9 @@ jobs:
                   if isinstance(real,(int,float)):
                       print('WALLET_REAL_AT_LEAST_545',real>=545,'AT_LEAST_727',real>=727,'AT_LEAST_1090',real>=1090,flush=True)
                   else: print('WALLET_REAL_FORMAT_UNKNOWN',True,flush=True)
+                  bonus=bal.get('bonus')
+                  if isinstance(bonus,(int,float)) and isinstance(real,(int,float)):
+                      print('WALLET_BONUS_PRESENT',bonus>0,'BONUS_AT_LEAST_545',bonus>=545,'REAL_PLUS_BONUS_AT_LEAST_545',real+bonus>=545,'REAL_PLUS_BONUS_AT_LEAST_727',real+bonus>=727,flush=True)
           except urllib.error.HTTPError as e:
               print('BALANCE_READ_ERROR_HTTP',e.code,flush=True)
           except Exception as e:
