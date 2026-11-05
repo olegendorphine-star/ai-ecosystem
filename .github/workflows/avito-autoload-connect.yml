@@ -1,0 +1,42 @@
+name: Avito autoload — connect project feed
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Configure feed and launch one upload
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          FEED_URL: https://olegendorphine-star.github.io/ai-ecosystem/avito-feed.xml
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          base="https://api.avito.ru"
+          cid=os.environ["AVITO_CLIENT_ID"]; secret=os.environ["AVITO_CLIENT_SECRET"]
+          body=urllib.parse.urlencode({"grant_type":"client_credentials","client_id":cid,"client_secret":secret}).encode()
+          req=urllib.request.Request(base+"/token/",data=body,headers={"Content-Type":"application/x-www-form-urlencoded"},method="POST")
+          with urllib.request.urlopen(req,timeout=30) as r: token=json.load(r)["access_token"]
+          h={"Authorization":"Bearer "+token,"Accept":"application/json","Content-Type":"application/json"}
+          with urllib.request.urlopen(urllib.request.Request(base+"/autoload/v2/profile",headers=h),timeout=30) as r:
+              old=json.load(r)
+          schedule=old.get("schedule") or [{"rate":100,"weekdays":[0,1,2,3,4,5,6],"time_slots":[0]}]
+          email=old.get("report_email")
+          if not email:
+              raise RuntimeError("Avito autoload profile has no report_email; configure it in Avito first")
+          payload={"autoload_enabled":True,"report_email":email,"schedule":schedule,
+                   "feeds_data":[{"feed_name":"ai-ecosystem.xml","feed_url":os.environ["FEED_URL"]}]}
+          req=urllib.request.Request(base+"/autoload/v2/profile",data=json.dumps(payload).encode(),headers=h,method="POST")
+          with urllib.request.urlopen(req,timeout=30) as r:
+              print("profile_update_http",r.status)
+          req=urllib.request.Request(base+"/autoload/v1/upload",data=b"{}",headers=h,method="POST")
+          with urllib.request.urlopen(req,timeout=30) as r:
+              print("upload_launch_http",r.status)
+          PY
