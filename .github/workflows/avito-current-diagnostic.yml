@@ -1,0 +1,65 @@
+name: Avito safe diagnosis for the current failed import
+on:
+  push:
+    branches: ["fix/avito-local-images-2026-11-05"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Inspect current import and listing without writes
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.parse, urllib.error
+          api='https://api.avito.ru'
+          payload=urllib.parse.urlencode({
+            'grant_type':'client_credentials',
+            'client_id':os.environ['AVITO_CLIENT_ID'],
+            'client_secret':os.environ['AVITO_CLIENT_SECRET']
+          }).encode()
+          request=urllib.request.Request(api+'/token/', data=payload,
+             headers={'Content-Type':'application/x-www-form-urlencoded'},method='POST')
+          try:
+            with urllib.request.urlopen(request,timeout=25) as response:
+              token=json.load(response)['access_token']
+          except urllib.error.HTTPError as err:
+            print('token_status', err.code)
+            raise SystemExit(2)
+          headers={'Authorization':'Bearer '+token,'Accept':'application/json'}
+          for name,path in [
+            ('current','/autoload/v4/uploads/current'),
+            ('current_items','/autoload/v4/uploads/current/items'),
+            ('latest_items','/autoload/v4/uploads/last_successful/items'),
+            ('listing','/core/v1/items/8347570435'),
+          ]:
+            try:
+              with urllib.request.urlopen(urllib.request.Request(api+path,headers=headers),timeout=25) as response:
+                data=json.load(response)
+              print(name+'_status',200)
+              if name=='current':
+                print('current_id',data.get('upload_id'),'state',data.get('status'))
+              elif name.endswith('_items'):
+                items=data.get('items',[]) if isinstance(data,dict) else []
+                if isinstance(items,dict): items=items.get('items',[])
+                for item in items if isinstance(items,list) else []:
+                  summary={k:item.get(k) for k in ('ad_id','avito_id','avito_status') if k in item}
+                  sec=item.get('section') or {}
+                  summary['section']=sec.get('slug')
+                  summary['messages']=[{k:m.get(k) for k in ('code','title','description','type') if k in m} for m in item.get('messages',[])[:10]]
+                  print(name+'_item',json.dumps(summary,ensure_ascii=False)[:3500])
+              elif name=='listing':
+                if isinstance(data,dict):
+                  print('listing_keys',sorted(data.keys()))
+                  for k in ('id','status','price','title'):
+                    if k in data: print('listing_'+k,str(data[k])[:140])
+            except urllib.error.HTTPError as err:
+              print(name+'_status',err.code)
+            except Exception as err:
+              print(name+'_error_type',type(err).__name__)
+          PY
