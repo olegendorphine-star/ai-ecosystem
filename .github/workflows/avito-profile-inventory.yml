@@ -1,0 +1,50 @@
+name: Avito profile and category inventory — SAFE read-only
+on:
+  pull_request:
+    paths:
+      - 'tools/avito_profile_inventory.py'
+      - 'tests/test_avito_profile_inventory.py'
+      - '.github/workflows/avito-profile-inventory.yml'
+  workflow_dispatch:
+    inputs:
+      approve_readonly:
+        description: 'Explicitly authorize a few non-mutating Avito API requests'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avito-profile-inventory
+  cancel-in-progress: false
+
+jobs:
+  offline_tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Offline privacy and access-control tests
+        run: python3 -m unittest discover -s tests -p 'test_avito_profile_inventory.py' -v
+      - name: No network in default mode
+        run: python3 tools/avito_profile_inventory.py
+
+  live_readonly:
+    needs: offline_tests
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.approve_readonly == true && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Category fields and profile status (no writes or messages)
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          AVITO_ALLOW_PROFILE_INVENTORY: 'YES'
+        run: python3 tools/avito_profile_inventory.py --live --approve-readonly
