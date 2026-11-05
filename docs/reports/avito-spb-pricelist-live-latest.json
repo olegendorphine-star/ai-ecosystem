@@ -1,0 +1,37 @@
+{
+  "account_mutations": 0,
+  "active_items": {
+    "active_page_count": 2,
+    "moscow_active": true,
+    "spb_active": true,
+    "spb_public_ad_id": 8477159401,
+    "spb_public_url": "https://www.avito.ru/sankt-peterburg/predlozheniya_uslug/personalnaya_ii-ekosistema_dlya_biznesa_i_zhizni_8477159401"
+  },
+  "autoload_posts": 0,
+  "charges_rub": 0,
+  "checked_at_utc": "2026-11-05T11:02:26+00:00",
+  "current_items_check": "skipped_while_processing",
+  "current_upload": {
+    "spb_in_current_items": false,
+    "spb_section": "unknown",
+    "upload_id": 628665408,
+    "upload_status": "processing"
+  },
+  "http": {
+    "active_items": 200,
+    "current_upload": 200
+  },
+  "messages_read": 0,
+  "messages_sent": 0,
+  "oauth_ok": true,
+  "public_feed": {
+    "all_original_images": true,
+    "free_package": true,
+    "ids_stable": true,
+    "moscow_has_no_price_list": true,
+    "spb_three_prices": true,
+    "two_ads": true
+  },
+  "public_feed_http": 200,
+  "schema": "avito.spb.pricelist.live-read.v2"
+}
