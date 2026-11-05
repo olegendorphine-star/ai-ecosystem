@@ -150,6 +150,29 @@
       <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/06_results.png"/>
     </Images>
     <Price>5000</Price>
+    <PriceList>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Аудит бизнеса и поиск точек роста</ServiceTitle>
+        <ServicePrice>5000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Настройка персонального ИИ-ассистента</ServiceTitle>
+        <ServicePrice>30000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Внедрение ИИ-экосистемы для бизнеса</ServiceTitle>
+        <ServicePrice>150000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+    </PriceList>
     <AllowEmail>Да</AllowEmail>
     <AdStatus>Free</AdStatus>
   </Ad>
