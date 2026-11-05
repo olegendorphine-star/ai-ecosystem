@@ -1,0 +1,69 @@
+"""Offline safeguards for staged SPb PriceList rollout."""
+import unittest
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+LIVE = ROOT / "docs" / "avito-feed.xml"
+MOSCOW_REFERENCE = ROOT / "reference" / "avito-successful-moscow-2026-11-05.xml"
+
+
+class RolloutTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.current = ET.parse(LIVE).getroot()
+        cls.ads = cls.current.findall("Ad")
+        cls.reference = ET.parse(MOSCOW_REFERENCE).getroot().find("Ad")
+
+    def test_exactly_two_ads(self):
+        self.assertEqual(len(self.ads), 2)
+        self.assertEqual([x.findtext("Id") for x in self.ads],
+            ["ai-assistant-memory-moscow-001", "ai-assistant-memory-spb-001"])
+
+    def test_moscow_exactly_same_as_published_reference(self):
+        self.assertEqual(ET.tostring(self.ads[0]), ET.tostring(self.reference))
+        self.assertIsNone(self.ads[0].find("PriceList"))
+
+    def test_spb_is_only_edited_listing(self):
+        self.assertEqual(self.ads[0].findtext("Address"), "Москва")
+        self.assertEqual(self.ads[1].findtext("Address"), "Санкт-Петербург")
+        self.assertEqual(self.ads[0].findtext("AvitoId"), "8347570435")
+        self.assertIsNone(self.ads[1].find("AvitoId"))
+
+    def test_spb_three_price_rows(self):
+        prices = self.ads[1].findall("./PriceList/Service/ServicePrice")
+        self.assertEqual([int(p.text) for p in prices], [5000, 30000, 150000])
+        self.assertEqual(len(self.ads[1].findall("./PriceList/Service")), 3)
+
+    def test_price_from_and_unit(self):
+        services = self.ads[1].findall("./PriceList/Service")
+        self.assertTrue(all(x.findtext("ServiceStartingPrice") == "Да" for x in services))
+        self.assertTrue(all(x.findtext("ServicePriceType") == "за услугу" for x in services))
+
+    def test_both_ads_no_paid_promotion(self):
+        for ad in self.ads:
+            self.assertEqual(ad.findtext("Price"), "5000")
+            self.assertEqual(ad.findtext("ListingFee"), "Package")
+            self.assertEqual(ad.findtext("AdStatus"), "Free")
+            self.assertIsNone(ad.find("DateEnd"))
+            self.assertIsNone(ad.find("Promo"))
+
+    def test_all_six_original_images_present_for_each(self):
+        i1 = [x.attrib.get("url") for x in self.ads[0].findall("./Images/Image")]
+        i2 = [x.attrib.get("url") for x in self.ads[1].findall("./Images/Image")]
+        self.assertEqual(len(i1), 6)
+        self.assertEqual(i1, i2)
+        self.assertTrue(all(u.startswith("https://olegendorphine-star.github.io/") for u in i1))
+
+    def test_unchanged_core_fields_city_excluded(self):
+        fields = ["Category", "ServiceType", "ServiceSubtype", "ServiceSubspecies",
+                  "Specialty", "WhatServices", "Specialisation", "Place", "WorkWithContract",
+                  "Consultations", "Prepayment", "TechnicalSupport", "WorkingWithAI",
+                  "ContactMethod", "ListingFee", "Title", "Description", "Images", "Price",
+                  "AllowEmail", "AdStatus"]
+        for tag in fields:
+            self.assertEqual(ET.tostring(self.ads[0].find(tag)),
+                             ET.tostring(self.ads[1].find(tag)), tag)
+
+if __name__ == "__main__":
+    unittest.main()
