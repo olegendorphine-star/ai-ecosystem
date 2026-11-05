@@ -1,0 +1,77 @@
+name: Avito minimum promotion safe DRY RUN (zero spend)
+on:
+  push:
+    branches: ["test/avito-minimum-promotion-dryrun-2026-11-05"]
+permissions:
+  contents: read
+jobs:
+  dry_run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify promotion price, active listing, budget and baseline without purchase
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.parse,urllib.error
+          api='https://api.avito.ru'
+          oauth=urllib.parse.urlencode({'grant_type':'client_credentials','client_id':os.environ['AVITO_CLIENT_ID'],'client_secret':os.environ['AVITO_CLIENT_SECRET']}).encode()
+          with urllib.request.urlopen(urllib.request.Request(api+'/token/',data=oauth,method='POST',headers={'Content-Type':'application/x-www-form-urlencoded'}),timeout=30) as r:token=json.load(r)['access_token']
+          headers={'Authorization':'Bearer '+token,'Accept':'application/json','Content-Type':'application/json'}
+          def query(label,path,body=None):
+              req=urllib.request.Request(api+path,headers=headers,method='POST' if body is not None else 'GET',data=json.dumps(body).encode() if body is not None else None)
+              try:
+                  with urllib.request.urlopen(req,timeout=35) as r:
+                      j=json.load(r)
+                  print('READ_ONLY_QUERY_OK',label,flush=True)
+                  return j
+              except urllib.error.HTTPError as e:
+                  print('READ_ONLY_QUERY_ERROR',label,'HTTP',e.code,flush=True)
+                  return None
+          acc=query('account','/core/v1/accounts/self')
+          assert isinstance(acc,dict) and str(acc.get('id','')).isdigit()
+          uid=str(acc['id'])
+          active=query('active_list','/core/v1/items?status=active&per_page=99&page=1')
+          assert isinstance(active,dict)
+          ads=active.get('resources') or []
+          mos=next((x for x in ads if str(x.get('id'))=='8347570435' and x.get('status')=='active'),None)
+          assert mos is not None,'MOSCOW_MUST_BE_ACTIVE'
+          assert mos.get('price')==5000,'PUBLISHED_PRICE_CHANGED_STOP'
+          ids=[int(x['id']) for x in ads if str(x.get('id','')).isdigit()]
+          print('ACTIVE_TOTAL',len(ids),'MOSCOW_STILL_ACTIVE',True,flush=True)
+          for x in ads:
+              print('ACTIVE_AD',x.get('id'),x.get('address'),x.get('price'),flush=True)
+          quote=query('exact_promotion_quote','/core/v1/accounts/'+uid+'/vas/prices',{'itemIds':[8347570435]})
+          assert isinstance(quote,list)
+          data=next((x for x in quote if str(x.get('itemId'))=='8347570435'),None)
+          assert data and data.get('vas'),'NO_AVAILABLE_PROMO_QUOTE_STOP'
+          types={x['slug']:x['price'] for x in data['vas'] if isinstance(x,dict) and isinstance(x.get('price'),(int,float)) and x.get('slug')}
+          print('QUOTE_OPTIONS',types,flush=True)
+          # stickerpack_x1 is an addon requiring XL: cheapest independent option is min(highlight,xl).
+          standalone={slug:types[slug] for slug in ('highlight','xl') if slug in types}
+          assert standalone,'NO_STANDALONE_OPTION'
+          choice=min(standalone,key=lambda slug:standalone[slug])
+          amount=standalone[choice]
+          assert amount>0
+          print('MINIMUM_INDEPENDENT_PAID_OPTION',choice,'PRICE_RUB',amount,flush=True)
+          bonus=query('balance','/core/v1/accounts/'+uid+'/balance/')
+          if isinstance(bonus,dict):
+              real=bonus.get('real')
+              if isinstance(real,(int,float)):
+                  print('WALLET_CAN_COVER_MINIMUM',real>=amount,flush=True)
+              print('WALLET_BONUSES_PRESENT',isinstance(bonus.get('bonus'),(int,float)) and bonus['bonus']>0,flush=True)
+          enabled=query('existing_promotions','/promotion/v2/items/services/get',{'itemIds':[8347570435]})
+          if isinstance(enabled,dict):
+              print('PROMOTION_STATE_KEYS',sorted(enabled.keys()),'ITEMS',len(enabled.get('items') or []),flush=True)
+              for item in (enabled.get('items') or []):
+                  print('ACTIVE_PROMO_ITEM',item.get('itemId'),'FIELDS',sorted(item.keys()),flush=True)
+          # Baseline for evaluating any paid test: request stats using read-only POST only.
+          stats=query('baseline_stats','/stats/v1/accounts/'+uid+'/items',{'dateFrom':'2026-11-04','dateTo':'2026-11-05','itemIds':[8347570435]})
+          if isinstance(stats,dict): print('BASELINE_STATS',json.dumps(stats,ensure_ascii=False)[:2500],flush=True)
+          print('SAFE_DRY_RUN_COMPLETE',True,flush=True)
+          print('ACTIVATION_MUTATION_REQUESTS',0,flush=True)
+          print('CHARGE_RUB',0,flush=True)
+          # Not sending PUT or paid POST. No automatic billing; exact price and permission require human-approved purchase later.
+          PY
