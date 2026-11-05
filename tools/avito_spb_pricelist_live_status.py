@@ -139,16 +139,33 @@ def inspect() -> dict[str, Any]:
     checks = [
         ("active_items", "/core/v1/items?status=active&per_page=99&page=1"),
         ("current_upload", "/autoload/v4/uploads/current"),
-        ("current_items", "/autoload/v4/uploads/current/items"),
     ]
     results = {name: http(API + path, auth=token) for name, path in checks}
     summary["http"] = {name: code for name, (code, _) in results.items()}
     if results["active_items"][0] == 200:
         summary["active_items"] = active_check(results["active_items"][1])
     if results["current_upload"][0] == 200:
-        summary["current_upload"] = upload_check(
-            results["current_upload"][1],
-            results["current_items"][1] if results["current_items"][0] == 200 else None)
+        current = results["current_upload"][1]
+        current_status = current.get("status") if isinstance(current, dict) else None
+        # Avoid a third API call while Avito is still processing an upload.
+        # The items endpoint previously returned 429; never retry it in a loop.
+        if current_status == "processing":
+            summary["current_items_check"] = "skipped_while_processing"
+            item_data = None
+        elif current_status in {"completed", "success", "finished", "error", "failed"}:
+            item_code, item_data = http(
+                API + "/autoload/v4/uploads/current/items", auth=token)
+            summary["http"]["current_items"] = item_code
+            summary["current_items_check"] = (
+                "read" if item_code == 200 else
+                "rate_limited" if item_code == 429 else "unavailable"
+            )
+            if item_code != 200:
+                item_data = None
+        else:
+            summary["current_items_check"] = "skipped_unknown_upload_status"
+            item_data = None
+        summary["current_upload"] = upload_check(current, item_data)
     return summary
 
 
