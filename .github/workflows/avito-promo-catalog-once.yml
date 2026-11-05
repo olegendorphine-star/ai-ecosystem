@@ -1,0 +1,27 @@
+name: Avito promotions - one-time priced catalog (read only)
+on:
+  push:
+    branches:
+      - feature/avito-promotion-catalog-2026-11-05
+    paths:
+      - .github/workflows/avito-promo-catalog-once.yml
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Check script and offline guard
+        run: |
+          python3 -m py_compile tools/avito_promo_catalog_readonly.py
+          python3 tools/avito_promo_catalog_readonly.py
+      - name: Retrieve per-item services and prices (no writes)
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          AVITO_PROMO_CATALOG_READONLY: "YES"
+        run: python3 tools/avito_promo_catalog_readonly.py
