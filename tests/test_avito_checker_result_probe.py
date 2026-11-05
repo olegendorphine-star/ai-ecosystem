@@ -29,7 +29,7 @@ class AvitoResultProbeTests(unittest.TestCase):
         self.assertEqual(r["parse_type"], "json_object")
 
     def test_html_fragment_does_not_leak(self):
-        r = p.classify(b'<div>PRIVATE CUSTOMER PHONE 79999999999 ERROR</div>', "text/html")
+        r = p.classify(b'<div>PRIVATE CUSTOMER PHONE 79999999999 ERROR<br></div>', "text/html")
         self.assertEqual(r["parse_type"], "html_fragment_or_invalid_xml")
         self.assertTrue(r["body_markers"]["error_phrase"])
         self.assertNotIn("PRIVATE", json.dumps(r))
