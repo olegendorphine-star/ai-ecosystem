@@ -1,5 +1,6 @@
 """Offline safeguards for staged SPb PriceList rollout."""
 import unittest
+import copy
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -21,7 +22,10 @@ class RolloutTests(unittest.TestCase):
             ["ai-assistant-memory-moscow-001", "ai-assistant-memory-spb-001"])
 
     def test_moscow_exactly_same_as_published_reference(self):
-        self.assertEqual(ET.tostring(self.ads[0]), ET.tostring(self.reference))
+        actual = copy.deepcopy(self.ads[0])
+        expected = copy.deepcopy(self.reference)
+        actual.tail = expected.tail = None
+        self.assertEqual(ET.tostring(actual), ET.tostring(expected))
         self.assertIsNone(self.ads[0].find("PriceList"))
 
     def test_spb_is_only_edited_listing(self):
