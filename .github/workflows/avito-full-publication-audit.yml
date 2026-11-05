@@ -1,0 +1,60 @@
+name: Avito full publication audit
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check feed, images and Avito reports
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          FEED_URL: https://olegendorphine-star.github.io/ai-ecosystem/avito-feed.xml
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request, urllib.error, xml.etree.ElementTree as ET, sys
+          feed=os.environ["FEED_URL"]
+          with urllib.request.urlopen(feed,timeout=30) as r:
+              raw=r.read()
+              print("feed_http",r.status,"bytes",len(raw))
+          root=ET.fromstring(raw)
+          ad=root.find("Ad")
+          required=["Id","AvitoId","Category","Title","Description","Price"]
+          missing=[x for x in required if ad is None or not (ad.findtext(x) or "").strip()]
+          print("xml_root",root.tag,"missing_required",missing)
+          images=ad.find("Images") if ad is not None else None
+          urls=[x.attrib.get("url","") for x in list(images) if x.attrib.get("url")] if images is not None else []
+          print("image_count",len(urls))
+          bad=[]
+          for u in urls:
+              try:
+                  req=urllib.request.Request(u,method="GET",headers={"User-Agent":"Mozilla/5.0"})
+                  with urllib.request.urlopen(req,timeout=30) as r:
+                      ct=r.headers.get("Content-Type","")
+                      print("image",r.status,ct,u)
+                      if r.status != 200 or not ct.startswith("image/"): bad.append(u)
+              except Exception as e:
+                  print("image_error",u,type(e).__name__)
+                  bad.append(u)
+          base="https://api.avito.ru"
+          body=urllib.parse.urlencode({"grant_type":"client_credentials","client_id":os.environ["AVITO_CLIENT_ID"],"client_secret":os.environ["AVITO_CLIENT_SECRET"]}).encode()
+          req=urllib.request.Request(base+"/token/",data=body,headers={"Content-Type":"application/x-www-form-urlencoded"},method="POST")
+          with urllib.request.urlopen(req,timeout=30) as r: token=json.load(r)["access_token"]; print("token_http",r.status)
+          h={"Authorization":"Bearer "+token,"Accept":"application/json"}
+          for label,path in [("autoload_profile","/autoload/v2/profile"),("current_upload","/autoload/v4/uploads/current"),("last_successful","/autoload/v4/uploads/last_successful"),("last_items","/autoload/v4/uploads/last_successful/items")]:
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(base+path,headers=h),timeout=30) as r:
+                      data=json.load(r); print(label+"_http",r.status); print(label+"_summary",json.dumps(data,ensure_ascii=False)[:4000])
+              except urllib.error.HTTPError as e:
+                  print(label+"_http",e.code); print(label+"_error",e.read(4000).decode("utf-8","replace"))
+          if missing or not urls or bad:
+              print("AUDIT_FAILED_FEED")
+              sys.exit(1)
+          print("AUDIT_FEED_OK")
+          PY
