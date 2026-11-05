@@ -1,0 +1,40 @@
+name: Avito publication gate
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require target item in last successful upload
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request, urllib.error, sys
+          base="https://api.avito.ru"
+          body=urllib.parse.urlencode({"grant_type":"client_credentials","client_id":os.environ["AVITO_CLIENT_ID"],"client_secret":os.environ["AVITO_CLIENT_SECRET"]}).encode()
+          req=urllib.request.Request(base+"/token/",data=body,headers={"Content-Type":"application/x-www-form-urlencoded"},method="POST")
+          with urllib.request.urlopen(req,timeout=30) as r: token=json.load(r)["access_token"]
+          h={"Authorization":"Bearer "+token,"Accept":"application/json"}
+          with urllib.request.urlopen(urllib.request.Request(base+"/autoload/v4/uploads/last_successful/items",headers=h),timeout=30) as r:
+              data=json.load(r)
+          raw=data.get("items",data.get("resources",[])) if isinstance(data,dict) else []
+          if isinstance(raw,dict): raw=raw.get("items",[])
+          found=[]
+          for item in raw if isinstance(raw,list) else []:
+              sid=str(item.get("avito_id",item.get("avitoId",item.get("id",""))))
+              if sid=="8347570435": found.append(item)
+          print("last_successful_items",len(raw) if isinstance(raw,list) else 0)
+          print("target_found",bool(found))
+          if not found:
+              print("PUBLICATION_NOT_CONFIRMED")
+              sys.exit(1)
+          print("PUBLICATION_CONFIRMED")
+          PY
