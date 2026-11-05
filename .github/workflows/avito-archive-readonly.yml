@@ -1,0 +1,53 @@
+name: Avito archive inventory and current upload read-only
+on:
+  push:
+    branches: ["audit/avito-archived-items-readonly-2026-11-05"]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Inspect existing items without edits, publish, or fees
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.parse,urllib.error
+          api="https://api.avito.ru"
+          body=urllib.parse.urlencode({'grant_type':'client_credentials','client_id':os.environ['AVITO_CLIENT_ID'],'client_secret':os.environ['AVITO_CLIENT_SECRET']}).encode()
+          with urllib.request.urlopen(urllib.request.Request(api+'/token/',data=body,method='POST',headers={'Content-Type':'application/x-www-form-urlencoded'}),timeout=20) as r:
+              token=json.load(r)['access_token']
+          h={'Authorization':'Bearer '+token,'Accept':'application/json'}
+          for status in ('old','removed','active','blocked','rejected'):
+              params=urllib.parse.urlencode({'status':status,'per_page':99,'page':1})
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(api+'/core/v1/items?'+params,headers=h),timeout=20) as r:
+                      data=json.load(r)
+                  resources=data.get('resources',[]) if isinstance(data,dict) else []
+                  meta=data.get('meta',{}) if isinstance(data,dict) else {}
+                  print('STATE',status,'COUNT_PAGE',len(resources),'META',json.dumps(meta,ensure_ascii=False)[:300])
+                  for item in resources[:99]:
+                      print('PUBLIC_LISTING',json.dumps({k:item.get(k) for k in ('id','status','category','price','created','url') if k in item},ensure_ascii=False)[:500])
+              except urllib.error.HTTPError as e:
+                  print('STATE',status,'HTTP',e.code)
+                  if e.code==429:break
+          for key,path in [('current','/autoload/v4/uploads/current'),('current_items','/autoload/v4/uploads/current/items')]:
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(api+path,headers=h),timeout=20) as r:
+                      data=json.load(r)
+                  if key=='current':
+                      print('LATEST_UPLOAD',{k:data.get(k) for k in ('upload_id','status','started_at')})
+                  else:
+                      for item in (data.get('items') or [])[:8]:
+                          print('CURRENT_UPLOAD_ENTRY',json.dumps({
+                            'id':item.get('ad_id'),'avito_id':item.get('avito_id'),
+                            'status':item.get('avito_status'),
+                            'section':(item.get('section') or {}).get('slug'),
+                            'codes':[m.get('code') for m in (item.get('messages') or [])]
+                          },ensure_ascii=False)[:600])
+              except urllib.error.HTTPError as e:
+                  print(key.upper(),'HTTP',e.code)
+          PY
