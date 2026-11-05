@@ -1,0 +1,36 @@
+{
+  "autoload_enabled": true,
+  "category_fields_http": 200,
+  "category_fields_observed": [
+    "AdStatus",
+    "Address",
+    "Description",
+    "Images",
+    "ListingFee",
+    "Price",
+    "PriceList",
+    "Title"
+  ],
+  "category_leaf_discovered": true,
+  "charges_rub": 0,
+  "http": {
+    "account": 200,
+    "active_items": 200,
+    "autoload_profile": 200,
+    "category_tree": 200
+  },
+  "items": {
+    "active_items_first_page_count": 2,
+    "moscow_active": true,
+    "petersburg_active_first_page": true
+  },
+  "messages_read": 0,
+  "messages_sent": 0,
+  "oauth_http": 200,
+  "oauth_ok": true,
+  "pricelist_observed_in_fields": true,
+  "read_only": true,
+  "schema": "avito.profile.inventory.redacted.v1",
+  "source": "Avito official read-only API",
+  "writes": 0
+}
