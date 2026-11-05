@@ -1,0 +1,36 @@
+name: Avito drafts - one-time read-only verification
+
+on:
+  push:
+    branches:
+      - feature/avito-drafts-readonly-2026-11-05
+    paths:
+      - .github/workflows/avito-drafts-readonly-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Checkout restricted task branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify no accidental live run without opt-in
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/avito_drafts_readonly.py
+          python3 tools/avito_drafts_readonly.py
+      - name: Check own draft using read-only Avito API requests
+        shell: bash
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          AVITO_DRAFTS_READONLY_OPT_IN: 'YES'
+        run: |
+          set -euo pipefail
+          python3 tools/avito_drafts_readonly.py --live
