@@ -35,6 +35,9 @@ jobs:
                   print('INPUT_META',json.dumps(p.inputs[:30],ensure_ascii=False)[:2500])
                   print('SCRIPTS_COUNT',len(p.scripts))
                   print('PAGE_HAS_XMLCHECK',bool(re.search(r'xmlcheck|проверк.{0,12}(?:xml|файл)',h,re.I)))
+                  print('FORM_SNIPPETS',[v[:1500] for v in re.findall(r'<form\\b[\\s\\S]*?</form>',h,re.I)][:2])
+                  print('SUBMIT_BUTTONS',re.findall(r'<button[^>]{0,450}>[\\s\\S]{0,160}?</button>',h,re.I)[:6])
+                  print('SCRIPTS',p.scripts[:10])
               else: print('RESPONSE_NOT_HTML')
           except urllib.error.HTTPError as e:
               print('URL_ERROR_HTTP',e.code)
