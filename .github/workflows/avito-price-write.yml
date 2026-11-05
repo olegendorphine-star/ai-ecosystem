@@ -1,0 +1,63 @@
+name: Avito operator — controlled price write
+on:
+  workflow_dispatch:
+    inputs:
+      approve_write:
+        description: "Type YES to authorize one price update"
+        required: true
+        type: string
+      item_id:
+        description: "Avito item ID"
+        required: true
+        default: "8347570435"
+        type: string
+      price:
+        description: "New price in rubles"
+        required: true
+        default: "5000"
+        type: string
+permissions:
+  contents: read
+jobs:
+  update-price:
+    if: ${{ inputs.approve_write == 'YES' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Preflight, update price, read back
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          ITEM_ID: ${{ inputs.item_id }}
+          NEW_PRICE: ${{ inputs.price }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          base="https://api.avito.ru"
+          item_id=int(os.environ["ITEM_ID"])
+          new_price=int(os.environ["NEW_PRICE"])
+          if item_id != 8347570435:
+              raise SystemExit("blocked: only approved item 8347570435 is allowed")
+          if new_price < 1 or new_price > 100000000:
+              raise SystemExit("blocked: invalid price")
+          body=urllib.parse.urlencode({"grant_type":"client_credentials","client_id":os.environ["AVITO_CLIENT_ID"],"client_secret":os.environ["AVITO_CLIENT_SECRET"]}).encode()
+          req=urllib.request.Request(base+"/token/",data=body,headers={"Content-Type":"application/x-www-form-urlencoded"},method="POST")
+          with urllib.request.urlopen(req,timeout=30) as r: token=json.load(r)["access_token"]
+          h={"Authorization":"Bearer "+token,"Accept":"application/json","Content-Type":"application/json"}
+          def get(path):
+              with urllib.request.urlopen(urllib.request.Request(base+path,headers=h),timeout=30) as r:
+                  return r.status,json.load(r)
+          s,p=get("/core/v1/accounts/self")
+          uid=int(p["id"])
+          s,d=get(f"/core/v1/accounts/{uid}/items/{item_id}/")
+          title=d.get("title") or d.get("result",{}).get("title")
+          if title != "Персональная ИИ-экосистема — для бизнеса и жизни":
+              raise SystemExit("blocked: title mismatch")
+          req=urllib.request.Request(base+f"/core/v1/items/{item_id}/update_price",data=json.dumps({"price":new_price}).encode(),headers=h,method="POST")
+          with urllib.request.urlopen(req,timeout=30) as r:
+              print("update_price_http",r.status)
+          s,after=get(f"/core/v1/accounts/{uid}/items/{item_id}/")
+          obj=after.get("result",after)
+          print("readback_http",s,"title_matches",obj.get("title")==title,"price",obj.get("price"))
+          PY
