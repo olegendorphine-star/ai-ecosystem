@@ -1,0 +1,68 @@
+name: Avito SPb PriceList — safe live status verification
+on:
+  pull_request:
+    paths:
+      - 'tools/avito_spb_pricelist_live_status.py'
+      - 'tests/test_avito_spb_pricelist_live_status.py'
+      - '.github/workflows/avito-spb-pricelist-live-status.yml'
+  push:
+    branches: ["main"]
+    paths:
+      - '.github/workflows/avito-spb-pricelist-live-status.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline_tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Offline integrity and read-only tests
+        run: |
+          python3 -m unittest discover -s tests -p 'test_avito_spb_pricelist_live_status.py' -v
+          python3 -m unittest discover -s tests -p 'test_avito_pricelist_rollout.py' -v
+
+  read_and_report:
+    needs: offline_tests
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'RUN_ONCE_AVITO_SPB_PRICELIST_STATUS_2026_11_05') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: true
+      - name: Verify public new feed and Avito account read-only statuses
+        shell: bash
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ "$(date -u +%F)" != "2026-11-05" ]]; then
+            echo "READ_ONLY_DATE_GUARD_EXPIRED"
+            exit 0
+          fi
+          python3 tools/avito_spb_pricelist_live_status.py \
+            docs/reports/avito-spb-pricelist-live-status-2026-11-05.json
+      - name: Publish sanitized read-only status
+        shell: bash
+        run: |
+          set -euo pipefail
+          path='docs/reports/avito-spb-pricelist-live-status-2026-11-05.json'
+          if [[ ! -f "$path" ]]; then
+            exit 0
+          fi
+          git add -- "$path"
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "report: read-only SPb PriceList rollout state"
+          git push origin HEAD:main
