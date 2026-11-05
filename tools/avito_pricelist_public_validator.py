@@ -27,6 +27,23 @@ class CheckError(Exception):
         self.status = status
         super().__init__(code)
 
+def decode_response(raw: bytes) -> Any:
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError):
+        sample = raw[:2500].decode("utf-8", "replace").strip().lower()
+        if not raw:
+            kind = "empty"
+        elif sample.startswith("<!doctype html") or "<html" in sample[:300]:
+            kind = "html"
+        elif "отчёт в работе" in sample or "отчет в работе" in sample:
+            kind = "text_pending"
+        else:
+            kind = "plain_text"
+        # Never expose raw response bodies, which may include arbitrary HTML.
+        return {"_result_format": kind, "_result_size": len(raw)}
+
+
 def fetch(url: str, data: bytes | None = None, content_type: str | None = None) -> Any:
     if url != CANDIDATE and url != SUBMIT and not url.startswith(RESULT):
         raise ValueError("URL not allowlisted")
@@ -43,7 +60,7 @@ def fetch(url: str, data: bytes | None = None, content_type: str | None = None) 
             raise CheckError("response_too_large", code)
         if url == CANDIDATE:
             return (code, raw)
-        return (code, json.loads(raw.decode("utf-8")))
+        return (code, decode_response(raw))
     except urllib.error.HTTPError as exc:
         # Untrusted error bodies may contain private content.
         raise CheckError("http_error", exc.code)
@@ -68,6 +85,10 @@ def describe_result(obj: Any) -> dict[str, Any]:
     """Conservative sanitized summary. Never infer pass from HTTP 200 alone."""
     if not isinstance(obj, dict):
         return {"state": "unknown", "schema_keys": []}
+    if obj.get("_result_format") in ("empty", "html", "text_pending", "plain_text"):
+        kind = obj["_result_format"]
+        return {"state": "pending" if kind == "text_pending" else "non_json_response",
+                "body_format": kind, "body_size": obj.get("_result_size")}
     keys = sorted(k for k in obj.keys() if k in ("data", "result", "status", "error", "success", "message"))
     statuses: list[str] = []
     codes: list[str] = []
@@ -135,18 +156,27 @@ def main(output: str) -> int:
         result["submit_http"] = code
         ident = extract_id(payload)
         result["checker_id_issued"] = ident is not None
+        if ident:
+            result["public_checker_id"] = ident
         if not ident:
             result["status"] = "checker_id_missing"
             result["submit_response_keys"] = sorted(k for k in payload if k in ("data", "error", "message", "status")) if isinstance(payload, dict) else []
             return save(output, result)
 
         result["status"] = "pending"
+        non_json_count = 0
         for i in range(18):
             time.sleep(15)
             c, obj = fetch(RESULT + ident + "/")
             result["result_http"] = c
             assessment = describe_result(obj)
             result["assessment"] = assessment
+            if assessment["state"] == "non_json_response":
+                non_json_count += 1
+                if non_json_count >= 2:
+                    result["status"] = "non_json_response"
+                    break
+                continue
             if assessment["state"] in ("final_report_returned", "errors_reported", "failed_reported"):
                 result["status"] = assessment["state"]
                 # No inference of validation_passed unless full official error data is available.

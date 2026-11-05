@@ -87,5 +87,42 @@ class AvitoPublicValidatorTests(unittest.TestCase):
             self.assertFalse(output["validation_passed"])
             self.assertEqual(output["charges_rub"], 0)
 
+    def test_non_json_result_preserves_only_format_not_body(self):
+        raw = b"<html><body>PRIVATE SECRET</body></html>"
+        data = v.decode_response(raw)
+        r = v.describe_result(data)
+        self.assertEqual(r["state"], "non_json_response")
+        self.assertEqual(r["body_format"], "html")
+        self.assertNotIn("PRIVATE SECRET", json.dumps(r))
+
+    def test_plain_text_pending_recognized(self):
+        obj = v.decode_response("Отчёт в работе".encode("utf-8"))
+        r = v.describe_result(obj)
+        self.assertEqual(r["state"], "pending")
+
+    def test_two_non_json_results_stop_without_account_mutation(self):
+        calls = []
+        def fake(url, data=None, content_type=None):
+            calls.append(url)
+            if url == v.CANDIDATE:
+                return 200, b"<Ads><Ad></Ad><Ad></Ad><PriceList></PriceList></Ads>"
+            if url == v.SUBMIT:
+                return 200, {"data": {"id": "bbbbbbbbbbbbbbbb"}}
+            if url.startswith(v.RESULT):
+                return 200, v.decode_response(b"<html>No JSON</html>")
+            raise AssertionError(url)
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = str(Path(tmp) / "safe.json")
+            with patch.object(v, "fetch", side_effect=fake), patch.object(v.time, "sleep"):
+                self.assertEqual(v.main(dest), 0)
+            out = json.loads(Path(dest).read_text())
+            self.assertEqual(out["status"], "non_json_response")
+            self.assertEqual(out["assessment"]["body_format"], "html")
+            self.assertEqual(out["public_checker_id"], "bbbbbbbbbbbbbbbb")
+            self.assertEqual(out["account_mutations"], 0)
+            self.assertEqual(calls.count(v.SUBMIT), 1)
+            self.assertEqual(len([x for x in calls if x.startswith(v.RESULT)]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
