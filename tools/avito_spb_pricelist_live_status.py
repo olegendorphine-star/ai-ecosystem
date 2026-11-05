@@ -2,6 +2,7 @@
 """One-shot read-only verification of the live SPb PriceList rollout."""
 from __future__ import annotations
 import json
+from datetime import datetime, timezone
 import os
 import sys
 import urllib.error
@@ -82,9 +83,23 @@ def active_check(payload: Any) -> dict[str, Any]:
                 and str(x.get("id")) == "8347570435"), None)
     spb = next((x for x in res if isinstance(x, dict)
                 and "sankt-peterburg" in str(x.get("url", "")).lower()), None)
-    return {"moscow_active": bool(mos and mos.get("status") == "active" and mos.get("price") == 5000),
-            "spb_active": bool(spb and spb.get("status") == "active" and spb.get("price") == 5000),
-            "active_page_count": len(res)}
+    result = {"moscow_active": bool(mos and mos.get("status") == "active" and mos.get("price") == 5000),
+              "spb_active": bool(spb and spb.get("status") == "active" and spb.get("price") == 5000),
+              "active_page_count": len(res)}
+    # Listing IDs and canonical public URLs are public advertising metadata.
+    # Do not expose raw URLs, query parameters, contact details or API payloads.
+    if isinstance(spb, dict):
+        item_id = spb.get("id")
+        if type(item_id) is int and 0 < item_id < 1000000000000000:
+            result["spb_public_ad_id"] = item_id
+        raw_url = spb.get("url")
+        if isinstance(raw_url, str):
+            parsed = urllib.parse.urlsplit(raw_url)
+            if (parsed.scheme == "https" and parsed.hostname in ("avito.ru", "www.avito.ru")
+                    and parsed.port is None and parsed.path.startswith("/sankt-peterburg/")
+                    and ".." not in parsed.path and len(parsed.path) <= 250):
+                result["spb_public_url"] = "https://www.avito.ru" + parsed.path
+    return result
 
 
 def upload_check(current: Any, items: Any) -> dict[str, Any]:
@@ -109,7 +124,8 @@ def upload_check(current: Any, items: Any) -> dict[str, Any]:
 
 def inspect() -> dict[str, Any]:
     summary: dict[str, Any] = {
-        "schema": "avito.spb.pricelist.live-read.v1",
+        "schema": "avito.spb.pricelist.live-read.v2",
+        "checked_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "account_mutations": 0, "messages_read": 0, "messages_sent": 0,
         "charges_rub": 0, "autoload_posts": 0,
     }
@@ -139,16 +155,33 @@ def inspect() -> dict[str, Any]:
     checks = [
         ("active_items", "/core/v1/items?status=active&per_page=99&page=1"),
         ("current_upload", "/autoload/v4/uploads/current"),
-        ("current_items", "/autoload/v4/uploads/current/items"),
     ]
     results = {name: http(API + path, auth=token) for name, path in checks}
     summary["http"] = {name: code for name, (code, _) in results.items()}
     if results["active_items"][0] == 200:
         summary["active_items"] = active_check(results["active_items"][1])
     if results["current_upload"][0] == 200:
-        summary["current_upload"] = upload_check(
-            results["current_upload"][1],
-            results["current_items"][1] if results["current_items"][0] == 200 else None)
+        current = results["current_upload"][1]
+        current_status = current.get("status") if isinstance(current, dict) else None
+        # Avoid a third API call while Avito is still processing an upload.
+        # The items endpoint previously returned 429; never retry it in a loop.
+        if current_status == "processing":
+            summary["current_items_check"] = "skipped_while_processing"
+            item_data = None
+        elif current_status in {"completed", "success", "finished", "error", "failed"}:
+            item_code, item_data = http(
+                API + "/autoload/v4/uploads/current/items", auth=token)
+            summary["http"]["current_items"] = item_code
+            summary["current_items_check"] = (
+                "read" if item_code == 200 else
+                "rate_limited" if item_code == 429 else "unavailable"
+            )
+            if item_code != 200:
+                item_data = None
+        else:
+            summary["current_items_check"] = "skipped_unknown_upload_status"
+            item_data = None
+        summary["current_upload"] = upload_check(current, item_data)
     return summary
 
 
