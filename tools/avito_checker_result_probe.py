@@ -6,6 +6,7 @@ All network bodies stay on the runner and only a safe summary is persisted.
 """
 from __future__ import annotations
 import gzip
+from html.parser import HTMLParser
 import json
 import re
 import sys
@@ -17,6 +18,50 @@ from typing import Any
 
 RESULT_URL = "https://autoload.avito.ru/api/v2/public/xml_checker/result/6aec57e6213afa1bce7d3974/"
 MAX_BODY = 2000000
+
+
+class _VisibleTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.nodes: list[str] = []
+        self.hidden = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("script", "style", "template"):
+            self.hidden += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style", "template") and self.hidden:
+            self.hidden -= 1
+
+    def handle_data(self, text: str) -> None:
+        if not self.hidden and text.strip() and len(self.nodes) < 500:
+            self.nodes.append(text.strip()[:400])
+
+
+def visible_report_markers(raw: bytes) -> dict[str, Any]:
+    """Inspect visible text of public HTML; never export raw ad or customer text."""
+    parser = _VisibleTextParser()
+    parser.feed(raw.decode("utf-8-sig", "replace"))
+    text = re.sub(r"\s+", " ", " ".join(parser.nodes)).lower()
+    invalid = "xml не соответствует формату" in text
+    valid = "xml соответствует формату" in text and not invalid
+    count = re.search(r"проверено объявлений\s*:?\s*(\d{1,5})", text)
+    return {
+        "report_heading_visible": "общий статус" in text,
+        "format_valid_text_visible": valid,
+        "format_invalid_text_visible": invalid,
+        "explicit_errors_found": (
+            "в вашем файле найдены следующие ошибки" in text
+            or "найдены ошибки формата" in text
+            or "обнаружены ошибки" in text
+        ),
+        "explicit_no_errors": (
+            "ошибок не найдено" in text or "ошибки не найдены" in text
+        ),
+        "checked_ad_count": int(count.group(1)) if count else None,
+        "visible_text_node_count": len(parser.nodes)
+    }
 
 
 def classify(body: bytes, content_type: str = "", encoding: str = "") -> dict[str, Any]:
@@ -75,6 +120,8 @@ def classify(body: bytes, content_type: str = "", encoding: str = "") -> dict[st
       "price_list_reference": "pricelist" in text,
     }
     summary["body_markers"] = flags
+    if summary["content_type"] == "text/html":
+        summary["visible_html_report"] = visible_report_markers(body)
     return summary
 
 

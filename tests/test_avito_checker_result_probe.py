@@ -56,5 +56,25 @@ class AvitoResultProbeTests(unittest.TestCase):
         r = p.classify(b"\x1f\x8bfoo", "text/plain")
         self.assertEqual(r["parse_type"], "gzip_invalid")
 
+    def test_visible_public_html_report(self):
+        html = ("<article><h2>Общий статус</h2><b>XML соответствует формату</b>"
+                "<div>Проверено объявлений</div><span>2</span>"
+                "<script>PRIVATE_TOKEN</script></article>").encode("utf-8")
+        r = p.classify(html, "text/html")
+        visible = r["visible_html_report"]
+        self.assertTrue(visible["report_heading_visible"])
+        self.assertTrue(visible["format_valid_text_visible"])
+        self.assertFalse(visible["format_invalid_text_visible"])
+        self.assertEqual(visible["checked_ad_count"], 2)
+        self.assertFalse(visible["explicit_errors_found"])
+        self.assertNotIn("PRIVATE_TOKEN", json.dumps(r))
+
+    def test_visible_html_rejects_negative_format(self):
+        html = "<article><b>Общий статус</b><i>XML не соответствует формату</i></article>"
+        markers = p.visible_report_markers(html.encode("utf-8"))
+        self.assertFalse(markers["format_valid_text_visible"])
+        self.assertTrue(markers["format_invalid_text_visible"])
+
+
 if __name__ == "__main__":
     unittest.main()

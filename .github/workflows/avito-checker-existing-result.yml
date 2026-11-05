@@ -26,7 +26,7 @@ jobs:
 
   inspect:
     needs: test
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'RUN_ONCE_AVITO_CHECKER_GET_ONLY_2026_11_05') }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'RUN_ONCE_AVITO_CHECKER_VISIBLE_HTML_V2_2026_11_05') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
