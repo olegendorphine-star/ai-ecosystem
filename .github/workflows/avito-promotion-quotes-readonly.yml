@@ -44,6 +44,21 @@ jobs:
           ids=[int(x.get('id')) for x in active if str(x.get('id','')).isdigit() and x.get('status')=='active']
           print('ACTIVE_ITEM_COUNT',len(ids),'ACTIVE_IDS',ids,flush=True)
           if 8347570435 not in ids: print('WARNING_MOSCOW_NOT_ACTIVE',flush=True)
+          # Wallet read uses GET; print only sufficiency flags, never exact account balances to public CI logs.
+          try:
+              with urllib.request.urlopen(urllib.request.Request(root+'/core/v1/accounts/'+str(user_id)+'/balance/',headers=headers),timeout=25) as r:
+                  bal=json.load(r)
+              print('BALANCE_READ_HTTP',r.status,'BALANCE_KEYS',sorted(bal.keys()) if isinstance(bal,dict) else [],flush=True)
+              if isinstance(bal,dict):
+                  # Parse fields as documented: real / bonus. Do not assume promotions may use bonus.
+                  real=bal.get('real')
+                  if isinstance(real,(int,float)):
+                      print('WALLET_REAL_AT_LEAST_545',real>=545,'AT_LEAST_727',real>=727,'AT_LEAST_1090',real>=1090,flush=True)
+                  else: print('WALLET_REAL_FORMAT_UNKNOWN',True,flush=True)
+          except urllib.error.HTTPError as e:
+              print('BALANCE_READ_ERROR_HTTP',e.code,flush=True)
+          except Exception as e:
+              print('BALANCE_READ_ERROR',type(e).__name__,flush=True)
           if not ids:
               print('NO_ITEMS_SKIP_PRICE_QUERY',flush=True)
               raise SystemExit(0)
