@@ -1,0 +1,64 @@
+name: Avito single retry for existing approved listing
+on:
+  push:
+    branches: [ "fix/avito-local-images-2026-11-05" ]
+permissions:
+  contents: read
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Retry only original Avito item after stable Id restored
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os, urllib.request, urllib.parse, urllib.error, xml.etree.ElementTree as ET, json, time
+          feedurl='https://olegendorphine-star.github.io/ai-ecosystem/avito-feed.xml'
+          with urllib.request.urlopen(feedurl,timeout=25) as response:
+              feed=ET.fromstring(response.read())
+          ads=feed.findall('Ad')
+          assert len(ads)==1,'Must only contain the existing listing'
+          a=ads[0]
+          assert a.findtext('Id')=='ai-assistant-memory-moscow-001','Wrong internal Id'
+          assert a.findtext('AvitoId')=='8347570435','Wrong AvitoId'
+          assert a.findtext('Price')=='5000','Price drift'
+          assert a.findtext('AdStatus')=='Free','Paid services not allowed'
+          print('feed_identity_verified',True)
+          print('image_links_count',len(a.findall('./Images/Image')))
+          b=urllib.parse.urlencode({
+              'grant_type':'client_credentials',
+              'client_id':os.environ['AVITO_CLIENT_ID'],
+              'client_secret':os.environ['AVITO_CLIENT_SECRET']
+          }).encode()
+          req=urllib.request.Request('https://api.avito.ru/token/',data=b,
+            headers={'Content-Type':'application/x-www-form-urlencoded'},method='POST')
+          with urllib.request.urlopen(req,timeout=25) as response:
+              token=json.load(response)['access_token']
+          headers={'Authorization':'Bearer '+token,'Accept':'application/json','Content-Type':'application/json'}
+          with urllib.request.urlopen(urllib.request.Request('https://api.avito.ru/autoload/v2/profile',headers=headers),timeout=25) as response:
+              profile=json.load(response)
+          assert profile.get('autoload_enabled') is True,'Autoload is disabled'
+          assert len(profile.get('feeds_data') or [])==1,'Unexpected feeds'
+          assert profile['feeds_data'][0].get('feed_url')==feedurl,'Unexpected feed'
+          print('target_feed_enabled',True)
+          req=urllib.request.Request('https://api.avito.ru/autoload/v1/upload',data=b'{}',headers=headers,method='POST')
+          with urllib.request.urlopen(req,timeout=30) as response:
+              response_json=json.load(response)
+              print('upload_http',response.status,'response_fields',list(response_json) if isinstance(response_json,dict) else 'other')
+              print('upload_id',response_json.get('upload_id') if isinstance(response_json,dict) else None)
+          for index in range(6):
+              time.sleep(10)
+              with urllib.request.urlopen(urllib.request.Request('https://api.avito.ru/autoload/v4/uploads/current',headers=headers),timeout=25) as response:
+                  summary=json.load(response)
+              print('check',index+1,'upload_id',summary.get('upload_id'),'status',summary.get('status'))
+              if summary.get('status') in ('success','success_warning','failed','error','failed_warning'):
+                  with urllib.request.urlopen(urllib.request.Request('https://api.avito.ru/autoload/v4/uploads/current/items',headers=headers),timeout=25) as response:
+                      report=json.load(response)
+                  for item in report.get('items',[]):
+                      sect=item.get('section') or {}
+                      print('item_id',item.get('ad_id'),'avito_id',item.get('avito_id'),'section',sect.get('slug'),'codes',[m.get('code') for m in item.get('messages',[])])
+                  break
+          PY
