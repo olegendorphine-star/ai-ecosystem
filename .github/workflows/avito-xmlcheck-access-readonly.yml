@@ -38,6 +38,15 @@ jobs:
                   print('FORM_SNIPPETS',[v[:1500] for v in re.findall(r'<form\\b[\\s\\S]*?</form>',h,re.I)][:2])
                   print('SUBMIT_BUTTONS',re.findall(r'<button[^>]{0,450}>[\\s\\S]{0,160}?</button>',h,re.I)[:6])
                   print('SCRIPTS',p.scripts[:10])
+                  for asset in ('/format/js/index.js','/format/js/xml_checker.js'):
+                      try:
+                          with urllib.request.urlopen(urllib.request.Request('https://autoload.avito.ru'+asset,headers={'User-Agent':'Mozilla/5.0'}),timeout=20) as rr:
+                              js=rr.read(300000).decode('utf-8','replace')
+                          print('JS_ASSET',asset,'LEN',len(js))
+                          for pattern in ('XMLHttpRequest','fetch(','.ajax(','method:',"'POST'",'xmlcheck','/format/'):
+                              starts=[m.start() for m in list(re.finditer(re.escape(pattern),js,re.I))[:6]]
+                              for k in starts:print('JS_HINT',asset,pattern,js[max(0,k-120):min(len(js),k+230)].replace('\\n',' ')[:340])
+                      except Exception as ex:print('JS_ERROR',asset,type(ex).__name__)
               else: print('RESPONSE_NOT_HTML')
           except urllib.error.HTTPError as e:
               print('URL_ERROR_HTTP',e.code)
