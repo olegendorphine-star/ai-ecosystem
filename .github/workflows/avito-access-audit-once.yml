@@ -1,0 +1,54 @@
+name: Avito API - one-time read-only capabilities audit
+
+# Triggered only by adding this specific workflow file to the feature branch.
+on:
+  push:
+    branches:
+      - feature/avito-access-audit-2026-11-05
+    paths:
+      - .github/workflows/avito-access-audit-once.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avito-access-audit-once-2026-11-05
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/feature/avito-access-audit-2026-11-05'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Checkout isolated feature branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Offline tests and static safety check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_avito*.py' -q
+          python3 -m py_compile tools/avito_access_audit.py
+          python3 tools/avito_access_audit.py
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('tools/avito_access_audit.py').read_text()
+          assert '"PUT"' not in src and '"PATCH"' not in src and '"DELETE"' not in src
+          assert '/promotion/v1/items/services/bbip/orders/create' not in src
+          assert '/core/v1/items/{item_id}/update_price' not in src
+          assert 'messenger/' not in src.lower()
+          print('Read-only source guard: PASSED')
+          PY
+
+      - name: Read current Avito API capabilities (no writes)
+        shell: bash
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          AVITO_ALLOW_READONLY_AUDIT: 'YES'
+        run: |
+          set -euo pipefail
+          python3 tools/avito_access_audit.py --live
