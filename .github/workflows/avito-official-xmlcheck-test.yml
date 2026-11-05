@@ -68,15 +68,19 @@ jobs:
                       print('RESULT_ID_UNSAFE')
                       raise SystemExit(0)
                   url=base+'/api/v2/public/xml_checker/result/'+urllib.parse.quote(task_id,safe='')+'/'
-                  for attempt in range(4):
-                      time.sleep(5)
+                  report_ready=False
+                  for attempt in range(20):
+                      time.sleep(6)
                       try:
                           with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json','Referer':base+'/format/xmlcheck/'}),timeout=25) as response:
                               parsed=json.load(response)
                           print('OFFICIAL_VALIDATOR_RESULT_ATTEMPT',attempt+1,json.dumps(parsed,ensure_ascii=False)[:10000])
                           if isinstance(parsed,dict) and (parsed.get('status') in ('done','completed','complete','success','error') or parsed.get('result') not in (None,[],{})):
+                              report_ready=True
                               break
                       except urllib.error.HTTPError as err:
                           print('OFFICIAL_VALIDATOR_POLL_HTTP',err.code)
                           if err.code==429:break
+                  print('OFFICIAL_REPORT_READY',report_ready)
+                  if not report_ready:raise SystemExit(5)
           PY
