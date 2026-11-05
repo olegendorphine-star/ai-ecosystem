@@ -1,5 +1,10 @@
 name: Avito capabilities — manual SAFE read-only audit
 on:
+  pull_request:
+    paths:
+      - 'tools/avito_capability_audit.py'
+      - 'tests/test_avito_capability_audit.py'
+      - '.github/workflows/avito-capability-audit.yml'
   workflow_dispatch:
     inputs:
       approve_readonly:
@@ -29,7 +34,7 @@ jobs:
       - run: python3 tools/avito_capability_audit.py
   live_readonly:
     needs: offline_tests
-    if: ${{ inputs.approve_readonly == true && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.approve_readonly == true && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
