@@ -38,6 +38,10 @@ jobs:
                   for ad in ads[:5]:
                       print('ad_fields',[(x.tag,(x.text or '')[:120]) for x in ad if x.tag in allowed])
                       print('ad_tags',[x.tag for x in ad])
+                      protected={'Title','Description','Id','Images','ContactPhone','ManagerName'}
+                      print('ad_operational_fields',[(x.tag,(x.text or '')[:250]) for x in ad if x.tag not in protected])
+                      print('photo_count',len(ad.findall('./Images/Image')))
+                      print('photo_sources',[(u.attrib.get('url','')[:160],u.attrib.get('name','')) for u in ad.findall('./Images/Image')])
               except Exception as err:
                   print('feed_read_error',type(err).__name__)
           PY
