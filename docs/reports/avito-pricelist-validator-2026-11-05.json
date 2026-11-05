@@ -1,16 +1,22 @@
 {
   "account_mutations": 0,
   "ad_upload_requests": 0,
+  "assessment": {
+    "body_format": "plain_text",
+    "body_size": 2102,
+    "state": "non_json_response"
+  },
   "candidate_available": true,
   "candidate_url": "https://olegendorphine-star.github.io/ai-ecosystem/avito-pricelist-validation-preview-2026-11-05.xml",
   "charges_rub": 0,
   "checker": "public_xml_checker",
   "checker_id_issued": true,
-  "error_http": null,
   "messages_read": 0,
   "messages_sent": 0,
+  "public_checker_id": "6aec57e6213afa1bce7d3974",
+  "result_http": 200,
   "schema": "avito.price_list.public_validator.v1",
-  "status": "invalid_json",
+  "status": "non_json_response",
   "submit_http": 200,
   "validation_passed": false
 }
