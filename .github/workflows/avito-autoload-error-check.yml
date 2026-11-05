@@ -1,0 +1,35 @@
+name: Avito autoload — inspect errors
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read current and last upload reports
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          base="https://api.avito.ru"
+          body=urllib.parse.urlencode({"grant_type":"client_credentials","client_id":os.environ["AVITO_CLIENT_ID"],"client_secret":os.environ["AVITO_CLIENT_SECRET"]}).encode()
+          req=urllib.request.Request(base+"/token/",data=body,headers={"Content-Type":"application/x-www-form-urlencoded"},method="POST")
+          with urllib.request.urlopen(req,timeout=30) as r: token=json.load(r)["access_token"]
+          h={"Authorization":"Bearer "+token,"Accept":"application/json"}
+          for name,path in [("current","/autoload/v4/uploads/current"),("last_successful","/autoload/v4/uploads/last_successful"),("last_items","/autoload/v4/uploads/last_successful/items")]:
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(base+path,headers=h),timeout=30) as r:
+                      data=json.load(r)
+                      print(name+"_http",r.status)
+                      print(name+"_json",json.dumps(data,ensure_ascii=False)[:12000])
+              except urllib.error.HTTPError as e:
+                  print(name+"_http",e.code)
+                  print(name+"_body",e.read(12000).decode("utf-8","replace"))
+          PY
