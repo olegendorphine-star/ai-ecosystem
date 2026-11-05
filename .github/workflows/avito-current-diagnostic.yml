@@ -32,11 +32,15 @@ jobs:
             print('token_status', err.code)
             raise SystemExit(2)
           headers={'Authorization':'Bearer '+token,'Accept':'application/json'}
+          with urllib.request.urlopen(urllib.request.Request(api+'/core/v1/accounts/self',headers=headers),timeout=25) as response:
+            account=json.load(response)
+          account_id=account.get('id') or account.get('user_id')
+          print('self_id_exists',bool(account_id))
           for name,path in [
             ('current','/autoload/v4/uploads/current'),
             ('current_items','/autoload/v4/uploads/current/items'),
             ('latest_items','/autoload/v4/uploads/last_successful/items'),
-            ('listing','/core/v1/items/8347570435'),
+            ('listing',f'/core/v1/accounts/{account_id}/items/8347570435/'),
           ]:
             try:
               with urllib.request.urlopen(urllib.request.Request(api+path,headers=headers),timeout=25) as response:
@@ -56,6 +60,11 @@ jobs:
               elif name=='listing':
                 if isinstance(data,dict):
                   print('listing_keys',sorted(data.keys()))
+                  photos=data.get('images') or data.get('photos') or []
+                  print('listing_image_count',len(photos) if isinstance(photos,list) else 'not_list')
+                  if isinstance(photos,list):
+                    for i,photo in enumerate(photos[:10]):
+                      print('listing_image',i,json.dumps(photo,ensure_ascii=False)[:450])
                   for k in ('id','status','price','title'):
                     if k in data: print('listing_'+k,str(data[k])[:140])
             except urllib.error.HTTPError as err:
