@@ -1,7 +1,5 @@
 name: Avito scheduled one-shot upload after hourly limit
 on:
-  schedule:
-    - cron: '30 7 5 11 *'
   workflow_dispatch:
 permissions:
   contents: read
