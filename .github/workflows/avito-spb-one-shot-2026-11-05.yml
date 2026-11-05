@@ -1,0 +1,146 @@
+name: Avito Saint Petersburg one-shot exact Moscow copy (package only)
+on:
+  push:
+    branches: ["feature/avito-spb-exact-copy-2026-11-05"]
+    paths: [".github/workflows/avito-spb-one-shot-2026-11-05.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: avito-spb-once-2026-11-05
+  cancel-in-progress: false
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 84
+    steps:
+      - name: Wait for Avito one-hour limit; verify both listings and post once
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os,json,time,datetime,hashlib,urllib.request,urllib.parse,urllib.error,xml.etree.ElementTree as ET
+          UTC=datetime.timezone.utc
+          now=lambda:datetime.datetime.now(UTC)
+          if now().date().isoformat()!='2026-11-05':raise SystemExit('DATE_GUARD_EXPIRED_NO_POST')
+          # Last confirmed accepted upload was 2026-11-05T07:41:17Z. Add >1h buffer.
+          target=datetime.datetime(2026,11,5,8,46,0,tzinfo=UTC)
+          while now()<target:
+              seconds=min(60,max(1,(target-now()).total_seconds()))
+              print('COOLDOWN_WAIT_SECONDS',round(seconds),'UTC_NOW',now().isoformat(),flush=True)
+              time.sleep(seconds)
+          origin='https://olegendorphine-star.github.io/ai-ecosystem'
+          feedurl=origin+'/avito-feed.xml'
+          with urllib.request.urlopen(feedurl,timeout=35) as resp:
+              feedbytes=resp.read()
+              assert resp.status==200
+          root=ET.fromstring(feedbytes)
+          ads=root.findall('Ad')
+          assert len(ads)==2, 'STOP_ONLY_TWO_ADS_EXPECTED'
+          mos,spb=ads
+          assert mos.findtext('Id')=='ai-assistant-memory-moscow-001'
+          assert mos.findtext('AvitoId')=='8347570435'
+          assert mos.findtext('Address')=='Москва'
+          assert spb.findtext('Id')=='ai-assistant-memory-spb-001'
+          assert spb.find('AvitoId') is None
+          assert spb.findtext('Address')=='Санкт-Петербург'
+          for f in ('Category','ServiceType','ServiceSubtype','ServiceSubspecies','Specialty',
+                    'WhatServices','Specialisation','Place','WorkWithContract','Consultations',
+                    'Prepayment','TechnicalSupport','WorkingWithAI','ContactMethod','ListingFee',
+                    'Title','Description','Images','Price','AllowEmail','AdStatus'):
+              assert ET.tostring(mos.find(f),encoding='unicode')==ET.tostring(spb.find(f),encoding='unicode'), 'SPB_UNEXPECTED_DIFFERENCE_'+f
+          assert all(x.findtext('ListingFee')=='Package' and x.findtext('AdStatus')=='Free' and x.findtext('Price')=='5000' for x in ads)
+          expectedsha=[
+              'b71429da9c2157c18ee9e17526a80c11081cff983c2f9e1b0726e15004fc2f0c',
+              'cae6898bcdc351598b8545b8e49b5a605d126e437c9817450e3b8df3e5ae786d',
+              '4b9c7453104861e6ce5646739121e156cb646f9c84b4200fb75d5afbef60cbb8',
+              '8f3a5cac5fdd8a5d82025e48c9e3d26ea01edf61f3c5a9ea4bc9e17e9ca83fed',
+              'de1d4046fef909bb06b12a214c70c40144408a03267e1d2eb1e79cfaf77747e2',
+              '23510a3802fb5dd005125d7a07957551f513062684ead776b0477ec7efc14300',
+          ]
+          images=mos.findall('./Images/Image')
+          assert len(images)==6
+          for i,(el,expected) in enumerate(zip(images,expectedsha),1):
+              url=el.attrib['url']
+              assert url.startswith(origin+'/images/avito/')
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'AvitoVerifiedFeed/1.0'}),timeout=45) as res:
+                  image=res.read()
+                  assert res.status==200 and res.headers.get('Content-Type','').startswith('image/')
+                  assert res.geturl()==url and hashlib.sha256(image).hexdigest()==expected
+              print('VERIFIED_IMAGE',i,'SHA256_OK',flush=True)
+          print('TWO_ADS_EXACT_COPY_ONLY_CITY_ID_CHANGED',True,flush=True)
+          api='https://api.avito.ru'
+          payload=urllib.parse.urlencode({'grant_type':'client_credentials','client_id':os.environ['AVITO_CLIENT_ID'],'client_secret':os.environ['AVITO_CLIENT_SECRET']}).encode()
+          with urllib.request.urlopen(urllib.request.Request(api+'/token/',data=payload,method='POST',headers={'Content-Type':'application/x-www-form-urlencoded'}),timeout=30) as res:
+              token=json.load(res)['access_token']
+          h={'Authorization':'Bearer '+token,'Accept':'application/json','Content-Type':'application/json'}
+          def get(path):
+              with urllib.request.urlopen(urllib.request.Request(api+path,headers=h),timeout=35) as res:
+                  return json.load(res)
+          profile=get('/autoload/v2/profile')
+          assert profile.get('autoload_enabled') is True
+          assert len(profile.get('feeds_data') or [])==1
+          assert profile['feeds_data'][0].get('feed_url')==feedurl
+          def status():
+              payload=get('/core/v1/items?status=active&per_page=99&page=1')
+              resources=payload.get('resources',[])
+              m=next((x for x in resources if str(x.get('id'))=='8347570435'),None)
+              s=next((x for x in resources if 'sankt-peterburg' in str(x.get('url','')).lower()),None)
+              print('LIVE_LISTINGS',[(x.get('id'),x.get('status'),x.get('price'),x.get('url')) for x in resources][:8],flush=True)
+              assert m is not None and m.get('status')=='active' and m.get('price')==5000,'MOSCOW_NOT_ACTIVE_STOP'
+              return s
+          found=status()
+          if found is not None:
+              assert found.get('status')=='active' and found.get('price')==5000
+              print('SPB_ALREADY_ACTIVE_SKIP_NEW_UPLOAD',found.get('id'),flush=True)
+              raise SystemExit(0)
+          try:
+              current=get('/autoload/v4/uploads/current')
+              items=get('/autoload/v4/uploads/current/items').get('items') or []
+              for x in items:
+                  if x.get('id')=='ai-assistant-memory-spb-001':
+                      section=x.get('section') or {}
+                      slug=section.get('slug') if isinstance(section,dict) else section
+                      print('SPB_PREEXISTING_UPLOAD',current.get('upload_id'),'SECTION',slug,flush=True)
+                      if slug in ('error_params','error_payment','error_content','error'):
+                          raise SystemExit('SPB_REJECTED_NEED_VALIDATOR_AND_REPAIR')
+                      # An automatic load has already begun for SPb: do not submit twice.
+                      raise SystemExit('SPB_IN_EXISTING_UPLOAD_NO_DUPLICATE_POST')
+          except urllib.error.HTTPError as e:
+              print('PRIOR_UPLOAD_LOOKUP_HTTP',e.code,flush=True)
+              raise
+          print('SENDING_ONE_AVITO_AUTOLOAD_REQUEST',now().isoformat(),flush=True)
+          req=urllib.request.Request(api+'/autoload/v1/upload',data=b'{}',headers=h,method='POST')
+          try:
+              with urllib.request.urlopen(req,timeout=40) as res:
+                  body=res.read(3000)
+                  print('UPLOAD_ACCEPTED_HTTP',res.status,'BODY',body.decode('utf-8','replace')[:500],flush=True)
+                  assert res.status==200
+          except urllib.error.HTTPError as e:
+              print('UPLOAD_REJECTED_HTTP',e.code,'RETRY_AFTER',e.headers.get('Retry-After'),flush=True)
+              raise
+          published=False
+          for attempt in range(16):
+              time.sleep(25)
+              current=get('/autoload/v4/uploads/current')
+              data=get('/autoload/v4/uploads/current/items')
+              entries=data.get('items') or []
+              e=next((x for x in entries if x.get('id')=='ai-assistant-memory-spb-001'),None)
+              if e is not None:
+                  section=e.get('section') or {}
+                  slug=section.get('slug') if isinstance(section,dict) else section
+                  print('SPB_REPORT',attempt+1,'UPLOAD_ID',current.get('upload_id'),'UPLOAD_STATUS',current.get('status'),'AVITO_ID',e.get('avito_id'),'AVITO_STATUS',e.get('avito_status'),'SECTION',slug,'ERRORS',[(m.get('code'),m.get('text')) for m in (e.get('messages') or [])],flush=True)
+                  if slug in ('error_params','error_payment','error_content','error'):
+                      raise SystemExit('SPB_REJECTED_CHECK_VALIDATOR_AND_REPORT')
+                  if slug=='success_published':
+                      active=status()
+                      if active is not None and str(active.get('id'))==str(e.get('avito_id')) and active.get('status')=='active' and active.get('price')==5000:
+                          published=True
+                          print('SPB_CONFIRMED_ACTIVE',active.get('id'),active.get('url'),flush=True)
+                          break
+              else:
+                  print('PENDING_SPB_IN_CURRENT',attempt+1,current.get('upload_id'),current.get('status'),flush=True)
+          if not published:
+              print('SPB_PUBLICATION_PENDING_NOT_CONFIRMED',flush=True)
+              raise SystemExit(7)
+          PY
