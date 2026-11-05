@@ -1,0 +1,43 @@
+name: Avito official XML validator availability read-only
+on:
+  push:
+    branches: ["audit/avito-xmlcheck-readonly-2026-11-05"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Inspect official XML checker without submitting or publishing
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.error,html.parser,re,json
+          class HTMLForms(html.parser.HTMLParser):
+              def __init__(self):super().__init__();self.forms=[];self.inputs=[];self.scripts=[];self.inform=False
+              def handle_starttag(self,tag,attrs):
+                  d=dict(attrs)
+                  if tag=='form':self.forms.append({k:d.get(k) for k in ('id','method','action')})
+                  if tag=='input':self.inputs.append({k:d.get(k) for k in ('name','type','id')})
+                  if tag=='script' and 'src' in d:self.scripts.append(d.get('src','')[:150])
+          url='https://autoload.avito.ru/format/xmlcheck/'
+          req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 (compatible; AvitoXMLCheckAccessAudit/1.0)','Accept':'text/html'})
+          try:
+              with urllib.request.urlopen(req,timeout=25) as r:
+                  content=r.read(700000);ct=r.headers.get('Content-Type','')
+                  print('URL',r.geturl(),'STATUS',r.status,'MIME',ct,'BYTES_READ',len(content))
+              if 'html' in ct:
+                  h=content.decode('utf-8','replace')
+                  p=HTMLForms();p.feed(h)
+                  title=re.search(r'<title[^>]*>([^<]+)',h,re.I)
+                  print('PAGE_TITLE',(title.group(1) if title else '')[:180])
+                  print('FORM_META',json.dumps(p.forms,ensure_ascii=False)[:2500])
+                  print('INPUT_META',json.dumps(p.inputs[:30],ensure_ascii=False)[:2500])
+                  print('SCRIPTS_COUNT',len(p.scripts))
+                  print('PAGE_HAS_XMLCHECK',bool(re.search(r'xmlcheck|проверк.{0,12}(?:xml|файл)',h,re.I)))
+              else: print('RESPONSE_NOT_HTML')
+          except urllib.error.HTTPError as e:
+              print('URL_ERROR_HTTP',e.code)
+          except Exception as e:
+              print('URL_ERROR_TYPE',type(e).__name__)
+          PY
