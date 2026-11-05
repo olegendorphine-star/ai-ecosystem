@@ -1,0 +1,129 @@
+name: Avito scheduled one-shot upload after hourly limit
+on:
+  schedule:
+    - cron: '30 7 5 11 *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Verify public pictures and submit exactly one upload
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os,json,time,hashlib,datetime,urllib.request,urllib.parse,urllib.error,xml.etree.ElementTree as ET
+          if datetime.datetime.now(datetime.timezone.utc).date().isoformat()!='2026-11-05':
+              print('DATE_GUARD_SKIP_ALREADY_EXPIRED')
+              raise SystemExit(0)
+          origin='https://olegendorphine-star.github.io/ai-ecosystem'
+          feedurl=origin+'/avito-feed.xml'
+          with urllib.request.urlopen(feedurl,timeout=30) as response:
+              data=response.read()
+              assert response.status==200
+          root=ET.fromstring(data)
+          ads=root.findall('Ad')
+          assert len(ads)==1,'Multiple ads prohibited'
+          ad=ads[0]
+          required={'Id':'ai-assistant-memory-moscow-001','AvitoId':'8347570435',
+                    'Title':'Персональная ИИ-экосистема — для бизнеса и жизни',
+                    'Category':'Предложение услуг','ServiceType':'Деловые услуги',
+                    'Price':'5000','AdStatus':'Free'}
+          for k,v in required.items():
+              if ad.findtext(k)!=v: raise RuntimeError('invalid_'+k)
+          assert 'Поднимитесь над потоком' in ad.findtext('Description','')
+          urls=[x.attrib.get('url','') for x in ad.findall('./Images/Image')]
+          names=['01_cover.png','02_audit.jpg','03_assistant.png',
+                 '04_business.png','05_how_it_works.png','06_results.png']
+          hashes=['b71429da9c2157c18ee9e17526a80c11081cff983c2f9e1b0726e15004fc2f0c',
+                  'cae6898bcdc351598b8545b8e49b5a605d126e437c9817450e3b8df3e5ae786d',
+                  '4b9c7453104861e6ce5646739121e156cb646f9c84b4200fb75d5afbef60cbb8',
+                  '8f3a5cac5fdd8a5d82025e48c9e3d26ea01edf61f3c5a9ea4bc9e17e9ca83fed',
+                  'de1d4046fef909bb06b12a214c70c40144408a03267e1d2eb1e79cfaf77747e2',
+                  '23510a3802fb5dd005125d7a07957551f513062684ead776b0477ec7efc14300']
+          assert len(urls)==6,'Expected exactly six images'
+          for i,(url,name,expected) in enumerate(zip(urls,names,hashes),1):
+              if url != origin+'/images/avito/'+name: raise RuntimeError('invalid_image_url_'+str(i))
+              req=urllib.request.Request(url,headers={'User-Agent':'AvitoFeedSafetyVerifier/1.0'})
+              with urllib.request.urlopen(req,timeout=35) as response:
+                  ct=response.headers.get('Content-Type','')
+                  body=response.read()
+                  if response.status!=200 or not ct.startswith('image/'):
+                      raise RuntimeError('image_http_or_mime_invalid_'+str(i))
+                  if response.geturl()!=url:
+                      raise RuntimeError('image_redirect_'+str(i))
+                  if hashlib.sha256(body).hexdigest()!=expected:
+                      raise RuntimeError('image_hash_mismatch_'+str(i))
+              print('VALID_IMAGE',i,len(body),ct)
+          print('PREFLIGHT_OK_STABLE_ID_PRICE_SIX_IMAGES',True)
+          base='https://api.avito.ru'
+          payload=urllib.parse.urlencode({'grant_type':'client_credentials',
+            'client_id':os.environ['AVITO_CLIENT_ID'],'client_secret':os.environ['AVITO_CLIENT_SECRET']}).encode()
+          request=urllib.request.Request(base+'/token/',data=payload,method='POST',
+            headers={'Content-Type':'application/x-www-form-urlencoded'})
+          try:
+              with urllib.request.urlopen(request,timeout=25) as response:
+                  token=json.load(response)['access_token']
+          except urllib.error.HTTPError as exc:
+              print('OAUTH_HTTP',exc.code,'RETRY_AFTER',exc.headers.get('Retry-After','unknown'))
+              raise SystemExit(2)
+          h={'Authorization':'Bearer '+token,'Accept':'application/json','Content-Type':'application/json'}
+          try:
+              with urllib.request.urlopen(urllib.request.Request(base+'/autoload/v2/profile',headers=h),timeout=25) as response:
+                  profile=json.load(response)
+              assert profile.get('autoload_enabled') is True
+              assert len(profile.get('feeds_data') or [])==1
+              assert profile['feeds_data'][0].get('feed_url')==feedurl
+              print('PROFILE_SAFETY_OK',True)
+          except urllib.error.HTTPError as exc:
+              print('PROFILE_HTTP',exc.code,'RETRY_AFTER',exc.headers.get('Retry-After','unknown'))
+              raise SystemExit(3)
+          print('START_ONE_REAL_UPLOAD',True)
+          try:
+              request=urllib.request.Request(base+'/autoload/v1/upload',
+                  data=b'{}',headers=h,method='POST')
+              with urllib.request.urlopen(request,timeout=35) as response:
+                  body=response.read()
+                  print('UPLOAD_HTTP',response.status,'BODY_LENGTH',len(body))
+                  if body.strip():
+                      try:
+                          obj=json.loads(body)
+                          print('UPLOAD_ID',obj.get('upload_id'))
+                      except (ValueError,TypeError):
+                          print('UPLOAD_BODY_NON_JSON',True)
+          except urllib.error.HTTPError as exc:
+              print('UPLOAD_HTTP',exc.code,'RETRY_AFTER',exc.headers.get('Retry-After','unknown'))
+              raise SystemExit(4)
+          for k in range(6):
+              time.sleep(15)
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(base+'/autoload/v4/uploads/current',headers=h),timeout=25) as response:
+                      state=json.load(response)
+                  print('POLL',k+1,'CURRENT_ID',state.get('upload_id'),'STATE',state.get('status'))
+                  if state.get('status') in ('success','success_warning','error','failed'):
+                      with urllib.request.urlopen(urllib.request.Request(base+'/autoload/v4/uploads/current/items',headers=h),timeout=25) as response:
+                          items=json.load(response)
+                      for item in items.get('items',[])[:5]:
+                          print('RESULT_ITEM',item.get('ad_id'),'AVITO_ID',item.get('avito_id'),
+                                'SECTION',(item.get('section') or {}).get('slug'),
+                                'MESSAGES',[m.get('code') for m in item.get('messages',[])])
+                      break
+              except urllib.error.HTTPError as exc:
+                  print('POLL_HTTP',exc.code,'RETRY_AFTER',exc.headers.get('Retry-After','unknown'))
+                  break
+          try:
+              with urllib.request.urlopen(urllib.request.Request(base+'/core/v1/accounts/self',headers=h),timeout=25) as response:
+                  account=json.load(response)
+              aid=account.get('id') or account.get('user_id')
+              if aid:
+                  url=base+'/core/v1/accounts/'+str(aid)+'/items/8347570435/'
+                  with urllib.request.urlopen(urllib.request.Request(url,headers=h),timeout=25) as response:
+                      item=json.load(response)
+                  print('EXISTING_ITEM_STATUS',item.get('status'))
+          except urllib.error.HTTPError as exc:
+              print('ITEM_CHECK_HTTP',exc.code)
+          PY
