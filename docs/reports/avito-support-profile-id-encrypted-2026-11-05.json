@@ -1,0 +1,16 @@
+{
+  "ads_changed": 0,
+  "algorithm": "RSA-OAEP-SHA256",
+  "charges_rub": 0,
+  "encrypted_id": "G0RYF44KVqzBYvztlz7Vmv6HC2xVDSs+LGEGuTd0304s1tC8F0b67NbDE0TXf2RtDVGhxASX1WTiClZNlQrIxFPfWpHaH1yG8QSn6pGQpPbiwZ0zriLT0wl/4zSXRlD1/ft7hQLgLWk8CpKqxL69YBGXkUckfQep/a+QUSrVDyCdSc8LBtN9sGPGzJ1bfX02F5EqyOv3dG0yHD5mWCayP1aquS5Whlsprli44WDyCliIj1AKgMSfV5ElaL8z+9uRsDBsBoJcgQGfLy40IWSzkTyY/2Y5KXzo8VhvPWQOuMIPOktR9ZKrCkZPhljmaqz4K/p3F+hEVajP1FA+gN4neg==",
+  "messages_read": 0,
+  "oauth_http": 200,
+  "plaintext_logged": false,
+  "plaintext_stored": false,
+  "profile_http": 200,
+  "read_only": true,
+  "schema": "avito.support.own-profile-id.encrypted.v1",
+  "source": "GET /core/v1/accounts/self",
+  "status": "encrypted_id_ready",
+  "ticket": "79397429"
+}
