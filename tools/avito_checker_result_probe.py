@@ -43,10 +43,10 @@ def visible_report_markers(raw: bytes) -> dict[str, Any]:
     """Inspect visible text of public HTML; never export raw ad or customer text."""
     parser = _VisibleTextParser()
     parser.feed(raw.decode("utf-8-sig", "replace"))
-    text = re.sub(r"\\s+", " ", " ".join(parser.nodes)).lower()
+    text = re.sub(r"\s+", " ", " ".join(parser.nodes)).lower()
     invalid = "xml не соответствует формату" in text
     valid = "xml соответствует формату" in text and not invalid
-    count = re.search(r"проверено объявлений\\s*:?\\s*(\\d{1,5})", text)
+    count = re.search(r"проверено объявлений\s*:?\s*(\d{1,5})", text)
     return {
         "report_heading_visible": "общий статус" in text,
         "format_valid_text_visible": valid,
