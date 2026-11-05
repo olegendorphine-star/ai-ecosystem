@@ -32,7 +32,7 @@ jobs:
 
   check_candidate:
     needs: offline_tests
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'RUN_ONCE_AVITO_PUBLIC_XML_VALIDATOR_2026_11_05') }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'RUN_ONCE_AVITO_CHECKER_RESPONSE_FORMAT_V2_2026_11_05') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
