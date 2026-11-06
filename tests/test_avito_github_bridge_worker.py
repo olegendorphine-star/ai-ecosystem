@@ -158,6 +158,15 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(out["posted"], 0)
             self.assertFalse(path.exists())
 
+    def test_single_pass_deduplicates_repeated_command(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(b, "get_issue_comments", return_value=[comment(), comment()]), \
+                 patch.object(b, "utcnow", return_value=NOW), \
+                 patch.object(b, "execute", return_value={"bridge": "alive"}) as execute:
+                out = b.single_pass(dry_run=True, state_file=Path(d)/"state.json")
+                self.assertEqual(out["simulated"], 1)
+                execute.assert_called_once()
+
     def test_single_pass_ignore_old_result(self):
         result = b.make_result(command(), {"bridge": "alive"}, NOW)
         comments = [comment(), {"user": {"login": b.OWNER},
