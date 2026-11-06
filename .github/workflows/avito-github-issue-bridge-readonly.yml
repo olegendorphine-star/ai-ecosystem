@@ -28,10 +28,13 @@ jobs:
       - name: Validate runtime and execute allowlisted read-only commands
         env:
           AVITO_BRIDGE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           python3 -m py_compile tools/avito_github_bridge_worker.py
           python3 tools/avito_github_bridge_worker.py --once
 
 # NOTE: deploy to main only after approval. Public issue must contain no secrets.
-# No Avito credentials, cookies, live login, remote SSH or customer messages are used.
+# Avito client credentials are injected only for OAuth + GET, never published or logged.
+# No Avito account write endpoints, cookies, live browser login, remote SSH or messages.
