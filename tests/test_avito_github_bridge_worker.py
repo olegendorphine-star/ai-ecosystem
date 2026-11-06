@@ -106,6 +106,13 @@ class ValidationTests(unittest.TestCase):
             {"user": {"login": b.OWNER}, "body": body}
         ]), {command()["command_id"]})
 
+    def test_result_dedup_github_bot(self):
+        result = b.make_result(command(), {"bridge": "alive"}, NOW)
+        body = b.RESULT_PREFIX + json.dumps(result)
+        self.assertEqual(b.seen_completed_results([
+            {"user": {"login": "github-actions[bot]"}, "body": body}
+        ]), {command()["command_id"]})
+
     def test_feed_good(self):
         flags = b.check_feed_xml(xml_source())
         self.assertTrue(all(flags.values()))
