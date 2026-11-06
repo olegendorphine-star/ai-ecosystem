@@ -1,5 +1,10 @@
 name: Avito Chita — one-time guarded package publication
 on:
+  pull_request:
+    paths:
+      - 'docs/avito-feed.xml'
+      - 'tests/test_avito_chita_rollout.py'
+      - '.github/workflows/avito-chita-once-2026-11-06.yml'
   schedule:
     - cron: '37 17 6 11 *'
   workflow_dispatch:
@@ -15,6 +20,18 @@ concurrency:
   group: avito-chita-once-2026-11-06
   cancel-in-progress: false
 jobs:
+  offline:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate Chita and original listings without touching Avito
+        run: |
+          python3 -m unittest discover -s tests -p 'test_avito_chita_rollout.py' -v
+          python3 -m unittest discover -s tests -p 'test_avito_pricelist_rollout.py' -v
   publish:
     if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.approve_package_only == true) }}
     runs-on: ubuntu-latest
