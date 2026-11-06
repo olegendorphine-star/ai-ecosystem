@@ -60,6 +60,33 @@ class WorkerOfflineTests(unittest.TestCase):
         self.assertEqual(result["posted"], 0)
         self.assertFalse(worker.replay_path(self.root).exists())
 
+    def test_lock_prevents_second_worker_from_processing(self):
+        with worker.exclusive_worker_lock(self.root):
+            with self.assertRaises(worker.WorkerBlocked):
+                worker.run_once(self.root, comments=[comment()], now=NOW)
+
+    def test_lock_prevents_bootstrap_during_processing(self):
+        with worker.exclusive_worker_lock(self.root):
+            with self.assertRaises(worker.WorkerBlocked):
+                worker.bootstrap(self.root, "portfolio")
+
+    def test_lock_released_after_first_run(self):
+        with worker.exclusive_worker_lock(self.root):
+            pass
+        result = worker.run_once(self.root, comments=[comment()], now=NOW)
+        self.assertEqual(result["pending"], 1)
+
+    def test_symlink_lock_rejected(self):
+        root = worker.private_root(self.root)
+        target = root / "legit"
+        target.write_text("not a lock", encoding="utf-8")
+        try:
+            (root / "worker.lock").symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation unavailable")
+        with self.assertRaises(worker.WorkerBlocked):
+            worker.run_once(root, comments=[comment()], now=NOW)
+
     def test_no_token_no_post(self):
         with self.assertRaises(worker.WorkerBlocked):
             worker.run_once(self.root, dry_run=False, comments=[comment()], now=NOW)
