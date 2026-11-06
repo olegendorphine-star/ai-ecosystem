@@ -131,6 +131,81 @@ def screenshot(page, base: Path, suffix: str) -> Path:
     return target
 
 
+
+# Only control categories useful for owner-managed public profile and portfolio.
+# Do not capture field values, page text, links, account identifiers or screenshots in logs.
+PUBLIC_CONTROL_HINTS = {
+    "portfolio": re.compile(r"портфоли|альбом|проект|работ|portfolio|album|project", re.I),
+    "profile": re.compile(r"профил|описани|о себе|информац|названи|специализац|profile|description", re.I),
+    "media": re.compile(r"фото|изображен|логотип|аватар|обложк|photo|image|upload", re.I),
+    "edit": re.compile(r"добав|измен|редакт|сохран|созда|загруз|edit|add|save|create", re.I),
+}
+
+
+def inventory_controls(controls: list[dict]) -> dict:
+    """Classify relevant UI controls without retaining personally identifying labels."""
+    counts = {kind: 0 for kind in PUBLIC_CONTROL_HINTS}
+    types: dict[str, int] = {}
+    for item in controls[:500]:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        label = item.get("label")
+        if role not in {"button", "link", "tab", "textbox", "file"} or not isinstance(label, str):
+            continue
+        # Never store or return the literal label, which may include contact information.
+        if len(label) > 120 or "@" in label or re.search(r"\\+?\\d{6,}", label):
+            continue
+        matched = False
+        for kind, pattern in PUBLIC_CONTROL_HINTS.items():
+            if pattern.search(label):
+                counts[kind] += 1
+                matched = True
+        if matched:
+            types[role] = types.get(role, 0) + 1
+    return {"schema": "avito.owner-ui.inventory.v1",
+            "screen": "owner-selected",
+            "privacy": "category-counts-only",
+            "categories": counts,
+            "control_types": types}
+
+
+def inspect_controls(page) -> dict:
+    """Enumerate only metadata of visible controls; never read their values."""
+    controls: list[dict] = []
+    # Playwright only; no JS evaluation or private API calls.
+    elements = page.locator("button, a, [role=tab], input, textarea, label")
+    count = min(elements.count(), 500)
+    for index in range(count):
+        el = elements.nth(index)
+        try:
+            if not el.is_visible():
+                continue
+            tag = el.evaluate("(e) => e.tagName.toLowerCase()")
+            if tag == "input":
+                typ = el.get_attribute("type") or "text"
+                role = "file" if typ == "file" else "textbox"
+            elif tag == "textarea":
+                role = "textbox"
+            elif tag == "a":
+                role = "link"
+            elif tag == "label":
+                role = "textbox"
+            elif el.get_attribute("role") == "tab":
+                role = "tab"
+            else:
+                role = "button"
+            label = el.get_attribute("aria-label") or el.get_attribute("placeholder")
+            if not label and role not in {"textbox", "file"}:
+                label = el.inner_text(timeout=1000)
+            if not label and role in {"textbox", "file"}:
+                label = el.get_attribute("name") or ""
+            controls.append({"role": role, "label": label[:120]})
+        except Exception:
+            continue
+    return inventory_controls(controls)
+
+
 def interactive(command: str, plan: dict | None, session: Path) -> None:
     try:
         from playwright.sync_api import sync_playwright
@@ -152,10 +227,17 @@ def interactive(command: str, plan: dict | None, session: Path) -> None:
             input("Press Enter on THIS computer when the appropriate page is open: ")
             if not safe_avito_url(page.url):
                 raise OperatorSafetyError("Not a permitted Avito page.")
-            if command == "inspect":
-                path = screenshot(page, root, "inspect")
-                print("READ-ONLY inspection completed. Private screenshot:", str(path))
-                print("Verified host: Avito. No profile edits, messages or payments performed.")
+            if command in ("inspect", "inventory"):
+                if command == "inventory":
+                    assert plan is not None
+                    check_page(page, plan["purpose"])
+                    result = inspect_controls(page)
+                    print("SAFE CONTROL COUNTS:", json.dumps(result, ensure_ascii=False, sort_keys=True))
+                    print("No field values, link URLs, customer data or screenshots captured.")
+                else:
+                    path = screenshot(page, root, "inspect")
+                    print("READ-ONLY inspection completed. Private screenshot:", str(path))
+                    print("Verified host: Avito. No profile edits, messages or payments performed.")
                 return
             assert plan is not None
             check_page(page, plan["purpose"])
@@ -193,7 +275,7 @@ def interactive(command: str, plan: dict | None, session: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["inspect", "check-plan", "apply-plan"])
+    parser.add_argument("command", choices=["inspect", "inventory", "check-plan", "apply-plan"])
     parser.add_argument("plan", nargs="?", type=Path)
     parser.add_argument("--session-dir", type=Path, default=DEFAULT_SESSION)
     args = parser.parse_args()
@@ -201,6 +283,11 @@ def main() -> None:
         if args.plan:
             parser.error("inspect takes no plan")
         interactive("inspect", None, args.session_dir)
+    elif args.command == "inventory":
+        if not args.plan:
+            parser.error("inventory requires a local JSON plan to identify a safe screen")
+        plan = read_plan(args.plan)
+        interactive("inventory", plan, args.session_dir)
     else:
         if not args.plan:
             parser.error(f"{args.command} requires a local JSON plan")
