@@ -6,6 +6,7 @@ on:
       - 'tools/avito_github_bridge_worker.py'
       - 'tests/test_avito_github_bridge_worker.py'
       - '.github/workflows/avito-github-server-bridge-tests.yml'
+      - '.github/workflows/avito-github-issue-bridge-readonly.yml'
   push:
     branches: ['main']
     paths:
@@ -27,4 +28,6 @@ jobs:
       - name: Compile without network or secrets
         run: python3 -m py_compile tools/avito_github_bridge_worker.py
       - name: Offline tests — only mocked HTTP endpoints
-        run: python3 -m unittest discover -s tests -p 'test_avito_github_bridge_worker.py' -v
+        run: |
+          python3 -m unittest discover -s tests -p 'test_avito_github_bridge_worker.py' -v
+          python3 -m unittest discover -s tests -p 'test_avito_spb_pricelist_live_status.py' -v
