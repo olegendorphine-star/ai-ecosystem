@@ -9,17 +9,17 @@
   },
   "autoload_posts": 0,
   "charges_rub": 0,
-  "checked_at_utc": "2026-11-05T19:48:12+00:00",
-  "current_items_check": "rate_limited",
+  "checked_at_utc": "2026-11-06T09:17:10+00:00",
+  "current_items_check": "read",
   "current_upload": {
     "spb_in_current_items": false,
     "spb_section": "unknown",
-    "upload_id": 628665408,
+    "upload_id": 629312916,
     "upload_status": "success"
   },
   "http": {
     "active_items": 200,
-    "current_items": 429,
+    "current_items": 200,
     "current_upload": 200
   },
   "messages_read": 0,
