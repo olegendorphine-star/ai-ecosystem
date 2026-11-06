@@ -1,0 +1,37 @@
+name: Avito bridge — execute owner issue command (read-only)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  read_only_bridge:
+    # Runs on trusted default-branch workflow only.
+    # Ignore untrusted commenters, other issues, and bot result comments.
+    if: >-
+      github.event.issue.number == 32 &&
+      github.event.comment.user.login == 'olegendorphine-star' &&
+      startsWith(github.event.comment.body, 'AVITO_BRIDGE_COMMAND_V1 ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: avito-bridge-readonly
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate runtime and execute allowlisted read-only commands
+        env:
+          AVITO_BRIDGE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/avito_github_bridge_worker.py
+          python3 tools/avito_github_bridge_worker.py --once
+
+# NOTE: deploy to main only after approval. Public issue must contain no secrets.
+# No Avito credentials, cookies, live login, remote SSH or customer messages are used.
