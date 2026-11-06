@@ -144,6 +144,7 @@ class ValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "no-state.json"
             with patch.object(b, "get_issue_comments", return_value=[comment()]), \
+                 patch.object(b, "utcnow", return_value=NOW), \
                  patch.object(b, "execute", return_value={"bridge": "alive"}):
                 out = b.single_pass(dry_run=True, state_file=path)
             self.assertEqual(out["simulated"], 1)
@@ -156,6 +157,7 @@ class ValidationTests(unittest.TestCase):
                      "body": b.RESULT_PREFIX + json.dumps(result)}]
         with tempfile.TemporaryDirectory() as d:
             with patch.object(b, "get_issue_comments", return_value=comments), \
+                 patch.object(b, "utcnow", return_value=NOW), \
                  patch.object(b, "execute", side_effect=AssertionError("must not rerun")):
                 self.assertEqual(b.single_pass(dry_run=True, state_file=Path(d)/"state.json")["pending"], 0)
 
