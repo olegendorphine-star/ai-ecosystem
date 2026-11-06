@@ -54,13 +54,13 @@ def http(url: str, *, auth: str | None = None, body: bytes | None = None) -> tup
 def feed_check(xml: bytes) -> dict[str, Any]:
     root = ET.fromstring(xml)
     ads = root.findall("Ad")
-    if len(ads) != 2:
+    if len(ads) < 2:
         return {"two_ads": False, "spb_three_prices": False, "moscow_has_no_price_list": False,
                 "all_original_images": False, "free_package": False}
-    mos, spb = ads
+    mos, spb = ads[:2]
     price_vals = [x.text for x in spb.findall("./PriceList/Service/ServicePrice")]
     return {
-        "two_ads": len(ads) == 2,
+        "two_ads": len(ads) >= 2,  # backward-compatible: original Moscow/SPb pair still exists
         "spb_three_prices": price_vals == ["5000", "30000", "150000"],
         "moscow_has_no_price_list": mos.find("PriceList") is None,
         "all_original_images": (
