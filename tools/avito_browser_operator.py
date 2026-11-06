@@ -23,12 +23,12 @@ AVITO_ORIGIN = "https://www.avito.ru/"
 BLOCKED_URL_PARTS = (
     "/messenger", "/messages", "/chat", "/payment", "/pay", "/balance",
     "/wallet", "/promotion", "/promote", "/security", "/password",
-    "/notifications",
+    "/notifications", "/delete", "/remove", "/billing", "/finance", "/orders",
 )
 BLOCKED_WORDS = re.compile(
     r"(?:оплат|купить|продвиг|продвиж|платеж|баланс|кошел|"
     r"сообщен|переписк|чат\b|парол|двухфактор|captcha|"
-    r"payment|buy\b|wallet|password|message|security)", re.I
+    r"payment|buy\b|wallet|password|message|security|delete|remove|"\n    r"удал|архив|отключ|снять с публикац|опубликов|отправ|send\b)", re.I
 )
 ALLOWED_ACTIONS = {"click", "fill", "upload"}
 ALLOWED_LOCATORS = {"role", "label", "placeholder"}
