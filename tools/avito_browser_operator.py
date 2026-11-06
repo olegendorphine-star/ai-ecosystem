@@ -154,7 +154,7 @@ def inventory_controls(controls: list[dict]) -> dict:
         if role not in {"button", "link", "tab", "textbox", "file"} or not isinstance(label, str):
             continue
         # Never store or return the literal label, which may include contact information.
-        if len(label) > 120 or "@" in label or re.search(r"\\+?\\d{6,}", label):
+        if len(label) > 120 or "@" in label or re.search(r"\+?\d{6,}", label):
             continue
         matched = False
         for kind, pattern in PUBLIC_CONTROL_HINTS.items():
@@ -278,16 +278,16 @@ def main() -> None:
     parser.add_argument("command", choices=["inspect", "inventory", "check-plan", "apply-plan"])
     parser.add_argument("plan", nargs="?", type=Path)
     parser.add_argument("--session-dir", type=Path, default=DEFAULT_SESSION)
+    parser.add_argument("--purpose", choices=["public-profile", "portfolio"], help="For inventory read-only screen inspection")
     args = parser.parse_args()
     if args.command == "inspect":
         if args.plan:
             parser.error("inspect takes no plan")
         interactive("inspect", None, args.session_dir)
     elif args.command == "inventory":
-        if not args.plan:
-            parser.error("inventory requires a local JSON plan to identify a safe screen")
-        plan = read_plan(args.plan)
-        interactive("inventory", plan, args.session_dir)
+        if args.plan or not args.purpose:
+            parser.error("inventory takes --purpose public-profile|portfolio, but no plan file")
+        interactive("inventory", {"purpose": args.purpose, "steps": []}, args.session_dir)
     else:
         if not args.plan:
             parser.error(f"{args.command} requires a local JSON plan")
