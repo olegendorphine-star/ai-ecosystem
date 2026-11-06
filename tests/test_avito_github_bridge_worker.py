@@ -167,6 +167,88 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(out["simulated"], 1)
                 execute.assert_called_once()
 
+    def test_live_api_action_allowed_but_write_still_blocked(self):
+        self.assertEqual(b.validate_command(command("check_live_avito_api"), NOW)["action"],
+                         "check_live_avito_api")
+        with self.assertRaises(b.InvalidCommand):
+            b.validate_command(command("avito_publish"), NOW)
+
+    def test_live_report_never_leaks_secrets(self):
+        raw = {"oauth_ok": True, "public_feed_http": 200,
+               "public_feed": {"two_ads": True, "spb_three_prices": True},
+               "secret": "TOP_SECRET_VALUE", "token": "TOP_SECRET_VALUE",
+               "active_items": {"moscow_active": True, "spb_active": True,
+                                "phone": "TOP_SECRET_VALUE",
+                                "spb_public_url": "https://private.invalid"},
+               "current_upload": {"upload_status": "success", "spb_section": "success_published",
+                                  "upload_id": 123456789, "private_id": "TOP_SECRET_VALUE"},
+               "http": {"active_items": 200, "current_upload": 200, "current_items": 429},
+               "current_items_check": "rate_limited"}
+        safe = b.sanitize_live_api_report(raw)
+        self.assertTrue(safe["spb_active"])
+        self.assertTrue(safe["moscow_active"])
+        self.assertEqual(safe["current_items_check"], "rate_limited")
+        self.assertEqual(safe["price_list_visible_on_public_ad"], "unverified")
+        self.assertNotIn("TOP_SECRET_VALUE", json.dumps(safe))
+        self.assertNotIn("123456789", json.dumps(safe))
+        self.assertNotIn("private.invalid", json.dumps(safe))
+
+    def test_live_report_restricts_http_and_status_fields(self):
+        report = {"oauth_ok": False, "public_feed_http": "SECRET",
+                  "http": {"active_items": "SECRET", "current_items": 429},
+                  "current_upload": {"upload_status": "SECRET",
+                                     "spb_section": "SECRET"}}
+        safe = b.sanitize_live_api_report(report)
+        self.assertEqual(safe["upload_status"], "unknown")
+        self.assertEqual(safe["spb_section"], "unknown")
+        self.assertIsNone(safe["http"]["active_items"])
+        self.assertNotIn("SECRET", json.dumps(safe))
+
+    def test_live_api_execution_calls_existing_read_only_inspector(self):
+        import avito_spb_pricelist_live_status as live
+        with patch.object(live, "inspect", return_value={
+             "oauth_ok": True, "active_items": {
+                 "moscow_active": True, "spb_active": True
+             }, "user": "SECRET"
+        }) as mock:
+            result = b.execute("check_live_avito_api")
+        mock.assert_called_once()
+        self.assertEqual(result["result"], "checked")
+        self.assertTrue(result["spb_active"])
+        self.assertNotIn("SECRET", json.dumps(result))
+
+    def test_live_api_error_returns_no_exception_content(self):
+        import avito_spb_pricelist_live_status as live
+        with patch.object(live, "inspect", side_effect=RuntimeError("TOKEN_SECRET")):
+            result = b.execute("check_live_avito_api")
+        self.assertEqual(result["result"], "unavailable")
+        self.assertNotIn("TOKEN_SECRET", json.dumps(result))
+
+    def test_live_api_cooldown(self):
+        result = b.make_result(command("check_live_avito_api"),
+                               {"result": "checked"}, NOW)
+        body = b.RESULT_PREFIX + json.dumps(result)
+        comments = [{"user": {"login": "github-actions[bot]"}, "body": body}]
+        self.assertTrue(b.has_recent_api_check(comments, NOW + dt.timedelta(minutes=30)))
+        self.assertFalse(b.has_recent_api_check(comments, NOW + dt.timedelta(minutes=61)))
+
+    def test_live_api_cooldown_blocks_repeat_execute(self):
+        now = NOW
+        last = b.make_result(command("check_live_avito_api"),
+                             {"result": "checked"}, now)
+        recent_result = {"user": {"login": "github-actions[bot]"},
+                         "body": b.RESULT_PREFIX + json.dumps(last)}
+        new_command = command("check_live_avito_api")
+        new_command["command_id"] = str(uuid.uuid4())
+        comments = [recent_result, comment(new_command)]
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(b, "get_issue_comments", return_value=comments), \
+                 patch.object(b, "utcnow", return_value=NOW + dt.timedelta(minutes=5)), \
+                 patch.object(b, "execute", side_effect=AssertionError("should not run")):
+                with patch("builtins.print"):
+                    result = b.single_pass(dry_run=True, state_file=Path(d)/"state.json")
+        self.assertEqual(result["simulated"], 1)
+
     def test_single_pass_ignore_old_result(self):
         result = b.make_result(command(), {"bridge": "alive"}, NOW)
         comments = [comment(), {"user": {"login": b.OWNER},
