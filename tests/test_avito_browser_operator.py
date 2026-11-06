@@ -18,6 +18,46 @@ def good_plan():
 
 
 class SafeOperatorTests(unittest.TestCase):
+    def test_inventory_only_categories_no_raw_labels(self):
+        labels = [
+            {"role": "button", "label": "Добавить альбом портфолио"},
+            {"role": "button", "label": "Сохранить описание профиля"},
+            {"role": "textbox", "label": "Название проекта"},
+            {"role": "file", "label": "Загрузить фото"},
+        ]
+        report = op.inventory_controls(labels)
+        self.assertEqual(report["schema"], "avito.owner-ui.inventory.v1")
+        self.assertGreater(report["categories"]["portfolio"], 0)
+        self.assertGreater(report["categories"]["profile"], 0)
+        raw = __import__("json").dumps(report, ensure_ascii=False)
+        self.assertNotIn("Сохранить описание", raw)
+        self.assertNotIn("Добавить альбом", raw)
+
+    def test_inventory_skips_personal_contact_strings(self):
+        labels = [
+            {"role": "link", "label": "Профиль user@example.org"},
+            {"role": "button", "label": "Профиль +79998887766"},
+            {"role": "button", "label": "Редактировать профиль"},
+        ]
+        report = op.inventory_controls(labels)
+        self.assertEqual(report["control_types"]["button"], 1)
+        self.assertNotIn("example.org", str(report))
+        self.assertNotIn("79998887766", str(report))
+
+    def test_inventory_drops_unapproved_roles_and_controls(self):
+        labels = [{"role": "script", "label": "Добавить портфолио"},
+                  {"role": "link", "label": "Настройки безопасности"},
+                  {"role": "button", "label": "Оплатить продвижение"}]
+        report = op.inventory_controls(labels)
+        self.assertEqual(report["categories"]["portfolio"], 0)
+        self.assertNotIn("script", report["control_types"])
+
+    def test_inventory_does_not_read_field_values(self):
+        labels = [{"role": "textbox", "label": "Описание профиля",
+                   "value": "SECRET_CUSTOMER_DATA"}]
+        report = op.inventory_controls(labels)
+        self.assertNotIn("SECRET_CUSTOMER_DATA", str(report))
+
     def test_valid_minimal(self):
         op.validate_plan(good_plan())
 
