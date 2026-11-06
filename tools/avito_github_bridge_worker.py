@@ -98,7 +98,7 @@ def parse_owner_command(comment: Any, now: dt.datetime | None = None) -> dict[st
 def seen_completed_results(comments: list[Any]) -> set[str]:
     out: set[str] = set()
     for comment in comments:
-        if not isinstance(comment, dict) or comment.get("user", {}).get("login") != OWNER:
+        if not isinstance(comment, dict) or comment.get("user", {}).get("login") not in (OWNER, "github-actions[bot]"):
             continue
         body = comment.get("body")
         if not isinstance(body, str) or not body.startswith(RESULT_PREFIX):
