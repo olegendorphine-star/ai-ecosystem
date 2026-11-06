@@ -1,0 +1,113 @@
+name: Avito Surgut guarded one-shot publish
+on:
+  push:
+    branches: ["main"]
+    paths: ["docs/avito-feed.xml", ".github/workflows/avito-surgut-one-shot-2026-11-06.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: avito-surgut-2026-11-06
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: ${{ startsWith(github.event.head_commit.message, 'SURGUT_PUBLISH_ONCE_2026_11_06') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify, submit at most once, and check Avito state
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os,sys,time,json,datetime,urllib.request,urllib.parse,urllib.error,xml.etree.ElementTree as ET,subprocess
+          if datetime.datetime.now(datetime.timezone.utc).date().isoformat()!='2026-11-06':
+              print('EXPIRED_DATE_NO_POST');sys.exit(0)
+          root=ET.parse('docs/avito-feed.xml').getroot()
+          old=ET.fromstring(subprocess.check_output(['git','show','HEAD^:docs/avito-feed.xml']))
+          ads=root.findall('Ad');old_ads=old.findall('Ad')
+          assert len(ads)==3 and len(old_ads)==2,'INVALID_AD_COUNT'
+          for now,previous in zip(ads[:2],old_ads):
+              assert ET.tostring(now)==ET.tostring(previous),'EXISTING_AD_MODIFIED'
+          s=ads[2]
+          required={'Id':'ai-assistant-memory-surgut-001','Address':'Сургут',
+                    'Title':'ИИ-ассистент и автоматизация бизнеса','Price':'5000',
+                    'ListingFee':'Package','AdStatus':'Free','Place':'Удалённо',
+                    'Category':'Предложение услуг','ServiceType':'Деловые услуги'}
+          assert all(s.findtext(k)==v for k,v in required.items()),'BAD_SURGUT_FIELDS'
+          assert s.find('AvitoId') is None
+          assert [x.findtext('ServicePrice') for x in s.findall('./PriceList/Service')]==['5000','30000','150000']
+          assert len(s.findall('./Images/Image'))==6
+          assert all(x.findtext('ListingFee')=='Package' and x.findtext('AdStatus')=='Free' for x in ads)
+          origin='https://olegendorphine-star.github.io/ai-ecosystem'
+          feed_url=origin+'/avito-feed.xml'
+          expected=open('docs/avito-feed.xml','rb').read()
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(feed_url,timeout=30) as r:published=r.read()==expected and r.status==200
+              except Exception:published=False
+              if published:break
+              time.sleep(15)
+          assert published,'STOP_GITHUB_PAGES_NOT_UPDATED'
+          for index,image in enumerate(s.findall('./Images/Image'),1):
+              url=image.attrib['url']
+              assert url.startswith(origin+'/images/avito/')
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'AvitoVerifiedFeed/1.0'}),timeout=45) as r:
+                  assert r.status==200 and r.geturl()==url and r.headers.get('Content-Type','').startswith('image/') and len(r.read())>10000
+              print('IMAGE_OK',index,flush=True)
+          print('PREFLIGHT_OK_3_ADS_EXISTING_UNCHANGED_3_PRICES_6_IMAGES',flush=True)
+          api='https://api.avito.ru'
+          data=urllib.parse.urlencode({'grant_type':'client_credentials','client_id':os.environ['AVITO_CLIENT_ID'],'client_secret':os.environ['AVITO_CLIENT_SECRET']}).encode()
+          with urllib.request.urlopen(urllib.request.Request(api+'/token/',data=data,method='POST',headers={'Content-Type':'application/x-www-form-urlencoded'}),timeout=30) as r:token=json.load(r)['access_token']
+          h={'Authorization':'Bearer '+token,'Accept':'application/json','Content-Type':'application/json'}
+          def get(path):
+              with urllib.request.urlopen(urllib.request.Request(api+path,headers=h),timeout=35) as r:return json.load(r)
+          profile=get('/autoload/v2/profile')
+          assert profile.get('autoload_enabled') is True
+          assert len(profile.get('feeds_data') or [])==1 and profile['feeds_data'][0].get('feed_url')==feed_url
+          def active_list():return get('/core/v1/items?status=active&per_page=99&page=1').get('resources',[])
+          act=active_list()
+          for old_id in ['8347570435','8477159401']:
+              found=next((x for x in act if str(x.get('id'))==old_id),None)
+              assert found and found.get('status')=='active' and found.get('price')==5000,'STOP_EXISTING_ITEM_INACTIVE'
+          live=next((x for x in act if 'surgut' in str(x.get('url','')).lower() and 'ассистент' in str(x.get('title','')).lower()),None)
+          if live:
+              print('SURGUT_ALREADY_ACTIVE',live.get('id'),live.get('url'));sys.exit(0)
+          current=get('/autoload/v4/uploads/current')
+          if current.get('status') in ('processing','running','pending'):
+              print('ONGOING_UPLOAD_NO_POST',current.get('upload_id'));sys.exit(0)
+          try:
+              items=get('/autoload/v4/uploads/current/items').get('items') or []
+          except urllib.error.HTTPError as ex:
+              print('READ_CURRENT_ITEMS_HTTP',ex.code,'NO_POST');sys.exit(0)
+          if any(x.get('id')=='ai-assistant-memory-surgut-001' or x.get('ad_id')=='ai-assistant-memory-surgut-001' for x in items):
+              print('SURGUT_ALREADY_IN_UPLOAD_NO_POST');sys.exit(0)
+          print('START_ONE_PACKAGE_ONLY_UPLOAD',flush=True)
+          try:
+              with urllib.request.urlopen(urllib.request.Request(api+'/autoload/v1/upload',data=b'{}',headers=h,method='POST'),timeout=40) as r:print('POST_UPLOAD_HTTP',r.status,flush=True)
+          except urllib.error.HTTPError as ex:
+              print('POST_UPLOAD_HTTP',ex.code,'NO_RETRY',flush=True);sys.exit(0)
+          for k in range(12):
+              time.sleep(15)
+              try:
+                  act=active_list()
+                  live=next((x for x in act if 'surgut' in str(x.get('url','')).lower() and x.get('price')==5000),None)
+                  if live:
+                      print('SURGUT_CONFIRMED_ACTIVE',live.get('id'),live.get('url'),flush=True);sys.exit(0)
+                  state=get('/autoload/v4/uploads/current')
+                  items=get('/autoload/v4/uploads/current/items').get('items') or []
+                  a=next((x for x in items if x.get('id')=='ai-assistant-memory-surgut-001' or x.get('ad_id')=='ai-assistant-memory-surgut-001'),None)
+                  if a:
+                      sec=a.get('section') or {}
+                      slug=sec.get('slug') if isinstance(sec,dict) else str(sec)
+                      print('SURGUT_SECTION',slug,'UPLOAD',state.get('upload_id'),flush=True)
+                      if slug.startswith('error'):
+                          print('REJECTED_CHECK_OFFICIAL_VALIDATOR_DO_NOT_RETRY',flush=True);sys.exit(1)
+              except urllib.error.HTTPError as ex:
+                  print('POLL_HTTP',ex.code,'NO_RETRY',flush=True);break
+          print('PUBLICATION_PENDING_NOT_CONFIRMED',flush=True)
+          PY
