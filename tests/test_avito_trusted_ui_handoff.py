@@ -139,7 +139,7 @@ class TrustedUiHandoffTests(unittest.TestCase):
             h.sanitized_inventory(y)
 
     def test_default_result_is_blocked_and_no_effect_claim(self):
-        body = h.make_public_result(request())
+        body = h.make_public_result(request(), now=NOW)
         data = json.loads(body[len(h.RESULT_PREFIX):])
         self.assertEqual(data["status"], "blocked")
         self.assertEqual(data["reason"], "no_verified_session")
@@ -147,7 +147,7 @@ class TrustedUiHandoffTests(unittest.TestCase):
         self.assertEqual(data["price_list_visible"], "unverified")
 
     def test_valid_counts_only_report(self):
-        body = h.make_public_result(request("portfolio"), inventory(), session_verified=True)
+        body = h.make_public_result(request("portfolio"), inventory(), session_verified=True, now=NOW)
         data = json.loads(body[len(h.RESULT_PREFIX):])
         self.assertEqual(data["status"], "observed_controls")
         self.assertEqual(data["inventory"]["categories"]["portfolio"], 1)
@@ -159,16 +159,28 @@ class TrustedUiHandoffTests(unittest.TestCase):
     def test_invalid_report_stays_blocked(self):
         bad = inventory()
         bad["control_types"]["button"] = -2
-        body = h.make_public_result(request(), bad, session_verified=True)
+        body = h.make_public_result(request(), bad, session_verified=True, now=NOW)
         data = json.loads(body[len(h.RESULT_PREFIX):])
         self.assertEqual(data["status"], "blocked")
         self.assertEqual(data["reason"], "invalid_inventory")
         self.assertNotIn("inventory", data)
 
+    def test_result_rejects_arbitrary_unvalidated_correlation_id(self):
+        bad_request = request()
+        bad_request["request_id"] = "SENSITIVE_DO_NOT_PUBLISH"
+        with self.assertRaises(h.InvalidTrustedRequest):
+            h.make_public_result(bad_request, inventory(), session_verified=True, now=NOW)
+
+    def test_result_does_not_accept_string_as_session_approval(self):
+        body = h.make_public_result(request(), inventory(), session_verified="true", now=NOW)
+        data = json.loads(body[len(h.RESULT_PREFIX):])
+        self.assertEqual(data["reason"], "no_verified_session")
+        self.assertEqual(data["status"], "blocked")
+
     def test_unknown_fields_never_echoed(self):
         bad = inventory()
         bad["private_notes"] = "NEVER_PUBLISH_ME"
-        body = h.make_public_result(request(), bad, session_verified=True)
+        body = h.make_public_result(request(), bad, session_verified=True, now=NOW)
         self.assertNotIn("NEVER_PUBLISH_ME", body)
         self.assertNotIn("private_notes", body)
 
