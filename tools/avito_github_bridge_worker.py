@@ -29,7 +29,8 @@ COMMAND_PREFIX = "AVITO_BRIDGE_COMMAND_V1 "
 RESULT_PREFIX = "AVITO_BRIDGE_RESULT_V1 "
 SCHEMA = "avito.bridge.command.v1"
 RESULT_SCHEMA = "avito.bridge.result.v1"
-ALLOWED_ACTIONS = frozenset(("ping", "check_public_feed", "check_avito_public_access"))
+ALLOWED_ACTIONS = frozenset(("ping", "check_public_feed", "check_avito_public_access", "check_live_avito_api"))
+API_READ_COOLDOWN_SEC = 3600
 STATE_FILE = Path.home() / ".local" / "state" / "ai-ecosystem" / "avito-bridge-state.json"
 MAX_PAGES = 15
 MAX_BODY = 1500000
@@ -177,8 +178,72 @@ def check_feed_xml(raw: bytes) -> dict[str, Any]:
     }
 
 
+def sanitize_live_api_report(raw: dict[str, Any]) -> dict[str, Any]:
+    """Produce a strict public-only boolean/status summary; never publish Avito payloads."""
+    if not isinstance(raw, dict):
+        return {"result": "invalid"}
+    safe: dict[str, Any] = {
+        "result": "checked",
+        "price_list_visible_on_public_ad": "unverified",
+        "oauth_ok": raw.get("oauth_ok") is True,
+    }
+    if type(raw.get("public_feed_http")) is int:
+        safe["public_feed_http"] = raw["public_feed_http"]
+    if isinstance(raw.get("public_feed"), dict):
+        flags = raw["public_feed"]
+        safe["feed_integrity_ok"] = (bool(flags) and all(v is True for v in flags.values()))
+    if isinstance(raw.get("active_items"), dict):
+        items = raw["active_items"]
+        safe["moscow_active"] = items.get("moscow_active") is True
+        safe["spb_active"] = items.get("spb_active") is True
+    if isinstance(raw.get("current_upload"), dict):
+        upload = raw["current_upload"]
+        safe["upload_status"] = upload.get("upload_status") if upload.get("upload_status") in {
+            "processing", "completed", "error", "failed", "success", "finished"
+        } else "unknown"
+        safe["spb_in_current_items"] = upload.get("spb_in_current_items") is True
+        safe["spb_section"] = upload.get("spb_section") if upload.get("spb_section") in {
+            "success_published", "processing", "error_params", "error_payment",
+            "error_content", "removed_complete", "pending"
+        } else "unknown"
+    if raw.get("current_items_check") in {
+        "read", "rate_limited", "unavailable", "skipped_while_processing",
+        "skipped_unknown_upload_status"
+    }:
+        safe["current_items_check"] = raw["current_items_check"]
+    if isinstance(raw.get("http"), dict):
+        safe["http"] = {
+            key: (raw["http"].get(key) if type(raw["http"].get(key)) is int else None)
+            for key in ("active_items", "current_upload", "current_items")
+        }
+    return safe
+
+
+def has_recent_api_check(comments: list[Any], now: dt.datetime) -> bool:
+    """Limit account API checks to one successful invocation per 60 min."""
+    for comment in comments:
+        if not isinstance(comment, dict) or comment.get("user", {}).get("login") not in (OWNER, "github-actions[bot]"):
+            continue
+        body = comment.get("body")
+        if not isinstance(body, str) or not body.startswith(RESULT_PREFIX):
+            continue
+        try:
+            payload = json.loads(body[len(RESULT_PREFIX):])
+            if (payload.get("schema") != RESULT_SCHEMA or
+                payload.get("action") != "check_live_avito_api"):
+                continue
+            if payload.get("detail", {}).get("result") == "cooldown":
+                continue
+            checked = parsed_time(payload.get("checked_at"))
+            if dt.timedelta(0) <= now - checked < dt.timedelta(seconds=API_READ_COOLDOWN_SEC):
+                return True
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return False
+
+
 def execute(action: str) -> dict[str, Any]:
-    """One of three read-only, parameter-free preapproved actions."""
+    """Run only allowlisted, read-only, parameter-free actions."""
     if action == "ping":
         return {"bridge": "alive", "mode": "public_read_only"}
     if action == "check_public_feed":
@@ -198,6 +263,15 @@ def execute(action: str) -> dict[str, Any]:
                     "note": "public GET only; login and PriceList visibility not verified"}
         except (OSError, ValueError):
             return {"reachable": False, "note": "network or TLS error"}
+    if action == "check_live_avito_api":
+        # Imports the previously tested public-feed and authenticated GET-only helper.
+        # OAuth POST is the sole non-GET request; its token is never returned.
+        try:
+            from avito_spb_pricelist_live_status import inspect
+            return sanitize_live_api_report(inspect())
+        except Exception:
+            # No raw exception, API responses, credentials, or remote host values.
+            return {"result": "unavailable", "price_list_visible_on_public_ad": "unverified"}
     raise InvalidCommand("action not allowlisted")
 
 
@@ -250,8 +324,16 @@ def single_pass(*, dry_run: bool = False, state_file: Path = STATE_FILE) -> dict
     if not dry_run and not token:
         raise RuntimeError("AVITO_BRIDGE_GITHUB_TOKEN missing; no results posted")
     posted = 0
+    recent_api = has_recent_api_check(comments, now)
     for command in pending:
-        payload = make_result(command, execute(command["action"]))
+        if command["action"] == "check_live_avito_api" and recent_api:
+            detail = {"result": "cooldown", "retry_after_minutes": 60,
+                      "price_list_visible_on_public_ad": "unverified"}
+        else:
+            detail = execute(command["action"])
+            if command["action"] == "check_live_avito_api" and detail.get("result") != "cooldown":
+                recent_api = True
+        payload = make_result(command, detail)
         if dry_run:
             print(RESULT_PREFIX + json.dumps(payload, ensure_ascii=False, sort_keys=True))
         else:
