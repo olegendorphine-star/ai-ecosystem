@@ -237,7 +237,13 @@ def single_pass(*, dry_run: bool = False, state_file: Path = STATE_FILE) -> dict
     now = utcnow()
     complete = seen_completed_results(comments) | load_state(state_file)
     commands = [c for comment in comments if (c := parse_owner_command(comment, now))]
-    pending = [c for c in commands if c["command_id"] not in complete]
+    pending = []
+    queued = set(complete)
+    for command in commands:
+        if command["command_id"] in queued:
+            continue
+        pending.append(command)
+        queued.add(command["command_id"])
     if not pending:
         return {"pending": 0, "posted": 0}
     token = os.environ.get("AVITO_BRIDGE_GITHUB_TOKEN", "")
