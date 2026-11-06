@@ -169,9 +169,11 @@ def sanitized_inventory(raw: Any) -> dict[str, dict[str, int]]:
 
 def make_public_result(
     request: dict[str, str], raw_inventory: Any = None,
-    *, session_verified: bool = False,
+    *, session_verified: bool = False, now: dt.datetime | None = None,
 ) -> str:
     """A successful report only proves count extraction, not identity or public visibility."""
+    # Never echo an arbitrary unvalidated ID or text in a public GitHub result.
+    request = validate_request(request, now)
     payload: dict[str, Any] = {
         "schema": RESULT_SCHEMA,
         "request_id": request["request_id"],
@@ -182,7 +184,7 @@ def make_public_result(
         "public_profile_updated": False,
         "price_list_visible": "unverified",
     }
-    if session_verified:
+    if session_verified is True:
         try:
             if raw_inventory is None:
                 raise ValueError("no inventory")
