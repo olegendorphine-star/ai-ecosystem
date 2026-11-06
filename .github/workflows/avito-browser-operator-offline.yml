@@ -6,6 +6,8 @@ on:
       - 'tools/avito_browser_operator.py'
       - 'tests/test_avito_browser_operator.py'
       - 'tools/avito_trusted_ui_handoff.py'
+      - 'tools/avito_trusted_ui_worker.py'
+      - 'tests/test_avito_trusted_ui_worker.py'
       - 'tests/test_avito_trusted_ui_handoff.py'
       - '.github/workflows/avito-browser-operator-offline.yml'
   push:
@@ -14,6 +16,8 @@ on:
       - 'tools/avito_browser_operator.py'
       - 'tests/test_avito_browser_operator.py'
       - 'tools/avito_trusted_ui_handoff.py'
+      - 'tools/avito_trusted_ui_worker.py'
+      - 'tests/test_avito_trusted_ui_worker.py'
       - 'tests/test_avito_trusted_ui_handoff.py'
       - '.github/workflows/avito-browser-operator-offline.yml'
 
@@ -34,3 +38,5 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_avito_browser_operator.py' -v
           python3 -m py_compile tools/avito_trusted_ui_handoff.py
           python3 -m unittest discover -s tests -p 'test_avito_trusted_ui_handoff.py' -v
+          python3 -m py_compile tools/avito_trusted_ui_worker.py
+          python3 -m unittest discover -s tests -p 'test_avito_trusted_ui_worker.py' -v
