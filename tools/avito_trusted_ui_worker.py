@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import json
 import os
 import re
@@ -20,6 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from contextlib import contextmanager
 from typing import Any
 
 import avito_browser_operator as browser
@@ -85,6 +87,34 @@ def read_private_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+@contextmanager
+def exclusive_worker_lock(root: Path):
+    """One owner session and command processor per private root on Linux."""
+    if os.name != "posix":
+        raise WorkerBlocked("trusted worker lock requires POSIX")
+    root = private_root(root)
+    lock_path = root / "worker.lock"
+    if lock_path.is_symlink():
+        raise WorkerBlocked("lock path must not be a symlink")
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(lock_path, flags, 0o600)
+    try:
+        if stat.S_IMODE(os.fstat(fd).st_mode) & 0o077:
+            raise WorkerBlocked("lock permissions are too broad")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise WorkerBlocked("another worker owns the session") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def target_path(root: Path) -> Path:
     return root / "targets.json"
 
@@ -108,7 +138,7 @@ def valid_targets(data: Any) -> dict[str, str]:
     return data
 
 
-def bootstrap(root: Path, purpose: str) -> dict[str, str]:
+def _bootstrap_unlocked(root: Path, purpose: str) -> dict[str, str]:
     """Owner manually signs in and selects screen. Never touches GitHub."""
     if purpose not in handoff.PURPOSES:
         raise WorkerBlocked("invalid bootstrap purpose")
@@ -142,6 +172,13 @@ def bootstrap(root: Path, purpose: str) -> dict[str, str]:
     valid_targets(targets)
     private_json_write(target_path(root), targets)
     return {"purpose": purpose, "saved": "local_only", "owner_session": "owner_managed"}
+
+
+def bootstrap(root: Path, purpose: str) -> dict[str, str]:
+    """Keep bootstrap from racing the scheduled browser session."""
+    root = private_root(root)
+    with exclusive_worker_lock(root):
+        return _bootstrap_unlocked(root, purpose)
 
 
 def read_only_inventory(root: Path, purpose: str) -> dict[str, Any]:
@@ -260,7 +297,7 @@ def load_processed(root: Path) -> set[str]:
     return set(data)
 
 
-def run_once(
+def _run_once_unlocked(
     root: Path, *, dry_run: bool = True,
     enable_browser: bool = False, token: str | None = None,
     comments: list[dict] | None = None,
@@ -294,6 +331,18 @@ def run_once(
             private_json_write(replay_path(root), sorted(processed)[-1000:])
             reported += 1
     return {"pending": len(commands), "posted": reported, "simulated": len(commands) if dry_run else 0}
+
+
+def run_once(root: Path, *, dry_run: bool = True,
+             enable_browser: bool = False, token: str | None = None,
+             comments: list[dict] | None = None, inventory_fn=None,
+             now: dt.datetime | None = None) -> dict[str, int]:
+    """Hold lock throughout reading commands, browser use and replay commit."""
+    root = private_root(root)
+    with exclusive_worker_lock(root):
+        return _run_once_unlocked(
+            root, dry_run=dry_run, enable_browser=enable_browser,
+            token=token, comments=comments, inventory_fn=inventory_fn, now=now)
 
 
 def main() -> None:
