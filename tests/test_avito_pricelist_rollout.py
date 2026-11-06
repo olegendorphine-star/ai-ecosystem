@@ -1,4 +1,4 @@
-"""Offline safeguards for staged SPb PriceList rollout."""
+"""Offline safeguards for multi-city Avito feed and SPb PriceList."""
 import unittest
 import copy
 import xml.etree.ElementTree as ET
@@ -16,10 +16,22 @@ class RolloutTests(unittest.TestCase):
         cls.ads = cls.current.findall("Ad")
         cls.reference = ET.parse(MOSCOW_REFERENCE).getroot().find("Ad")
 
-    def test_exactly_two_ads(self):
-        self.assertEqual(len(self.ads), 2)
-        self.assertEqual([x.findtext("Id") for x in self.ads],
+    def test_original_two_ads_preserved(self):
+        self.assertGreaterEqual(len(self.ads), 2)
+        self.assertEqual([x.findtext("Id") for x in self.ads[:2]],
             ["ai-assistant-memory-moscow-001", "ai-assistant-memory-spb-001"])
+        self.assertEqual(len({x.findtext('Id') for x in self.ads}), len(self.ads))
+
+    def test_surgut_ad_and_pricelist(self):
+        found = [x for x in self.ads if x.findtext('Id') == 'ai-assistant-memory-surgut-001']
+        self.assertEqual(len(found), 1)
+        s = found[0]
+        self.assertEqual(s.findtext('Address'), 'Сургут')
+        self.assertEqual(s.findtext('Price'), '5000')
+        self.assertIsNone(s.find('AvitoId'))
+        self.assertEqual([x.findtext('ServicePrice') for x in s.findall('./PriceList/Service')],
+                         ['5000', '30000', '150000'])
+        self.assertEqual(len(s.findall('./Images/Image')), 6)
 
     def test_moscow_exactly_same_as_published_reference(self):
         actual = copy.deepcopy(self.ads[0])
