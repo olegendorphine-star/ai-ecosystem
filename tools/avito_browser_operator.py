@@ -28,7 +28,8 @@ BLOCKED_URL_PARTS = (
 BLOCKED_WORDS = re.compile(
     r"(?:оплат|купить|продвиг|продвиж|платеж|баланс|кошел|"
     r"сообщен|переписк|чат\b|парол|двухфактор|captcha|"
-    r"payment|buy\b|wallet|password|message|security|delete|remove|"\n    r"удал|архив|отключ|снять с публикац|опубликов|отправ|send\b)", re.I
+    r"payment|buy\b|wallet|password|message|security|delete|remove|"
+    r"удал|архив|отключ|снять с публикац|опубликов|отправ|send\b)", re.I
 )
 ALLOWED_ACTIONS = {"click", "fill", "upload"}
 ALLOWED_LOCATORS = {"role", "label", "placeholder"}
