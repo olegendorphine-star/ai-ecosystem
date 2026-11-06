@@ -98,6 +98,17 @@ class SafeOperatorTests(unittest.TestCase):
         with self.assertRaises(op.OperatorSafetyError):
             op.validate_plan(p)
 
+    def test_reject_destructive_locator(self):
+        for phrase in ("Удалить профиль", "Архивировать", "Отправить", "Опубликовать"):
+            p = good_plan()
+            p["steps"][1]["name"] = phrase
+            with self.assertRaises(op.OperatorSafetyError):
+                op.validate_plan(p)
+
+    def test_reject_destructive_urls(self):
+        for path in ("profile/delete", "profile/billing", "profile/orders"):
+            self.assertFalse(op.safe_avito_url("https://www.avito.ru/" + path))
+
     def test_reject_nonstring_value(self):
         p = good_plan()
         p["steps"][0]["value"] = {"unsafe": True}
