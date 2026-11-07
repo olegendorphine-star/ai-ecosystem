@@ -10,6 +10,7 @@ import shutil
 import socket
 import ssl
 import time
+import threading
 import urllib.request
 from pathlib import Path
 
@@ -17,12 +18,18 @@ ACTIONS = {"health", "browser_health", "connect_status"}
 
 
 def http_status(url: str) -> int | None:
-    try:
-        request = urllib.request.Request(url, method="GET", headers={"User-Agent": "AvitoBridgeHealth/1.0"})
-        with urllib.request.urlopen(request, timeout=8) as response:
-            return int(response.status)
-    except Exception:
-        return None
+    result: dict[str, int | None] = {"status": None}
+    def probe() -> None:
+        try:
+            request = urllib.request.Request(url, method="GET", headers={"User-Agent": "AvitoBridgeHealth/1.0"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                result["status"] = int(response.status)
+        except Exception:
+            result["status"] = None
+    thread = threading.Thread(target=probe, daemon=True)
+    thread.start()
+    thread.join(timeout=6)
+    return result["status"] if not thread.is_alive() else None
 
 
 def health() -> dict:
