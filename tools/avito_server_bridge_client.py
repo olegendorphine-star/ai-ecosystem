@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, json, os, re, subprocess, sys
+import argparse, json, os, re, shlex, subprocess, sys
 ALLOWED_ACTIONS=frozenset({"health","browser_health","connect_status"})
 DEFAULT_REMOTE_WORKER="avito-agent/avito_server_worker.py"
 HOST_RE=re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
@@ -17,7 +17,8 @@ def build_command(action):
  if not HOST_RE.fullmatch(host) or not USER_RE.fullmatch(user): raise SystemExit("invalid server target")
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
  if not PATH_RE.fullmatch(remote_worker): raise SystemExit("invalid AVITO_SERVER_WORKER")
- return ["ssh","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}","python3",remote_worker,"--action",action,"--json"]
+ remote_cmd="python3 \"$HOME/"+remote_worker+"\" --action "+shlex.quote(action)+" --json"
+ return ["ssh","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}","sh","-lc",remote_cmd]
 def error_kind(stderr):
  s=(stderr or "").lower()
  if "permission denied" in s or "error in libcrypto" in s: return "ssh_auth_failed"
