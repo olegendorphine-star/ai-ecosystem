@@ -20,7 +20,7 @@ def build_command(action, remote_cmd=None, debug=False):
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
  if remote_cmd is None:
   remote_cmd="python3 - --action "+shlex.quote(action)+" --json"
- command=["ssh","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
+ command=["ssh","-F","/dev/null","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
  if debug: command.insert(1,"-vvv")
  return command
 def error_kind(stderr, returncode=None):
