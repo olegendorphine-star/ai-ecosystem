@@ -51,8 +51,10 @@ def browser_health() -> dict:
     found = {name: shutil.which(name) is not None for name in binaries}
     local_venv = Path.home() / ".avito-agent" / "venv"
     local_playwright = list((local_venv / "lib").glob("python*/site-packages/playwright"))
+    browser_cache = Path.home() / ".cache" / "ms-playwright"
     local_browsers = sorted(
-        (Path.home() / ".cache" / "ms-playwright").glob("chromium-*/chrome-linux/chrome")
+        list(browser_cache.glob("chromium-*/chrome-linux/chrome"))
+        + list(browser_cache.glob("chromium_headless_shell-*/chrome-linux/headless_shell"))
     )
     playwright_installed = importlib.util.find_spec("playwright") is not None or bool(local_playwright)
     browser_path = str(local_browsers[0]) if local_browsers else ""
