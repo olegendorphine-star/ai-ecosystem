@@ -128,18 +128,18 @@ jobs:
           current_id=upload.get('upload_id')
           print('LAST_UPLOAD_ID',current_id,'STATUS',upload.get('status'),flush=True)
           if upload.get('status') in ('processing','running','pending'):
-              print('STOP_PRIOR_UPLOAD_STILL_PROCESSING',flush=True);sys.exit(0)
+              print('STOP_PRIOR_UPLOAD_STILL_PROCESSING',flush=True);sys.exit(2)
           try:
               items=get('/autoload/v4/uploads/current/items').get('items') or []
           except urllib.error.HTTPError as e:
-              print('STOP_CURRENT_ITEMS_HTTP',e.code,flush=True);sys.exit(0)
+              print('STOP_CURRENT_ITEMS_HTTP',e.code,flush=True);sys.exit(2)
           if any(i.get('id')=='ai-assistant-memory-chita-001' or
                  i.get('ad_id')=='ai-assistant-memory-chita-001' for i in items):
               print('CHITA_ALREADY_IN_AUTOLOAD_NO_SECOND_POST',flush=True);sys.exit(0)
           # Known last manual upload 629511118 was accepted 16:23:55Z.
           # If another upload appeared subsequently, avoid guessing its cooldown.
           if current_id!=629511118:
-              print('STOP_NEWER_UPLOAD_UNVERIFIED_COOLDOWN',flush=True);sys.exit(0)
+              print('STOP_NEWER_UPLOAD_UNVERIFIED_COOLDOWN',flush=True);sys.exit(2)
           print('ONE_SAFE_PACKAGE_UPLOAD_START',now().isoformat(),flush=True)
           try:
               with urllib.request.urlopen(urllib.request.Request(
