@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-AGENT = "/tmp/avito_operator_agent.py"
+AGENT = str(Path(__file__).resolve().parents[1] / "tools" / "avito_operator_agent.py")
 NOW = "2026-11-07T12:00:00Z"
 
 
