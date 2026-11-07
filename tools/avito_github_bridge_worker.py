@@ -13,6 +13,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
@@ -196,6 +197,8 @@ def sanitize_live_api_report(raw: dict[str, Any]) -> dict[str, Any]:
         items = raw["active_items"]
         safe["moscow_active"] = items.get("moscow_active") is True
         safe["spb_active"] = items.get("spb_active") is True
+        safe["surgut_active"] = items.get("surgut_active") is True
+        safe["chita_candidate_active"] = items.get("chita_candidate_active") is True
     if isinstance(raw.get("current_upload"), dict):
         upload = raw["current_upload"]
         safe["upload_status"] = upload.get("upload_status") if upload.get("upload_status") in {
@@ -206,6 +209,26 @@ def sanitize_live_api_report(raw: dict[str, Any]) -> dict[str, Any]:
             "success_published", "processing", "error_params", "error_payment",
             "error_content", "removed_complete", "pending"
         } else "unknown"
+        safe["chita_in_current_items"] = upload.get("chita_in_current_items") is True
+        safe["chita_section"] = upload.get("chita_section") if upload.get("chita_section") in {
+            "success_published", "processing", "error_params", "error_payment",
+            "error_content", "removed_complete", "pending"
+        } else "unknown"
+    # Never equate upload success, a city-only candidate, or HTTP 200
+    # with an independently correlated, active Chita advertisement.
+    safe["chita_confirmed_active"] = False
+    if raw.get("chita_confirmed_active") is True and isinstance(raw.get("active_items"), dict):
+        item = raw["active_items"]
+        item_id, item_url = item.get("chita_public_ad_id"), item.get("chita_public_url")
+        if type(item_id) is int and 0 < item_id < 1000000000000000 and isinstance(item_url, str):
+            parsed = urllib.parse.urlsplit(item_url)
+            if (parsed.scheme == "https" and parsed.netloc == "www.avito.ru"
+                    and parsed.path.startswith("/chita/")
+                    and parsed.path.endswith("_" + str(item_id))
+                    and ".." not in parsed.path and len(parsed.path) <= 250):
+                safe["chita_confirmed_active"] = True
+                safe["chita_public_ad_id"] = item_id
+                safe["chita_public_url"] = "https://www.avito.ru" + parsed.path
     if raw.get("current_items_check") in {
         "read", "rate_limited", "unavailable", "skipped_while_processing",
         "skipped_unknown_upload_status"
