@@ -10,7 +10,7 @@ def required(name):
  v=os.environ.get(name,"")
  if not v: raise SystemExit(f"missing environment variable: {name}")
  return v
-def build_command(action):
+def build_command(action, remote_cmd=None):
  host,user=required("AVITO_SERVER_HOST"),required("AVITO_SERVER_USER")
  key_file=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_SSH_KEY_FILE")))
  known_hosts=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_KNOWN_HOSTS_FILE")))
@@ -18,7 +18,8 @@ def build_command(action):
  if not os.path.isfile(known_hosts): raise FileNotFoundError("local_known_hosts_missing")
  if not HOST_RE.fullmatch(host) or not USER_RE.fullmatch(user): raise SystemExit("invalid server target")
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
- remote_cmd="python3 - --action "+shlex.quote(action)+" --json"
+ if remote_cmd is None:
+  remote_cmd="python3 - --action "+shlex.quote(action)+" --json"
  return ["ssh","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
 def error_kind(stderr, returncode=None):
  if isinstance(stderr, bytes): stderr=stderr.decode("utf-8", "replace")
@@ -42,6 +43,13 @@ def main():
  try: cmd=build_command(a.action)
  except FileNotFoundError as exc: failure(a.action,str(exc)); return 1
  if a.dry_run: print(json.dumps({"ok":True,"action":a.action,"mode":"dry_run"})); return 0
+ preflight_cmd=build_command(a.action, "printf SSH_OK")
+ try:
+  preflight=subprocess.run(preflight_cmd,capture_output=True,text=False,timeout=20)
+ except subprocess.TimeoutExpired:
+  failure(a.action,"ssh_preflight_timeout"); return 1
+ if preflight.returncode or preflight.stdout.strip()!=b"SSH_OK":
+  failure(a.action,"ssh_preflight_"+error_kind(preflight.stderr,preflight.returncode),preflight.returncode); return 1
  try:
   worker_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools", "avito_server_worker.py")
   with open(worker_path, "rb") as worker_file:
