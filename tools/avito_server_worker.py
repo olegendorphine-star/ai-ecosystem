@@ -53,8 +53,10 @@ def browser_health() -> dict:
     local_playwright = list((local_venv / "lib").glob("python*/site-packages/playwright"))
     browser_cache = Path.home() / ".cache" / "ms-playwright"
     local_browsers = sorted(
-        list(browser_cache.glob("chromium-*/chrome-linux/chrome"))
-        + list(browser_cache.glob("chromium_headless_shell-*/chrome-linux/headless_shell"))
+        path for path in browser_cache.rglob("*")
+        if path.is_file()
+        and path.name in {"chrome", "headless_shell"}
+        and os.access(path, os.X_OK)
     )
     playwright_installed = importlib.util.find_spec("playwright") is not None or bool(local_playwright)
     browser_path = str(local_browsers[0]) if local_browsers else ""
