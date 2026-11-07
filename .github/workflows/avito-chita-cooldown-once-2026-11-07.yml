@@ -1,0 +1,202 @@
+name: Avito Chita — single post cooldown retry 2026-11-07
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/avito-chita-cooldown-once-2026-11-07.yml'
+  schedule:
+    - cron: '40 7 7 11 *'
+permissions:
+  contents: read
+concurrency:
+  group: avito-chita-cooldown-single-post-2026-11-07
+  cancel-in-progress: false
+jobs:
+  offline:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate Chita and original listings without touching Avito
+        run: |
+          python3 -m unittest discover -s tests -p 'test_avito_chita_rollout.py' -v
+          python3 -m unittest discover -s tests -p 'test_avito_chita_cooldown_once.py' -v
+          python3 -m unittest discover -s tests -p 'test_avito_pricelist_rollout.py' -v
+  publish:
+    if: ${{ github.event_name == 'schedule' && github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify old listings, public feed, cooldown, and guarded upload
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os,sys,datetime,json,time,hashlib,urllib.request,urllib.parse,urllib.error,xml.etree.ElementTree as ET
+          UTC=datetime.timezone.utc
+          now=lambda: datetime.datetime.now(UTC)
+          # User authorized one Package-only upload; the 06:02 UTC attempt
+          # STOPPED BEFORE POST because the preflight GET got HTTP 429.
+          # This is a single scheduled attempt AFTER >= 1h 38m cooldown.
+          if (now().date().isoformat()!='2026-11-07'
+              or os.environ.get('GITHUB_RUN_ATTEMPT')!='1'
+              or os.environ.get('GITHUB_EVENT_NAME')!='schedule'
+              or now()<datetime.datetime(2026,11,7,7,40,tzinfo=UTC)):
+              print('STOP_EXPIRED_OR_NOT_SCHEDULED_COOLDOWN');sys.exit(2)
+          import subprocess
+          frozen_blob=subprocess.check_output(['git','hash-object','docs/avito-feed.xml'],text=True).strip()
+          if frozen_blob!='0118661e27aa4aab5b8db5a306d84e05c526924b':
+              print('STOP_FROZEN_FEED_CHANGED');sys.exit(2)
+          cooldown=datetime.datetime(2026,11,7,7,40,0,tzinfo=UTC)
+          if now()<cooldown:
+              print('STOP_HOURLY_COOLDOWN_NOT_ELAPSED',now().isoformat());sys.exit(2)
+          root=ET.parse('docs/avito-feed.xml').getroot()
+          ads=root.findall('Ad')
+          assert len(ads)==4,'STOP_EXPECTED_FOUR_RECORDS'
+          ids=[x.findtext('Id') for x in ads]
+          assert ids==['ai-assistant-memory-moscow-001','ai-assistant-memory-spb-001',
+                       'ai-assistant-memory-surgut-001','ai-assistant-memory-chita-001'],'STOP_ID_ORDER'
+          assert [x.findtext('Address') for x in ads]==['Москва','Санкт-Петербург','Сургут','Чита'],'STOP_CITIES'
+          assert ads[0].findtext('AvitoId')=='8347570435'
+          assert ads[3].find('AvitoId') is None
+          assert ads[3].findtext('Title')=='Персональный ИИ-ассистент и автоматизация'
+          assert all(x.findtext('Price')=='5000' and x.findtext('ListingFee')=='Package'
+                     and x.findtext('AdStatus')=='Free' for x in ads),'STOP_PAYMENT_MODE'
+          assert not any(x.find('Promo') is not None for x in ads),'STOP_PAID_PROMO'
+          assert [x.findtext('ServicePrice') for x in ads[3].findall('./PriceList/Service')]==['5000','30000','150000'],'STOP_PRICES'
+          assert len(ads[3].findall('./Images/Image'))==6
+          origin='https://olegendorphine-star.github.io/ai-ecosystem'
+          feed_url=origin+'/avito-feed.xml'
+          expected=open('docs/avito-feed.xml','rb').read()
+          ready=False
+          for n in range(16):
+              try:
+                  with urllib.request.urlopen(feed_url,timeout=35) as r:
+                      raw=r.read(200000)
+                      ready=(r.status==200 and r.geturl()==feed_url and raw==expected)
+              except Exception as exc:
+                  print('PUBLIC_FEED_UNAVAILABLE',type(exc).__name__,flush=True)
+              if ready:break
+              time.sleep(15)
+          if not ready:raise SystemExit('STOP_PUBLIC_FEED_MISMATCH')
+          print('PUBLIC_FEED_EXACT_MATCH',flush=True)
+          # All six image URLs must return bytes, never Google Drive HTML/redirects.
+          for index,el in enumerate(ads[3].findall('./Images/Image'),1):
+              url=el.attrib.get('url','')
+              assert url.startswith(origin+'/images/avito/'),'STOP_IMAGE_DOMAIN'
+              req=urllib.request.Request(url,headers={'User-Agent':'AvitoFeedSafetyVerifier/1.0'})
+              with urllib.request.urlopen(req,timeout=45) as r:
+                  data=r.read(5000000)
+                  assert r.status==200 and r.geturl()==url
+                  assert r.headers.get('Content-Type','').startswith('image/')
+                  assert len(data)>10000
+              print('VERIFIED_IMAGE',index,flush=True)
+          print('PREFLIGHT_OK_FOUR_ADS_3_PRICES_6_IMAGES_PACKAGE_FREE',flush=True)
+          api='https://api.avito.ru'
+          cred=urllib.parse.urlencode({
+              'grant_type':'client_credentials','client_id':os.environ['AVITO_CLIENT_ID'],
+              'client_secret':os.environ['AVITO_CLIENT_SECRET']}).encode()
+          with urllib.request.urlopen(urllib.request.Request(
+                api+'/token/',data=cred,method='POST',
+                headers={'Content-Type':'application/x-www-form-urlencoded'}),timeout=30) as r:
+              token=json.load(r)['access_token']
+          h={'Authorization':'Bearer '+token,'Accept':'application/json','Content-Type':'application/json'}
+          def get(path):
+              req=urllib.request.Request(api+path,headers=h)
+              with urllib.request.urlopen(req,timeout=35) as r:return json.load(r)
+          profile=get('/autoload/v2/profile')
+          assert profile.get('autoload_enabled') is True,'STOP_AUTOLOAD_DISABLED'
+          assert len(profile.get('feeds_data') or [])==1
+          assert profile['feeds_data'][0].get('feed_url')==feed_url,'STOP_WRONG_PROFILE_FEED'
+          def active():
+              return get('/core/v1/items?status=active&per_page=99&page=1').get('resources',[])
+          records=active()
+          for item_id in ['8347570435','8477159401','8531755111']:
+              rec=next((i for i in records if str(i.get('id'))==item_id),None)
+              assert rec and rec.get('status')=='active' and rec.get('price')==5000,'STOP_OLD_LISTING_INACTIVE_'+item_id
+          if len(records)>=99:
+              print('STOP_ACTIVE_ITEMS_PAGINATION_UNVERIFIED',flush=True);sys.exit(2)
+          chita=next((i for i in records if isinstance(i,dict)
+              and '/chita/' in str(i.get('url','')).lower()),None)
+          if chita:
+              print('STOP_POSSIBLE_CHITA_ALREADY_ACTIVE_RECHECK',flush=True);sys.exit(2)
+          upload=get('/autoload/v4/uploads/current')
+          current_id=upload.get('upload_id')
+          print('LAST_UPLOAD_ID',current_id,'STATUS',upload.get('status'),flush=True)
+          if upload.get('status') != 'success':
+              print('STOP_PRIOR_UPLOAD_NOT_SUCCESS',upload.get('status'),flush=True);sys.exit(2)
+          try:
+              items=get('/autoload/v4/uploads/current/items').get('items') or []
+          except urllib.error.HTTPError as e:
+              print('STOP_CURRENT_ITEMS_HTTP',e.code,flush=True);sys.exit(2)
+          if any(i.get('id')=='ai-assistant-memory-chita-001' or
+                 i.get('ad_id')=='ai-assistant-memory-chita-001' for i in items):
+              print('STOP_CHITA_ALREADY_IN_AUTOLOAD_NO_SECOND_POST',flush=True);sys.exit(2)
+          # Known last manual upload 629511118 was accepted 16:23:55Z.
+          # If another upload appeared subsequently, avoid guessing its cooldown.
+          if current_id!=629511118:
+              print('STOP_NEWER_UPLOAD_UNVERIFIED_COOLDOWN',flush=True);sys.exit(2)
+          # Re-read status immediately before the only allowed POST, preventing
+          # a duplicate if a background load appeared during preflight.
+          latest=get('/autoload/v4/uploads/current')
+          if latest.get('upload_id')!=629511118 or latest.get('status')!='success':
+              print('STOP_LAST_MINUTE_UPLOAD_CHANGED',flush=True);sys.exit(2)
+          print('ONE_SAFE_PACKAGE_UPLOAD_START',now().isoformat(),flush=True)
+          try:
+              with urllib.request.urlopen(urllib.request.Request(
+                  api+'/autoload/v1/upload',data=b'{}',headers=h,method='POST'),timeout=40) as r:
+                  print('UPLOAD_HTTP',r.status,flush=True)
+                  assert r.status==200
+          except urllib.error.HTTPError as e:
+              print('UPLOAD_NOT_ACCEPTED_HTTP',e.code,'NO_RETRY',flush=True);sys.exit(2)
+          except Exception as e:
+              print('UPLOAD_OUTCOME_UNCERTAIN_NO_RETRY',type(e).__name__,flush=True);sys.exit(1)
+          # Never infer success from the POST HTTP response.
+          # Confirm the NEW current upload, its Chita row, and the active card.
+          for attempt in range(18):
+              time.sleep(20)
+              try:
+                  report=get('/autoload/v4/uploads/current')
+                  newer_id=report.get('upload_id')
+                  if newer_id==629511118:
+                      print('POLL_AWAIT_NEW_UPLOAD',attempt+1,flush=True)
+                      continue
+                  if type(newer_id) is not int:
+                      print('STOP_NEW_UPLOAD_ID_UNKNOWN',flush=True);sys.exit(2)
+                  if report.get('status') in ('error','failed'):
+                      print('CHITA_UPLOAD_FAILED_NO_RETRY',newer_id,flush=True);sys.exit(2)
+                  items=get('/autoload/v4/uploads/current/items').get('items') or []
+                  found_item=next((i for i in items if isinstance(i,dict) and
+                      (i.get('id')=='ai-assistant-memory-chita-001' or
+                       i.get('ad_id')=='ai-assistant-memory-chita-001')),None)
+                  if found_item:
+                      sec=found_item.get('section') or {}
+                      slug=sec.get('slug') if isinstance(sec,dict) else str(sec)
+                      print('CHITA_SECTION',slug,'UPLOAD_ID',newer_id,flush=True)
+                      if slug.startswith('error'):
+                          print('CHITA_REJECTED_DO_NOT_RETRY_NEEDS_VALIDATOR',flush=True);sys.exit(2)
+                  fresh=active()
+                  for item_id in ['8347570435','8477159401','8531755111']:
+                      assert any(str(i.get('id'))==item_id and
+                        i.get('status')=='active' and i.get('price')==5000
+                        for i in fresh),'OLD_LISTING_LOST'
+                  found=next((i for i in fresh if isinstance(i,dict) and
+                     i.get('status')=='active' and i.get('price')==5000 and
+                     '/chita/' in str(i.get('url','')).lower()),None)
+                  if found and found_item and slug=='success_published':
+                      item_id=found_item.get('avito_id',found_item.get('avitoId'))
+                      if str(item_id)==str(found.get('id')):
+                          print('CHITA_CONFIRMED_ACTIVE',found.get('id'),found.get('url'),flush=True)
+                          sys.exit(0)
+              except urllib.error.HTTPError as e:
+                  print('POLL_HTTP',e.code,'NO_RETRY',flush=True);sys.exit(2)
+          print('CHITA_PUBLICATION_PENDING_UNCONFIRMED_NO_RETRY',flush=True)
+          sys.exit(2)
+          PY
