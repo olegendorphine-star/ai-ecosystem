@@ -10,7 +10,7 @@ def required(name):
  v=os.environ.get(name,"")
  if not v: raise SystemExit(f"missing environment variable: {name}")
  return v
-def build_command(action, remote_cmd=None):
+def build_command(action, remote_cmd=None, debug=False):
  host,user=required("AVITO_SERVER_HOST"),required("AVITO_SERVER_USER")
  key_file=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_SSH_KEY_FILE")))
  known_hosts=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_KNOWN_HOSTS_FILE")))
@@ -20,11 +20,18 @@ def build_command(action, remote_cmd=None):
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
  if remote_cmd is None:
   remote_cmd="python3 - --action "+shlex.quote(action)+" --json"
- return ["ssh","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
+ command=["ssh","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
+ if debug: command.insert(1,"-vvv")
+ return command
 def error_kind(stderr, returncode=None):
  if isinstance(stderr, bytes): stderr=stderr.decode("utf-8", "replace")
  s=(stderr or "").lower()
- if "permission denied" in s or "error in libcrypto" in s: return "ssh_auth_failed"
+ if "identity file" in s and ("type -1" in s or "not accessible" in s or "no such file" in s): return "identity_file_missing"
+ if "host key verification failed" in s or "offending" in s: return "hostkey_mismatch"
+ if "permission denied" in s or "error in libcrypto" in s or "publickey" in s: return "auth_failed"
+ if "connection refused" in s: return "connection_refused"
+ if "connection timed out" in s: return "connection_timeout"
+ if "connection reset" in s: return "connection_reset"
  if "host key verification failed" in s: return "host_key_failed"
  if "could not resolve" in s or "name or service not known" in s: return "dns_failed"
  if "connection closed" in s or "connection reset" in s: return "connection_closed"
@@ -47,7 +54,7 @@ def main():
  try: cmd=build_command(a.action)
  except FileNotFoundError as exc: failure(a.action,str(exc)); return 1
  if a.dry_run: print(json.dumps({"ok":True,"action":a.action,"mode":"dry_run"})); return 0
- preflight_cmd=build_command(a.action, "printf SSH_OK")
+ preflight_cmd=build_command(a.action, "printf SSH_OK", debug=True)
  try:
   preflight=subprocess.run(preflight_cmd,capture_output=True,text=False,timeout=20)
  except subprocess.TimeoutExpired:
