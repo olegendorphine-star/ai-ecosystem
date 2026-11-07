@@ -260,5 +260,30 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(b.single_pass(dry_run=True, state_file=Path(d)/"state.json")["pending"], 0)
 
 
+
+    def test_chita_public_result_requires_confirmed_matching_canonical_url(self):
+        from copy import deepcopy
+        raw = {"oauth_ok": True, "chita_confirmed_active": True,
+               "active_items": {"chita_candidate_active": True, "surgut_active": True,
+                                "chita_public_ad_id": 8531999999,
+                                "chita_public_url": "https://www.avito.ru/chita/test_8531999999?secret=PRIVATE"},
+               "current_upload": {"upload_status": "success",
+                                  "chita_in_current_items": True,
+                                  "chita_section": "success_published"}}
+        ok = b.sanitize_live_api_report(raw)
+        self.assertTrue(ok["surgut_active"])
+        self.assertTrue(ok["chita_confirmed_active"])
+        self.assertEqual(ok["chita_public_ad_id"], 8531999999)
+        self.assertEqual(ok["chita_public_url"], "https://www.avito.ru/chita/test_8531999999")
+        self.assertNotIn("PRIVATE", json.dumps(ok))
+        unconfirmed = deepcopy(raw)
+        unconfirmed["chita_confirmed_active"] = False
+        safe = b.sanitize_live_api_report(unconfirmed)
+        self.assertFalse(safe["chita_confirmed_active"])
+        self.assertNotIn("chita_public_url", safe)
+        invalid = deepcopy(raw)
+        invalid["active_items"]["chita_public_url"] = "https://other.example/chita/test_8531999999"
+        self.assertFalse(b.sanitize_live_api_report(invalid)["chita_confirmed_active"])
+
 if __name__ == "__main__":
     unittest.main()

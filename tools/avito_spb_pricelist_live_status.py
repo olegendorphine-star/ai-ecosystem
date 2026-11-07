@@ -83,9 +83,39 @@ def active_check(payload: Any) -> dict[str, Any]:
                 and str(x.get("id")) == "8347570435"), None)
     spb = next((x for x in res if isinstance(x, dict)
                 and "sankt-peterburg" in str(x.get("url", "")).lower()), None)
+    surgut = next((x for x in res if isinstance(x, dict)
+                   and str(x.get("id")) == "8531755111"), None)
+    # A city/price match alone is not proof this is our newly created Chita ad.
+    # Only one strictly canonical Chita URL is carried forward as a candidate.
+    def canonical_chita_url(item: dict[str, Any]) -> str | None:
+        raw = item.get("url")
+        if not isinstance(raw, str):
+            return None
+        parsed = urllib.parse.urlsplit(raw)
+        if (parsed.scheme != "https" or parsed.netloc not in ("avito.ru", "www.avito.ru")
+                or not parsed.path.startswith("/chita/")
+                or ".." in parsed.path or len(parsed.path) > 250):
+            return None
+        item_id = item.get("id")
+        if type(item_id) is not int or not (0 < item_id < 1000000000000000):
+            return None
+        if not parsed.path.endswith("_" + str(item_id)):
+            return None
+        return "https://www.avito.ru" + parsed.path
+    candidates = [(x, canonical_chita_url(x)) for x in res
+                  if isinstance(x, dict) and x.get("status") == "active"
+                  and x.get("price") == 5000]
+    candidates = [(x, url) for x, url in candidates if url is not None]
+    chita = candidates[0] if len(candidates) == 1 else None
     result = {"moscow_active": bool(mos and mos.get("status") == "active" and mos.get("price") == 5000),
               "spb_active": bool(spb and spb.get("status") == "active" and spb.get("price") == 5000),
+              "surgut_active": bool(surgut and surgut.get("status") == "active"
+                                    and surgut.get("price") == 5000),
+              "chita_candidate_active": chita is not None,
               "active_page_count": len(res)}
+    if chita:
+        result["chita_public_ad_id"] = chita[0]["id"]
+        result["chita_public_url"] = chita[1]
     # Listing IDs and canonical public URLs are public advertising metadata.
     # Do not expose raw URLs, query parameters, contact details or API payloads.
     if isinstance(spb, dict):
@@ -110,16 +140,31 @@ def upload_check(current: Any, items: Any) -> dict[str, Any]:
     allowed_statuses = {"processing", "completed", "error", "failed", "success", "finished"}
     entries = items.get("items") if isinstance(items, dict) else None
     entries = entries if isinstance(entries, list) else []
-    spb = next((x for x in entries if isinstance(x, dict)
-                and x.get("id") == "ai-assistant-memory-spb-001"), None)
+    def by_stable_id(stable_id: str) -> dict[str, Any] | None:
+        return next((x for x in entries if isinstance(x, dict)
+                     and (x.get("id") == stable_id or x.get("ad_id") == stable_id)), None)
+    spb = by_stable_id("ai-assistant-memory-spb-001")
+    chita = by_stable_id("ai-assistant-memory-chita-001")
     section = spb.get("section") if isinstance(spb, dict) else None
     slug = section.get("slug") if isinstance(section, dict) else section
+    chita_section = chita.get("section") if isinstance(chita, dict) else None
+    chita_slug = (chita_section.get("slug") if isinstance(chita_section, dict)
+                  else chita_section)
+    chita_id = chita.get("avito_id", chita.get("avitoId")) if chita else None
+    if isinstance(chita_id, str) and chita_id.isdecimal():
+        chita_id = int(chita_id)
+    if type(chita_id) is not int or not (0 < chita_id < 1000000000000000):
+        chita_id = None
     allowed_sections = {"success_published", "processing", "error_params",
                         "error_payment", "error_content", "removed_complete", "pending"}
     return {"upload_id": upload_id,
             "upload_status": status if status in allowed_statuses else "unknown",
             "spb_in_current_items": spb is not None,
-            "spb_section": slug if isinstance(slug, str) and slug in allowed_sections else "unknown"}
+            "spb_section": slug if isinstance(slug, str) and slug in allowed_sections else "unknown",
+            "chita_in_current_items": chita is not None,
+            "chita_section": (chita_slug if isinstance(chita_slug, str)
+                              and chita_slug in allowed_sections else "unknown"),
+            "chita_avito_id": chita_id}
 
 
 def inspect() -> dict[str, Any]:
@@ -182,6 +227,16 @@ def inspect() -> dict[str, Any]:
             summary["current_items_check"] = "skipped_unknown_upload_status"
             item_data = None
         summary["current_upload"] = upload_check(current, item_data)
+    # A confirmed Chita card requires BOTH current upload correlation and an
+    # active public listing at the same assigned Avito ID, at Price=5000.
+    a = summary.get("active_items", {})
+    u = summary.get("current_upload", {})
+    summary["chita_confirmed_active"] = bool(
+        a.get("chita_candidate_active") is True
+        and u.get("chita_in_current_items") is True
+        and u.get("chita_section") == "success_published"
+        and a.get("chita_public_ad_id") == u.get("chita_avito_id")
+        and type(a.get("chita_public_ad_id")) is int)
     return summary
 
 
