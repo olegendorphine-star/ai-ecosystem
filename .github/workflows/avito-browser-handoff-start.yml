@@ -48,13 +48,28 @@ jobs:
           set -eu
           HANDOFF_PORT="${AVITO_HANDOFF_PORT:-8787}"
           PIDFILE="$HOME/.avito-agent/browser_handoff.pid"
+          LOGFILE="$HOME/.avito-agent/browser_handoff.log"
           if [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-            echo HANDOFF_ALREADY_RUNNING
-            exit 0
+            if ss -ltn 2>/dev/null | grep -q ":$HANDOFF_PORT "; then
+              echo HANDOFF_ALREADY_RUNNING
+              exit 0
+            fi
+            kill "$(cat "$PIDFILE")" 2>/dev/null || true
           fi
-          nohup env AVITO_HANDOFF_PORT="$HANDOFF_PORT" "$HOME/.avito-agent/venv/bin/python" "$HOME/.avito-agent/avito_browser_handoff.py" > "$HOME/.avito-agent/browser_handoff.log" 2>&1 < /dev/null &
+          rm -f "$PIDFILE"
+          : > "$LOGFILE"
+          setsid nohup env AVITO_HANDOFF_PORT="$HANDOFF_PORT" "$HOME/.avito-agent/venv/bin/python" "$HOME/.avito-agent/avito_browser_handoff.py" > "$LOGFILE" 2>&1 < /dev/null &
           echo $! > "$PIDFILE"
-          sleep 2
-          kill -0 "$(cat "$PIDFILE")"
+          ready=0
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            if ss -ltn 2>/dev/null | grep -q ":$HANDOFF_PORT "; then ready=1; break; fi
+            if ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo HANDOFF_START_FAILED >&2
+            tail -50 "$LOGFILE" >&2 || true
+            exit 1
+          fi
           echo HANDOFF_STARTED
           REMOTE
