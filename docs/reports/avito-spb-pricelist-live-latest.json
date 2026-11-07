@@ -1,25 +1,32 @@
 {
   "account_mutations": 0,
   "active_items": {
-    "active_page_count": 2,
+    "active_page_count": 4,
+    "chita_candidate_active": true,
+    "chita_public_ad_id": 8414224003,
+    "chita_public_url": "https://www.avito.ru/chita/predlozheniya_uslug/personalnyy_ii-assistent_i_avtomatizatsiya_8414224003",
     "moscow_active": true,
     "spb_active": true,
     "spb_public_ad_id": 8477159401,
-    "spb_public_url": "https://www.avito.ru/sankt-peterburg/predlozheniya_uslug/personalnaya_ii-ekosistema_dlya_biznesa_i_zhizni_8477159401"
+    "spb_public_url": "https://www.avito.ru/sankt-peterburg/predlozheniya_uslug/personalnaya_ii-ekosistema_dlya_biznesa_i_zhizni_8477159401",
+    "surgut_active": true
   },
   "autoload_posts": 0,
   "charges_rub": 0,
-  "checked_at_utc": "2026-11-06T09:17:10+00:00",
-  "current_items_check": "read",
+  "checked_at_utc": "2026-11-07T09:10:01+00:00",
+  "chita_confirmed_active": false,
+  "current_items_check": "skipped_while_processing",
   "current_upload": {
+    "chita_avito_id": null,
+    "chita_in_current_items": false,
+    "chita_section": "unknown",
     "spb_in_current_items": false,
     "spb_section": "unknown",
-    "upload_id": 629312916,
-    "upload_status": "success"
+    "upload_id": 629915964,
+    "upload_status": "processing"
   },
   "http": {
     "active_items": 200,
-    "current_items": 200,
     "current_upload": 200
   },
   "messages_read": 0,
