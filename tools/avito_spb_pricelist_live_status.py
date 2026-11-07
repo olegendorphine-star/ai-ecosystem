@@ -92,8 +92,8 @@ def active_check(payload: Any) -> dict[str, Any]:
         if not isinstance(raw, str):
             return None
         parsed = urllib.parse.urlsplit(raw)
-        if (parsed.scheme != "https" or parsed.hostname not in ("avito.ru", "www.avito.ru")
-                or parsed.port is not None or not parsed.path.startswith("/chita/")
+        if (parsed.scheme != "https" or parsed.netloc not in ("avito.ru", "www.avito.ru")
+                or not parsed.path.startswith("/chita/")
                 or ".." in parsed.path or len(parsed.path) > 250):
             return None
         item_id = item.get("id")
