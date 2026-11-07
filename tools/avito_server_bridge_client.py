@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, json, os, re, shlex, subprocess, sys
+import argparse, base64, json, os, re, shlex, subprocess, sys
 ALLOWED_ACTIONS=frozenset({"health","browser_health","connect_status"})
 DEFAULT_REMOTE_WORKER="avito-agent/avito_server_worker.py"
 HOST_RE=re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
@@ -13,12 +13,9 @@ def required(name):
 def build_command(action):
  host,user=required("AVITO_SERVER_HOST"),required("AVITO_SERVER_USER")
  key_file,known_hosts=required("AVITO_SERVER_SSH_KEY_FILE"),required("AVITO_SERVER_KNOWN_HOSTS_FILE")
- remote_worker=os.environ.get("AVITO_SERVER_WORKER",DEFAULT_REMOTE_WORKER)
  if not HOST_RE.fullmatch(host) or not USER_RE.fullmatch(user): raise SystemExit("invalid server target")
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
- if not PATH_RE.fullmatch(remote_worker): raise SystemExit("invalid AVITO_SERVER_WORKER")
- home="/root" if user=="root" else "/home/"+user
- remote_cmd="exec python3 "+shlex.quote(home+"/"+remote_worker)+" --action "+shlex.quote(action)+" --json"
+ remote_cmd="base64 -d | python3 - --action "+shlex.quote(action)+" --json"
  return ["ssh","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
 def error_kind(stderr, returncode=None):
  s=(stderr or "").lower()
@@ -34,7 +31,10 @@ def main():
  p=argparse.ArgumentParser(); p.add_argument("--action",required=True,choices=sorted(ALLOWED_ACTIONS)); p.add_argument("--dry-run",action="store_true"); a=p.parse_args(); cmd=build_command(a.action)
  if a.dry_run: print(json.dumps({"ok":True,"action":a.action,"mode":"dry_run"})); return 0
  try:
-  done=subprocess.run(cmd,capture_output=True,text=True,timeout=45)
+  worker_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools", "avito_server_worker.py")
+  with open(worker_path, "rb") as worker_file:
+   worker_b64=base64.b64encode(worker_file.read()).decode("ascii")
+  done=subprocess.run(cmd,input=worker_b64,capture_output=True,text=True,timeout=45)
  except subprocess.TimeoutExpired:
   print(json.dumps({"ok":False,"action":a.action,"result":"ssh_timeout"})); return 1
  if done.returncode:
