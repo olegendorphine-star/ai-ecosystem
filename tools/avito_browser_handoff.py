@@ -56,6 +56,7 @@ class Browser:
     def __init__(self):
         self.lock = threading.RLock()
         self.p = None
+        self.browser = None
         self.context = None
         self.page = None
         self.stopped = False
@@ -65,17 +66,23 @@ class Browser:
         from playwright.sync_api import sync_playwright
         PROFILE.mkdir(parents=True, exist_ok=True)
         self.p = sync_playwright().start()
-        self.context = self.p.chromium.launch_persistent_context(
-            str(PROFILE), headless=True, viewport={"width": 1280, "height": 900},
-            args=["--no-sandbox"],
-        )
+        PROFILE.mkdir(parents=True, exist_ok=True)
+        self.browser = self.p.chromium.launch(headless=True, args=["--no-sandbox"])
+        state_path = PROFILE / "storage_state.json"
+        context_kwargs = {"viewport": {"width": 1280, "height": 900}}
+        if state_path.exists():
+            context_kwargs["storage_state"] = str(state_path)
+        self.context = self.browser.new_context(**context_kwargs)
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
 
     def close(self):
         with self.lock:
             self.stopped = True
             try:
-                if self.context: self.context.close()
+                if self.context:
+                    self.context.storage_state(path=str(PROFILE / "storage_state.json"))
+                    self.context.close()
+                if self.browser: self.browser.close()
             finally:
                 if self.p: self.p.stop()
 
