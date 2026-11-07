@@ -34,7 +34,7 @@ def build_command(action: str) -> list[str]:
         raise SystemExit("invalid AVITO_SERVER_USER")
     if action not in ALLOWED_ACTIONS:
         raise SystemExit("unsupported action")
-    if not remote_worker.startswith("/") or any(ch in remote_worker for ch in " ;|&$`\\n\\r"):
+    if not remote_worker.startswith("/") or any(ch in remote_worker for ch in " ;|&$`\n\r"):
         raise SystemExit("invalid AVITO_SERVER_WORKER")
     return [
         "ssh", "-BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
