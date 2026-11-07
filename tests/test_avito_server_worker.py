@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("worker", "/tmp/avito_server_worker.py")
+WORKER_PATH = Path(__file__).resolve().parents[1] / "tools" / "avito_server_worker.py"
+spec = importlib.util.spec_from_file_location("worker", WORKER_PATH)
 worker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(worker)
 
