@@ -67,7 +67,17 @@ class Browser:
         PROFILE.mkdir(parents=True, exist_ok=True)
         self.p = sync_playwright().start()
         PROFILE.mkdir(parents=True, exist_ok=True)
-        self.browser = self.p.chromium.launch(channel="chromium", headless=True, args=["--no-sandbox"])
+        launch_kwargs = {"headless": True, "args": ["--no-sandbox"]}
+        # Playwright may prefer the incompatible headless-shell binary. Prefer
+        # a full Chrome binary when one is installed in the user cache.
+        cache_root = Path.home() / ".cache" / "ms-playwright"
+        chrome_candidates = sorted(
+            p for p in cache_root.rglob("chrome")
+            if p.is_file() and os.access(p, os.X_OK)
+        ) if cache_root.exists() else []
+        if chrome_candidates:
+            launch_kwargs["executable_path"] = str(chrome_candidates[-1])
+        self.browser = self.p.chromium.launch(**launch_kwargs)
         state_path = PROFILE / "storage_state.json"
         context_kwargs = {"viewport": {"width": 1280, "height": 900}}
         if state_path.exists():
