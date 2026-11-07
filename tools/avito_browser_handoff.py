@@ -35,14 +35,14 @@ img{max-width:100%;border:1px solid #555;margin-top:8px}#status{white-space:pre-
 <p>Локальная сессия. Вводимые данные не записываются в логи.</p>
 <div id="status">Загрузка…</div>
 <div class="row"><input id="url" placeholder="https://www.avito.ru/"><button onclick="go()">Перейти</button></div>
-<div class="row"><input id="sel" placeholder="CSS-селектор"><button onclick="clickSel()">Клик по селектору</button><button onclick="focusSel()">Фокус</button></div>
+<div class="row"><input id="sel" placeholder="CSS-селектор"><button onclick="clickSel()">Клик по селектору</button><button onclick="focusSel()">Фокус</button></div><div class="row"><input id="x" placeholder="X" style="width:80px"><input id="y" placeholder="Y" style="width:80px"><button onclick="clickXY()">Клик по координатам</button></div>
 <div class="row"><input id="txt" placeholder="Текст для ввода"><button onclick="typeText()">Ввести</button></div>
 <div class="row"><input id="key" placeholder="Enter / Tab / Escape"><button onclick="pressKey()">Клавиша</button><button onclick="refresh()">Обновить</button><button onclick="stop()">Остановить</button></div>
 <img id="shot" alt="screenshot">
 <script>
 async function post(path, body){let r=await fetch(path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body||{})});let j=await r.json();if(!r.ok) alert(j.error||"Ошибка");return j}
 async function go(){await post("/api/navigate",{url:document.querySelector("#url").value});refresh()}
-async function clickSel(){await post("/api/click",{selector:document.querySelector("#sel").value});refresh()}
+async function clickSel(){await post("/api/click",{selector:document.querySelector("#sel").value});refresh()}\nasync function clickXY(){await post("/api/click",{x:Number(document.querySelector("#x").value),y:Number(document.querySelector("#y").value)});refresh()}
 async function focusSel(){await post("/api/focus",{selector:document.querySelector("#sel").value});refresh()}
 async function typeText(){await post("/api/type",{selector:document.querySelector("#sel").value,text:document.querySelector("#txt").value});refresh()}
 async function pressKey(){await post("/api/key",{key:document.querySelector("#key").value});refresh()}
