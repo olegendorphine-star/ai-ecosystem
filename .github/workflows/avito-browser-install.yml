@@ -47,6 +47,6 @@ jobs:
           "$UV_BIN" venv --clear "$HOME/.avito-agent/venv"
           "$UV_BIN" pip install --python "$HOME/.avito-agent/venv/bin/python" playwright
           "$HOME/.avito-agent/venv/bin/python" -m playwright install chromium
-          test -x "$HOME/.cache/ms-playwright"/*/chrome-linux/chrome
+          test -n "$(find "$HOME/.cache/ms-playwright" -type f -perm -u+x \( -name chrome -o -name headless_shell \) -print -quit)"
           printf '%s\n' BROWSER_INSTALL_OK
           REMOTE
