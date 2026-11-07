@@ -17,9 +17,10 @@ def build_command(action):
  if not HOST_RE.fullmatch(host) or not USER_RE.fullmatch(user): raise SystemExit("invalid server target")
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
  if not PATH_RE.fullmatch(remote_worker): raise SystemExit("invalid AVITO_SERVER_WORKER")
- remote_cmd="cd ~ && exec python3 "+shlex.quote(remote_worker)+" --action "+shlex.quote(action)+" --json"
+ home="/root" if user=="root" else "/home/"+user
+ remote_cmd="exec python3 "+shlex.quote(home+"/"+remote_worker)+" --action "+shlex.quote(action)+" --json"
  return ["ssh","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
-def error_kind(stderr):
+def error_kind(stderr, returncode=None):
  s=(stderr or "").lower()
  if "permission denied" in s or "error in libcrypto" in s: return "ssh_auth_failed"
  if "host key verification failed" in s: return "host_key_failed"
@@ -27,12 +28,17 @@ def error_kind(stderr):
  if "could not resolve" in s or "name or service not known" in s: return "dns_failed"
  if "connection closed" in s or "connection reset" in s: return "connection_closed"
  if "connection timed out" in s or "unreachable" in s: return "network_failed"
+ if returncode is not None: return f"ssh_failed_rc_{returncode}"
  return "ssh_failed"
 def main():
  p=argparse.ArgumentParser(); p.add_argument("--action",required=True,choices=sorted(ALLOWED_ACTIONS)); p.add_argument("--dry-run",action="store_true"); a=p.parse_args(); cmd=build_command(a.action)
  if a.dry_run: print(json.dumps({"ok":True,"action":a.action,"mode":"dry_run"})); return 0
- done=subprocess.run(cmd,capture_output=True,text=True,timeout=45)
- if done.returncode: print(json.dumps({"ok":False,"action":a.action,"result":error_kind(done.stderr)})); return 1
+ try:
+  done=subprocess.run(cmd,capture_output=True,text=True,timeout=45)
+ except subprocess.TimeoutExpired:
+  print(json.dumps({"ok":False,"action":a.action,"result":"ssh_timeout"})); return 1
+ if done.returncode:
+  print(json.dumps({"ok":False,"action":a.action,"result":error_kind(done.stderr,done.returncode)})); return 1
  try: result=json.loads(done.stdout)
  except json.JSONDecodeError: print(json.dumps({"ok":False,"action":a.action,"result":"invalid_worker_response"})); return 1
  if not isinstance(result,dict) or result.get("action")!=a.action: print(json.dumps({"ok":False,"action":a.action,"result":"unexpected_worker_response"})); return 1
