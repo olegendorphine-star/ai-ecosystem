@@ -12,7 +12,7 @@ def required(name):
  return v
 def build_command(action, remote_cmd=None, debug=False):
  host,user=required("AVITO_SERVER_HOST"),required("AVITO_SERVER_USER")
- port=os.environ.get("AVITO_SERVER_SSH_PORT", "22")
+ port=os.environ.get("AVITO_SERVER_SSH_PORT") or "22"
  if not port.isdigit() or not 1 <= int(port) <= 65535: raise SystemExit("invalid server port")
  key_file=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_SSH_KEY_FILE")))
  known_hosts=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_KNOWN_HOSTS_FILE")))
