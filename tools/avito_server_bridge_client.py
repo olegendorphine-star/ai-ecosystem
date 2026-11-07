@@ -15,9 +15,10 @@ def build_command(action):
  key_file,known_hosts=required("AVITO_SERVER_SSH_KEY_FILE"),required("AVITO_SERVER_KNOWN_HOSTS_FILE")
  if not HOST_RE.fullmatch(host) or not USER_RE.fullmatch(user): raise SystemExit("invalid server target")
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
- remote_cmd="base64 -d | python3 - --action "+shlex.quote(action)+" --json"
+ remote_cmd="python3 - --action "+shlex.quote(action)+" --json"
  return ["ssh","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
 def error_kind(stderr, returncode=None):
+ if isinstance(stderr, bytes): stderr=stderr.decode("utf-8", "replace")
  s=(stderr or "").lower()
  if "permission denied" in s or "error in libcrypto" in s: return "ssh_auth_failed"
  if "host key verification failed" in s: return "host_key_failed"
@@ -39,16 +40,16 @@ def main():
  try:
   worker_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools", "avito_server_worker.py")
   with open(worker_path, "rb") as worker_file:
-   worker_b64=base64.b64encode(worker_file.read()).decode("ascii")
+   worker_bytes=worker_file.read()
  except OSError:
   failure(a.action,"local_worker_missing"); return 1
  try:
-  done=subprocess.run(cmd,input=worker_b64,capture_output=True,text=True,timeout=45)
+  done=subprocess.run(cmd,input=worker_bytes,capture_output=True,text=False,timeout=45)
  except subprocess.TimeoutExpired:
   failure(a.action,"ssh_timeout"); return 1
  if done.returncode:
   failure(a.action,error_kind(done.stderr,done.returncode),done.returncode); return 1
- try: result=json.loads(done.stdout)
+ try: result=json.loads(done.stdout.decode("utf-8"))
  except json.JSONDecodeError: print(json.dumps({"ok":False,"action":a.action,"result":"invalid_worker_response"})); return 1
  if not isinstance(result,dict) or result.get("action")!=a.action: print(json.dumps({"ok":False,"action":a.action,"result":"unexpected_worker_response"})); return 1
  print(json.dumps(result,ensure_ascii=False,sort_keys=True)); return 0
