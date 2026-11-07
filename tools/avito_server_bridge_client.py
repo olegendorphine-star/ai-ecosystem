@@ -12,7 +12,10 @@ def required(name):
  return v
 def build_command(action):
  host,user=required("AVITO_SERVER_HOST"),required("AVITO_SERVER_USER")
- key_file,known_hosts=required("AVITO_SERVER_SSH_KEY_FILE"),required("AVITO_SERVER_KNOWN_HOSTS_FILE")
+ key_file=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_SSH_KEY_FILE")))
+ known_hosts=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_KNOWN_HOSTS_FILE")))
+ if not os.path.isfile(key_file): raise FileNotFoundError("local_key_missing")
+ if not os.path.isfile(known_hosts): raise FileNotFoundError("local_known_hosts_missing")
  if not HOST_RE.fullmatch(host) or not USER_RE.fullmatch(user): raise SystemExit("invalid server target")
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
  remote_cmd="python3 - --action "+shlex.quote(action)+" --json"
@@ -35,7 +38,9 @@ def failure(action, result, returncode=None):
  if returncode is not None: payload["ssh_returncode"]=returncode
  print(json.dumps(payload,ensure_ascii=False,sort_keys=True))
 def main():
- p=argparse.ArgumentParser(); p.add_argument("--action",required=True,choices=sorted(ALLOWED_ACTIONS)); p.add_argument("--dry-run",action="store_true"); a=p.parse_args(); cmd=build_command(a.action)
+ p=argparse.ArgumentParser(); p.add_argument("--action",required=True,choices=sorted(ALLOWED_ACTIONS)); p.add_argument("--dry-run",action="store_true"); a=p.parse_args()
+ try: cmd=build_command(a.action)
+ except FileNotFoundError as exc: failure(a.action,str(exc)); return 1
  if a.dry_run: print(json.dumps({"ok":True,"action":a.action,"mode":"dry_run"})); return 0
  try:
   worker_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools", "avito_server_worker.py")
