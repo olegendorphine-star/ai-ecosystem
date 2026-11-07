@@ -67,7 +67,7 @@ class Browser:
         PROFILE.mkdir(parents=True, exist_ok=True)
         self.p = sync_playwright().start()
         PROFILE.mkdir(parents=True, exist_ok=True)
-        self.browser = self.p.chromium.launch(headless=True, args=["--no-sandbox"])
+        self.browser = self.p.chromium.launch(channel="chromium", headless=True, args=["--no-sandbox"])
         state_path = PROFILE / "storage_state.json"
         context_kwargs = {"viewport": {"width": 1280, "height": 900}}
         if state_path.exists():
