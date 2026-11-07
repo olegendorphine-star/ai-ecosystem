@@ -49,12 +49,13 @@ jobs:
           HANDOFF_PORT="${AVITO_HANDOFF_PORT:-8787}"
           PIDFILE="$HOME/.avito-agent/browser_handoff.pid"
           LOGFILE="$HOME/.avito-agent/browser_handoff.log"
-          if [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-            if ss -ltn 2>/dev/null | grep -q ":$HANDOFF_PORT "; then
-              echo HANDOFF_ALREADY_RUNNING
-              exit 0
+          if [ -s "$PIDFILE" ]; then
+            old_pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+            if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+              kill "$old_pid" 2>/dev/null || true
+              sleep 1
+              kill -9 "$old_pid" 2>/dev/null || true
             fi
-            kill "$(cat "$PIDFILE")" 2>/dev/null || true
           fi
           rm -f "$PIDFILE"
           : > "$LOGFILE"
