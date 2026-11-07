@@ -21,12 +21,18 @@ def error_kind(stderr, returncode=None):
  s=(stderr or "").lower()
  if "permission denied" in s or "error in libcrypto" in s: return "ssh_auth_failed"
  if "host key verification failed" in s: return "host_key_failed"
- if "no such file" in s or "can't open file" in s: return "remote_worker_missing"
  if "could not resolve" in s or "name or service not known" in s: return "dns_failed"
  if "connection closed" in s or "connection reset" in s: return "connection_closed"
  if "connection timed out" in s or "unreachable" in s: return "network_failed"
+ if "base64" in s: return "remote_base64_failed"
+ if "traceback" in s or "syntaxerror" in s or "stdin" in s: return "remote_worker_failed"
+ if "no such file" in s or "can't open file" in s: return "remote_dependency_missing"
  if returncode is not None: return f"ssh_failed_rc_{returncode}"
  return "ssh_failed"
+def failure(action, result, returncode=None):
+ payload={"ok":False,"action":action,"result":result}
+ if returncode is not None: payload["ssh_returncode"]=returncode
+ print(json.dumps(payload,ensure_ascii=False,sort_keys=True))
 def main():
  p=argparse.ArgumentParser(); p.add_argument("--action",required=True,choices=sorted(ALLOWED_ACTIONS)); p.add_argument("--dry-run",action="store_true"); a=p.parse_args(); cmd=build_command(a.action)
  if a.dry_run: print(json.dumps({"ok":True,"action":a.action,"mode":"dry_run"})); return 0
@@ -34,11 +40,14 @@ def main():
   worker_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools", "avito_server_worker.py")
   with open(worker_path, "rb") as worker_file:
    worker_b64=base64.b64encode(worker_file.read()).decode("ascii")
+ except OSError:
+  failure(a.action,"local_worker_missing"); return 1
+ try:
   done=subprocess.run(cmd,input=worker_b64,capture_output=True,text=True,timeout=45)
  except subprocess.TimeoutExpired:
-  print(json.dumps({"ok":False,"action":a.action,"result":"ssh_timeout"})); return 1
+  failure(a.action,"ssh_timeout"); return 1
  if done.returncode:
-  print(json.dumps({"ok":False,"action":a.action,"result":error_kind(done.stderr,done.returncode)})); return 1
+  failure(a.action,error_kind(done.stderr,done.returncode),done.returncode); return 1
  try: result=json.loads(done.stdout)
  except json.JSONDecodeError: print(json.dumps({"ok":False,"action":a.action,"result":"invalid_worker_response"})); return 1
  if not isinstance(result,dict) or result.get("action")!=a.action: print(json.dumps({"ok":False,"action":a.action,"result":"unexpected_worker_response"})); return 1
