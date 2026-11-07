@@ -59,6 +59,7 @@ class Browser:
         self.context = None
         self.page = None
         self.stopped = False
+        self.startup_error = ""
 
     def start(self):
         from playwright.sync_api import sync_playwright
@@ -80,7 +81,7 @@ class Browser:
 
     def status(self):
         with self.lock:
-            return {"ok": not self.stopped, "url": self.page.url if self.page else "", "title": self.page.title() if self.page else "", "profile": str(PROFILE)}
+            return {"ok": not self.stopped and not self.startup_error, "url": self.page.url if self.page else "", "title": self.page.title() if self.page else "", "profile": str(PROFILE), "startup_error": self.startup_error}
 
     def screenshot(self):
         with self.lock:
@@ -170,9 +171,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {"ok":False, "error":type(exc).__name__ + ": " + str(exc)[:300]})
 
 def main():
-    browser.start()
+    try:
+        browser.start()
+    except Exception as exc:
+        browser.startup_error = type(exc).__name__ + ": " + str(exc)[:500]
     server = HTTPServer((HOST, PORT), Handler)
-    print(json.dumps({"ok": True, "bind": f"{HOST}:{PORT}", "profile": str(PROFILE)}), flush=True)
+    print(json.dumps({"ok": not browser.startup_error, "bind": f"{HOST}:{PORT}", "profile": str(PROFILE), "startup_error": browser.startup_error}), flush=True)
     try:
         server.serve_forever()
     finally:
