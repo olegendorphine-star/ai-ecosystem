@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, base64, json, os, re, shlex, subprocess, sys
+import argparse, base64, hashlib, json, os, re, shlex, subprocess, sys
 ALLOWED_ACTIONS=frozenset({"health","browser_health","connect_status"})
 DEFAULT_REMOTE_WORKER="avito-agent/avito_server_worker.py"
 HOST_RE=re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
@@ -34,9 +34,13 @@ def error_kind(stderr, returncode=None):
  if "no such file" in s or "can't open file" in s: return "remote_dependency_missing"
  if returncode is not None: return f"ssh_failed_rc_{returncode}"
  return "ssh_failed"
-def failure(action, result, returncode=None):
+def failure(action, result, returncode=None, stderr=b""):
  payload={"ok":False,"action":action,"result":result}
  if returncode is not None: payload["ssh_returncode"]=returncode
+ if stderr:
+  raw=stderr if isinstance(stderr,bytes) else str(stderr).encode()
+  payload["stderr_len"]=len(raw)
+  payload["stderr_sha256"]=hashlib.sha256(raw).hexdigest()[:16]
  print(json.dumps(payload,ensure_ascii=False,sort_keys=True))
 def main():
  p=argparse.ArgumentParser(); p.add_argument("--action",required=True,choices=sorted(ALLOWED_ACTIONS)); p.add_argument("--dry-run",action="store_true"); a=p.parse_args()
@@ -49,7 +53,7 @@ def main():
  except subprocess.TimeoutExpired:
   failure(a.action,"ssh_preflight_timeout"); return 1
  if preflight.returncode or preflight.stdout.strip()!=b"SSH_OK":
-  failure(a.action,"ssh_preflight_"+error_kind(preflight.stderr,preflight.returncode),preflight.returncode); return 1
+  failure(a.action,"ssh_preflight_"+error_kind(preflight.stderr,preflight.returncode),preflight.returncode,preflight.stderr); return 1
  try:
   worker_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools", "avito_server_worker.py")
   with open(worker_path, "rb") as worker_file:
