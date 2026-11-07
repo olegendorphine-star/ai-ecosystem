@@ -41,8 +41,11 @@ jobs:
             "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'bash -s' <<'REMOTE'
           set -eu
           install -d -m 750 "$HOME/.avito-agent"
-          python3 -m venv "$HOME/.avito-agent/venv"
-          "$HOME/.avito-agent/venv/bin/python" -m pip install --upgrade pip playwright
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          UV_BIN="$HOME/.local/bin/uv"
+          test -x "$UV_BIN"
+          "$UV_BIN" venv "$HOME/.avito-agent/venv"
+          "$UV_BIN" pip install --python "$HOME/.avito-agent/venv/bin/python" playwright
           "$HOME/.avito-agent/venv/bin/python" -m playwright install chromium
           test -x "$HOME/.cache/ms-playwright"/*/chrome-linux/chrome
           printf '%s\n' BROWSER_INSTALL_OK
