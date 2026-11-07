@@ -69,10 +69,13 @@ def main():
   done=subprocess.run(cmd,input=worker_bytes,capture_output=True,text=False,timeout=45)
  except subprocess.TimeoutExpired:
   failure(a.action,"ssh_timeout"); return 1
- if done.returncode:
-  failure(a.action,error_kind(done.stderr,done.returncode),done.returncode); return 1
  try: result=json.loads(done.stdout.decode("utf-8"))
- except json.JSONDecodeError: print(json.dumps({"ok":False,"action":a.action,"result":"invalid_worker_response"})); return 1
- if not isinstance(result,dict) or result.get("action")!=a.action: print(json.dumps({"ok":False,"action":a.action,"result":"unexpected_worker_response"})); return 1
- print(json.dumps(result,ensure_ascii=False,sort_keys=True)); return 0
+ except json.JSONDecodeError:
+  if done.returncode:
+   failure(a.action,error_kind(done.stderr,done.returncode),done.returncode); return 1
+  failure(a.action,"invalid_worker_response"); return 1
+ if not isinstance(result,dict) or result.get("action")!=a.action:
+  failure(a.action,"unexpected_worker_response",done.returncode if done.returncode else None); return 1
+ print(json.dumps(result,ensure_ascii=False,sort_keys=True))
+ return 1 if done.returncode else 0
 if __name__=="__main__": sys.exit(main())
