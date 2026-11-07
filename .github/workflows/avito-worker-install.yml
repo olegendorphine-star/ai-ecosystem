@@ -37,7 +37,7 @@ jobs:
             -o IdentitiesOnly=yes -i "$HOME/.ssh/avito_server_ed25519" \
             tools/avito_server_worker.py \
             "$AVITO_SERVER_USER@$AVITO_SERVER_HOST:/tmp/avito_server_worker.py"
-      - name: Install isolated worker
+      - name: Install worker in user home
         env:
           AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
           AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
@@ -46,4 +46,4 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/avito_server_known_hosts" \
             -o IdentitiesOnly=yes -i "$HOME/.ssh/avito_server_ed25519" \
             "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" \
-            'install -d -m 750 /opt/ai-ecosystem && install -m 750 /tmp/avito_server_worker.py /opt/ai-ecosystem/avito_server_worker.py && rm -f /tmp/avito_server_worker.py'
+            'install -d -m 750 "$HOME/avito-agent" && install -m 750 /tmp/avito_server_worker.py "$HOME/avito-agent/avito_server_worker.py" && rm -f /tmp/avito_server_worker.py'
