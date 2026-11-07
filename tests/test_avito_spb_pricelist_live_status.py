@@ -112,5 +112,53 @@ class AvitoLiveStatusTests(unittest.TestCase):
                          "https://www.avito.ru/sankt-peterburg/predlozheniya_uslug/test_8347570999")
         self.assertNotIn("PRIVATE", json.dumps(report))
 
+
+    def test_chita_requires_correlated_successful_upload_and_active_card(self):
+        xml = (Path(__file__).resolve().parents[1] / "docs" / "avito-feed.xml").read_bytes()
+        chita_id = 8531999999
+        urls = {
+            "chita": "https://www.avito.ru/chita/predlozheniya_uslug/personalnyy_ii-assistent_8531999999",
+            "surgut": "https://www.avito.ru/surgut/predlozheniya_uslug/ii-assistent_8531755111"
+        }
+        def inspect_with_report(imported_id, section="success_published"):
+            def fake(url, auth=None, body=None):
+                if url == m.FEED:
+                    return 200, xml
+                if url == m.API + "/token/":
+                    return 200, {"access_token": "TEST_ONLY"}
+                if url.startswith(m.API + "/core/v1/items"):
+                    return 200, {"resources": [
+                        {"id": 8347570435, "status": "active", "price": 5000},
+                        {"id": 8477159401, "status": "active", "price": 5000,
+                         "url": "https://www.avito.ru/sankt-peterburg/uslugi/test_8477159401"},
+                        {"id": 8531755111, "status": "active", "price": 5000, "url": urls["surgut"]},
+                        {"id": chita_id, "status": "active", "price": 5000, "url": urls["chita"]}]}
+                if url == m.API + "/autoload/v4/uploads/current":
+                    return 200, {"upload_id": 123456, "status": "success"}
+                if url == m.API + "/autoload/v4/uploads/current/items":
+                    return 200, {"items": [{"ad_id": "ai-assistant-memory-chita-001",
+                                           "avito_id": imported_id,
+                                           "section": {"slug": section}}]}
+                raise AssertionError("Unexpected live route " + url)
+            with patch.dict(m.os.environ, {"AVITO_CLIENT_ID": "test", "AVITO_CLIENT_SECRET": "test"}):
+                with patch.object(m, "http", side_effect=fake):
+                    return m.inspect()
+        confirmed = inspect_with_report(chita_id)
+        self.assertTrue(confirmed["chita_confirmed_active"])
+        self.assertTrue(confirmed["active_items"]["surgut_active"])
+        self.assertEqual(confirmed["active_items"]["chita_public_ad_id"], chita_id)
+        self.assertEqual(confirmed["current_upload"]["chita_section"], "success_published")
+        self.assertEqual(confirmed["autoload_posts"], 0)
+        self.assertFalse(inspect_with_report(8531999998)["chita_confirmed_active"])
+        self.assertFalse(inspect_with_report(chita_id, "pending")["chita_confirmed_active"])
+
+    def test_chita_city_candidate_alone_not_publication_confirmation(self):
+        report = m.active_check({"resources": [
+            {"id": 8531999999, "status": "active", "price": 5000,
+             "url": "https://www.avito.ru/chita/test_8531999999"}]})
+        self.assertTrue(report["chita_candidate_active"])
+        self.assertNotIn("chita_confirmed_active", report)
+        self.assertFalse(m.upload_check({"status": "success"}, {"items": []})["chita_in_current_items"])
+
 if __name__ == "__main__":
     unittest.main()
