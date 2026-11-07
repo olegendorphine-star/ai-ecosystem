@@ -30,16 +30,16 @@ jobs:
         run: |
           test -n "$SERVER_KEY_B64"
           test -n "$SERVER_KNOWN_HOSTS"
-          install -d -m 700 "$HOME/.ssh"
-          printf '%s' "$SERVER_KEY_B64" | base64 --decode > "$HOME/.ssh/avito_server_ed25519"
-          printf '%s\n' "$SERVER_KNOWN_HOSTS" > "$HOME/.ssh/avito_server_known_hosts"
-          chmod 600 "$HOME/.ssh/avito_server_ed25519" "$HOME/.ssh/avito_server_known_hosts"
+          install -d -m 700 "$RUNNER_TEMP/avito-ssh"
+          printf '%s' "$SERVER_KEY_B64" | base64 --decode > "$RUNNER_TEMP/avito-ssh/avito_server_ed25519"
+          printf '%s\n' "$SERVER_KNOWN_HOSTS" > "$RUNNER_TEMP/avito-ssh/avito_server_known_hosts"
+          chmod 600 "$RUNNER_TEMP/avito-ssh/avito_server_ed25519" "$RUNNER_TEMP/avito-ssh/avito_server_known_hosts"
       - name: Run fixed server probe
         env:
           AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
           AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
-          AVITO_SERVER_SSH_KEY_FILE: "$HOME/.ssh/avito_server_ed25519"
-          AVITO_SERVER_KNOWN_HOSTS_FILE: "$HOME/.ssh/avito_server_known_hosts"
+          AVITO_SERVER_SSH_KEY_FILE: "${{ runner.temp }}/avito-ssh/avito_server_ed25519"
+          AVITO_SERVER_KNOWN_HOSTS_FILE: "${{ runner.temp }}/avito-ssh/avito_server_known_hosts"
         run: |
           test -n "$AVITO_SERVER_HOST"
           test -n "$AVITO_SERVER_USER"
