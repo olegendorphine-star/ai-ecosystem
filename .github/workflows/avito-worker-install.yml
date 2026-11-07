@@ -32,7 +32,7 @@ jobs:
         run: |
           test -n "$AVITO_SERVER_HOST"
           test -n "$AVITO_SERVER_USER"
-          scp -q -o BatchMode=yes -o StrictHostKeyChecking=yes \
+          scp -O -q -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/avito_server_known_hosts" \
             -o IdentitiesOnly=yes -i "$HOME/.ssh/avito_server_ed25519" \
             tools/avito_server_worker.py \
