@@ -12,6 +12,8 @@ def required(name):
  return v
 def build_command(action, remote_cmd=None, debug=False):
  host,user=required("AVITO_SERVER_HOST"),required("AVITO_SERVER_USER")
+ port=os.environ.get("AVITO_SERVER_SSH_PORT", "22")
+ if not port.isdigit() or not 1 <= int(port) <= 65535: raise SystemExit("invalid server port")
  key_file=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_SSH_KEY_FILE")))
  known_hosts=os.path.expandvars(os.path.expanduser(required("AVITO_SERVER_KNOWN_HOSTS_FILE")))
  if not os.path.isfile(key_file): raise FileNotFoundError("local_key_missing")
@@ -20,7 +22,7 @@ def build_command(action, remote_cmd=None, debug=False):
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
  if remote_cmd is None:
   remote_cmd="python3 - --action "+shlex.quote(action)+" --json"
- command=["ssh","-F","/dev/null","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
+ command=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","ConnectionAttempts=1","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,"-p",port,f"{user}@{host}",remote_cmd]
  if debug: command.insert(1,"-vvv")
  return command
 def error_kind(stderr, returncode=None):
