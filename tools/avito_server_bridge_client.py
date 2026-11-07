@@ -17,7 +17,7 @@ def build_command(action):
  if not HOST_RE.fullmatch(host) or not USER_RE.fullmatch(user): raise SystemExit("invalid server target")
  if action not in ALLOWED_ACTIONS: raise SystemExit("unsupported action")
  if not PATH_RE.fullmatch(remote_worker): raise SystemExit("invalid AVITO_SERVER_WORKER")
- remote_cmd='python3 "$HOME/'+remote_worker+'" --action '+shlex.quote(action)+' --json'
+ remote_cmd="cd ~ && exec python3 "+shlex.quote(remote_worker)+" --action "+shlex.quote(action)+" --json"
  return ["ssh","-T","-BatchMode=yes","-o","StrictHostKeyChecking=yes","-o",f"UserKnownHostsFile={known_hosts}","-o","IdentitiesOnly=yes","-i",key_file,f"{user}@{host}",remote_cmd]
 def error_kind(stderr):
  s=(stderr or "").lower()
