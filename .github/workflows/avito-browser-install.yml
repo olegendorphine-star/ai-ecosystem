@@ -44,7 +44,7 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           UV_BIN="$HOME/.local/bin/uv"
           test -x "$UV_BIN"
-          "$UV_BIN" venv "$HOME/.avito-agent/venv"
+          "$UV_BIN" venv --clear "$HOME/.avito-agent/venv"
           "$UV_BIN" pip install --python "$HOME/.avito-agent/venv/bin/python" playwright
           "$HOME/.avito-agent/venv/bin/python" -m playwright install chromium
           test -x "$HOME/.cache/ms-playwright"/*/chrome-linux/chrome
