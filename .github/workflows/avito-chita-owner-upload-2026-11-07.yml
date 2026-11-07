@@ -24,6 +24,7 @@ jobs:
       - name: Validate Chita and original listings without touching Avito
         run: |
           python3 -m unittest discover -s tests -p 'test_avito_chita_rollout.py' -v
+          python3 -m unittest discover -s tests -p 'test_avito_chita_authorized_once.py' -v
           python3 -m unittest discover -s tests -p 'test_avito_pricelist_rollout.py' -v
   publish:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.run_attempt == 1 && startsWith(github.event.head_commit.message, 'RUN_ONCE_CHITA_PACKAGE_2026_11_07') }}
