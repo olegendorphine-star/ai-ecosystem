@@ -16,7 +16,8 @@ from pathlib import Path
 
 ROOT = Path.home() / ".fl-agent"
 DEST = ROOT / "xvfb-runtime"
-PKGS = ("xvfb", "libxfont2", "libepoxy0", "libxkbfile1", "xserver-common")
+EXTRA_PKGS = ("libgl1", "libfontenc1", "libglx0", "libglvnd0")
+PKGS = ("xvfb", "libxfont2", "libepoxy0", "libxkbfile1", "xserver-common") + EXTRA_PKGS
 SAFE_SO = re.compile(r"^[A-Za-z0-9_.+-]+\.so(?:\.\d+)*$")
 
 
@@ -40,13 +41,18 @@ def install() -> dict:
         ensure_private(ROOT)
         ensure_private(DEST)
         binary = DEST / "usr" / "bin" / "Xvfb"
-        if not binary.is_file():
+        missing_known = any(
+            not (DEST / "usr/lib/x86_64-linux-gnu" / soname).exists()
+            for soname in ("libGL.so.1", "libfontenc.so.1")
+        )
+        if not binary.is_file() or missing_known:
             if shutil.which("apt-get") is None or shutil.which("dpkg-deb") is None:
                 result["packages_unavailable"] = ["packaging_tools"]
                 return result
+            packages = PKGS if not binary.is_file() else EXTRA_PKGS
             with tempfile.TemporaryDirectory(prefix="xvfb-download-", dir=ROOT) as temp:
                 folder = Path(temp)
-                for pkg in PKGS:
+                for pkg in packages:
                     proc = subprocess.run(
                         ["timeout", "50s", "apt-get", "download", pkg],
                         cwd=folder, stdout=subprocess.DEVNULL,
