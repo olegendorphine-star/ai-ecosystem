@@ -32,6 +32,22 @@ def classify(err: Exception) -> str:
     return "other_failure"
 
 
+
+def classify_xvfb_log(raw: bytes) -> list[str]:
+    """Categorize local X-server stderr without revealing paths or contents."""
+    text = raw[-16384:].decode("utf-8", "replace").lower()
+    labels = {
+        "x11_fonts_missing": ("could not open default font", "font 'fixed'", "couldn't open default font"),
+        "xkb_configuration_missing": ("xkb", "xkeyboard", "keymap"),
+        "unix_socket_permission": ("socket", "x11-unix", "permission denied"),
+        "server_already_active": ("server is already active", "display already"),
+        "xorg_module_missing": ("failed to load module", "unable to load module"),
+        "shared_library_error": ("error while loading shared libraries", "symbol lookup error"),
+        "fatal_server_error": ("fatal server error",),
+        "glx_error": ("glx", "glamor", "gl_init"),
+    }
+    return sorted(key for key, values in labels.items() if any(v in text for v in values))
+
 def locate_chrome() -> Path | None:
     root = Path.home() / ".cache" / "ms-playwright"
     if not root.is_dir():
@@ -56,6 +72,8 @@ def probe() -> dict:
         "fl_public_screenshot": "not_checked",
         "browser_alive_after": False,
         "result": "not_ready",
+        "xvfb_log_categories": [],
+        "xvfb_exit_code": None,
         "credentials_used": False,
         "captcha_interacted": False,
         "write_actions": False,
@@ -77,6 +95,7 @@ def probe() -> dict:
     pw = None
     browser = None
     with tempfile.TemporaryDirectory(prefix="fl-graphical-check-") as tmp:
+        stderr_file = Path(tmp) / "xvfb.stderr"
         try:
             from playwright.sync_api import sync_playwright
             # Test a private X display. Do not attach to other users' desktops.
@@ -87,10 +106,11 @@ def probe() -> dict:
             if Path(f"/tmp/.X11-unix/X{candidate}").exists():
                 out["result"] = "display_conflict"
                 return out
-            xvfb = subprocess.Popen(
-                ["Xvfb", display, "-screen", "0", "1280x850x24", "-nolisten", "tcp"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
+            with stderr_file.open("wb") as stream:
+                xvfb = subprocess.Popen(
+                    ["Xvfb", display, "-screen", "0", "1280x850x24", "-nolisten", "tcp"],
+                    stdout=subprocess.DEVNULL, stderr=stream
+                )
             for _ in range(35):
                 if xvfb.poll() is not None:
                     out["result"] = "xvfb_exited"
@@ -146,10 +166,16 @@ def probe() -> dict:
             if pw:
                 try: pw.stop()
                 except Exception: pass
-            if xvfb and xvfb.poll() is None:
-                xvfb.terminate()
-                try: xvfb.wait(timeout=3)
-                except subprocess.TimeoutExpired: xvfb.kill()
+            if xvfb:
+                out["xvfb_exit_code"] = xvfb.poll()
+                if xvfb.poll() is None:
+                    xvfb.terminate()
+                    try: xvfb.wait(timeout=3)
+                    except subprocess.TimeoutExpired: xvfb.kill()
+            try:
+                out["xvfb_log_categories"] = classify_xvfb_log(stderr_file.read_bytes())
+            except OSError:
+                pass
     return out
 
 
