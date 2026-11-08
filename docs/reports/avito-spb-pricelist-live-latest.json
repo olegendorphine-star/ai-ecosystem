@@ -13,7 +13,7 @@
   },
   "autoload_posts": 0,
   "charges_rub": 0,
-  "checked_at_utc": "2026-11-07T09:10:01+00:00",
+  "checked_at_utc": "2026-11-08T09:10:03+00:00",
   "chita_confirmed_active": false,
   "current_items_check": "skipped_while_processing",
   "current_upload": {
@@ -22,7 +22,7 @@
     "chita_section": "unknown",
     "spb_in_current_items": false,
     "spb_section": "unknown",
-    "upload_id": 629915964,
+    "upload_id": 630506538,
     "upload_status": "processing"
   },
   "http": {
