@@ -1,0 +1,71 @@
+name: FL.ru — graphical Chromium public-only diagnostics
+
+on:
+  pull_request:
+    paths:
+      - 'tools/fl_graphical_browser_probe.py'
+      - '.github/workflows/fl-graphical-browser-probe.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fl_graphical_browser_probe.py'
+      - '.github/workflows/fl-graphical-browser-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Syntax and privacy invariant
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_graphical_browser_probe.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0,"tools")
+          from fl_graphical_browser_probe import classify
+          assert classify(TimeoutError("secret profile timeout"))=="timeout"
+          assert classify(RuntimeError("target closed, cookie=private"))=="browser_closed"
+          print("FL_GRAPHICAL_OFFLINE_OK")
+          PY
+
+  private_server:
+    needs: offline
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Check graphical Chromium and Xvfb on existing VPS
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(cat tools/fl_graphical_browser_probe.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("schema")=="fl.graphical.browser.probe.v1" and d.get("credentials_used") is False and d.get("captcha_interacted") is False and d.get("write_actions") is False; print(json.dumps(d,sort_keys=True))'
