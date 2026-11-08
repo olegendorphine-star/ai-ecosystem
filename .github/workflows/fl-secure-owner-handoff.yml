@@ -1,0 +1,189 @@
+name: FL.ru — one-time private owner login handoff
+
+on:
+  pull_request:
+    paths:
+      - 'tools/fl_secure_handoff.py'
+      - 'tools/fl_handoff_recipient_pub.pem'
+      - 'tests/test_fl_secure_handoff.py'
+      - '.github/workflows/fl-secure-owner-handoff.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fl_secure_handoff.py'
+      - 'tools/fl_handoff_recipient_pub.pem'
+      - 'tests/test_fl_secure_handoff.py'
+      - '.github/workflows/fl-secure-owner-handoff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fl-one-time-owner-handoff
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate program and public encryption key
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_secure_handoff.py
+          openssl pkey -pubin -in tools/fl_handoff_recipient_pub.pem -noout
+          python3 -m unittest discover -s tests -p 'test_fl_secure_handoff.py' -v
+
+  server:
+    needs: offline
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH identity
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+
+      - name: Deploy FL-only temporary browser (never touch Avito session)
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          cat tools/fl_secure_handoff.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'install -d -m 700 "$HOME/.fl-agent" && cat > "$HOME/.fl-agent/fl_secure_handoff.py" && chmod 600 "$HOME/.fl-agent/fl_secure_handoff.py"'
+          echo FL_HANDOFF_CODE_INSTALLED
+
+      - name: Start token-protected FL Chromium at loopback only
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          PID="$HOME/.fl-agent/handoff.pid"
+          if [ -s "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
+            echo FL_HANDOFF_ALREADY_ACTIVE
+            exit 1
+          fi
+          test -x "$HOME/.local/bin/cloudflared"
+          test -x "$HOME/.avito-agent/venv/bin/python"
+          rm -f "$HOME/.fl-agent/handoff_token" "$HOME/.fl-agent/cloudflared.log"
+          : > "$HOME/.fl-agent/handoff.log"
+          chmod 600 "$HOME/.fl-agent/handoff.log"
+          setsid nohup env \
+            LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            FL_HANDOFF_PORT=8990 FL_HANDOFF_TTL_SECONDS=900 \
+            "$HOME/.avito-agent/venv/bin/python" \
+            "$HOME/.fl-agent/fl_secure_handoff.py" \
+            > "$HOME/.fl-agent/handoff.log" 2>&1 < /dev/null &
+          echo $! > "$PID"
+          chmod 600 "$PID"
+          ready=0
+          for n in $(seq 1 35); do
+            if curl --noproxy '*' -fsS --max-time 2 \
+              http://127.0.0.1:8990/ready > /dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$(cat "$PID")" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" != 1 ]; then echo FL_HANDOFF_NOT_READY; exit 1; fi
+          test -s "$HOME/.fl-agent/handoff_token"
+          echo FL_HANDOFF_LOCAL_READY
+          REMOTE
+
+      - name: Start 15-minute HTTPS tunnel to authenticated FL panel only
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          setsid nohup timeout 930s "$HOME/.local/bin/cloudflared" \
+            tunnel --no-autoupdate --url http://127.0.0.1:8990 \
+            > "$HOME/.fl-agent/cloudflared.log" 2>&1 < /dev/null &
+          echo $! > "$HOME/.fl-agent/cloudflared.pid"
+          chmod 600 "$HOME/.fl-agent/cloudflared.pid"
+          found=0
+          for n in $(seq 1 30); do
+            if grep -Eq 'https://[a-z0-9-]+\.trycloudflare\.com' \
+              "$HOME/.fl-agent/cloudflared.log"; then found=1; break; fi
+            sleep 1
+          done
+          if [ "$found" != 1 ]; then echo FL_TUNNEL_UNAVAILABLE; exit 1; fi
+          echo FL_AUTHENTICATED_TUNNEL_READY
+          REMOTE
+
+      - name: Encrypt access link before emitting a GitHub log
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          cipher="$(ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -' <<'PY' | \
+              openssl pkeyutl -encrypt -pubin \
+                -inkey tools/fl_handoff_recipient_pub.pem \
+                -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | \
+              base64 -w0
+          import json, re, sys, time
+          from pathlib import Path
+          root = Path.home() / ".fl-agent"
+          token = (root / "handoff_token").read_text().strip()
+          logs = (root / "cloudflared.log").read_text(errors="replace")
+          links = re.findall(r"https://[a-z0-9-]+\.trycloudflare\.com", logs)
+          if not links or not 32 <= len(token) <= 128:
+              raise SystemExit("LINK_NOT_READY")
+          data = json.dumps(
+              {"link": links[-1] + "/start?token=" + token,
+               "expires_at_unix": int(time.time()) + 840},
+              separators=(",", ":")).encode("utf-8")
+          if len(data) > 190:
+              raise SystemExit("ENCRYPTION_PAYLOAD_TOO_LARGE")
+          sys.stdout.buffer.write(data)
+          PY
+          )"
+          test -n "$cipher"
+          printf 'FL_HANDOFF_CIPHERTEXT_BASE64=%s\n' "$cipher"
+          echo FL_HANDOFF_LINK_ENCRYPTED
