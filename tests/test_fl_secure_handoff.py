@@ -185,7 +185,7 @@ class SecurityTests(unittest.TestCase):
             def is_closed(self):
                 return False
             def screenshot(self, **kwargs):
-                return b"\\x89PNG\\r\\n\\x1a\\n" + b"pixel_data"
+                return b"\x89PNG\r\n\x1a\n" + b"pixel_data"
         browser = mod.Browser()
         browser.browser = BrowserConnected()
         browser.page = Page()
