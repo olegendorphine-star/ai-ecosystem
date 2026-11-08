@@ -33,9 +33,11 @@ def category(exc) -> str:
     return "other_error"
 
 
-def probe() -> dict:
+def probe(*, single_process: bool = False) -> dict:
     result = {
         "schema": "fl.render.isolation.v1",
+        "mode": "single_process" if single_process else "normal",
+        "chrome_exit_code": None,
         "chrome_launched": False, "cdp_connected": False,
         "blank_screenshot": "not_checked", "fl_navigation": "not_checked",
         "fl_http_status": None, "fl_origin_seen": False,
@@ -61,13 +63,17 @@ def probe() -> dict:
             with socket.socket() as s:
                 s.bind(("127.0.0.1", 0))
                 port = s.getsockname()[1]
-            proc = subprocess.Popen([
+            args = [
                 str(browsers[-1]), "--headless=new", "--no-sandbox",
                 "--disable-gpu", "--disable-dev-shm-usage", "--no-zygote",
                 "--remote-debugging-address=127.0.0.1",
                 f"--remote-debugging-port={port}",
                 f"--user-data-dir={tmp}/chrome-data", "about:blank"
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ]
+            if single_process:
+                # Controlled compatibility experiment on a fresh, cookie-free profile.
+                args.insert(1, "--single-process")
+            proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             for _ in range(30):
                 if proc.poll() is not None:
@@ -119,6 +125,7 @@ def probe() -> dict:
             except Exception as exc:
                 result["fl_cdp_screenshot"] = category(exc)
             result["chrome_alive_after"] = proc.poll() is None
+            result["chrome_exit_code"] = proc.poll()
             context.close()
         except Exception as exc:
             if result["blank_screenshot"] == "not_checked":
@@ -138,4 +145,10 @@ def probe() -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(probe(),sort_keys=True))
+    print(json.dumps({
+        "schema": "fl.render.isolation.compare.v1",
+        "normal": probe(single_process=False),
+        "single_process": probe(single_process=True),
+        "owner_session_used": False,
+        "write_actions": False,
+    }, sort_keys=True))
