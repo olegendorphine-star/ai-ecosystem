@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse, base64, json, os, re, shlex, subprocess, sys
-ALLOWED_ACTIONS=frozenset({"health","browser_health","connect_status"})
+ALLOWED_ACTIONS=frozenset({"health","browser_health","connect_status","handoff_health"})
 DEFAULT_REMOTE_WORKER="avito-agent/avito_server_worker.py"
 HOST_RE=re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
 USER_RE=re.compile(r"^[A-Za-z_][A-Za-z0-9._-]{0,63}$")

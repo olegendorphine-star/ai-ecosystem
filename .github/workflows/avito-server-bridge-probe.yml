@@ -11,6 +11,7 @@ on:
           - health
           - browser_health
           - connect_status
+          - handoff_health
 
 permissions:
   contents: read

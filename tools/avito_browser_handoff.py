@@ -53,6 +53,22 @@ refresh();setInterval(refresh,5000)
 </script>
 """
 
+def startup_error_code(exc: Exception) -> str:
+    """Return only a known, non-sensitive startup error category."""
+    msg = str(exc).lower()
+    if "libatk-1.0.so.0" in msg:
+        return "missing_libatk"
+    if "cannot open shared object file" in msg:
+        return "missing_shared_library"
+    if "remote debugging endpoint" in msg or "connect_over_cdp" in msg:
+        return "browser_debugging_unavailable"
+    if "chrome exited" in msg:
+        return "browser_process_exited"
+    if "executable doesn't exist" in msg:
+        return "browser_executable_missing"
+    return "browser_start_failed"
+
+
 class Browser:
     def __init__(self):
         self.lock = threading.RLock()
@@ -63,6 +79,8 @@ class Browser:
         self.chrome_proc = None
         self.stopped = False
         self.startup_error = ""
+        self.last_navigation_http_status = None
+        self.last_navigation_ip_blocked = False
 
     def start(self):
         from playwright.sync_api import sync_playwright
@@ -131,7 +149,13 @@ class Browser:
 
     def status(self):
         with self.lock:
-            return {"ok": not self.stopped and not self.startup_error, "url": self.page.url if self.page else "", "title": self.page.title() if self.page else "", "profile": str(PROFILE), "startup_error": self.startup_error}
+            ready = not self.stopped and not self.startup_error and self.page is not None
+            if ready:
+                try:
+                    ready = not self.page.is_closed()
+                except Exception:
+                    ready = False
+            return {"ok": bool(ready), "url": self.page.url if ready else "", "startup_error": self.startup_error or ("browser_not_ready" if not ready else ""), "last_navigation_http_status": self.last_navigation_http_status, "last_navigation_ip_blocked": self.last_navigation_ip_blocked}
 
     def screenshot(self):
         with self.lock:
@@ -141,7 +165,21 @@ class Browser:
         if not isinstance(url, str) or not (url.startswith("https://") or url.startswith("http://")):
             raise ValueError("url must use http or https")
         with self.lock:
-            self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            if self.page is None or self.stopped or self.startup_error:
+                raise RuntimeError("browser_not_ready")
+            self.last_navigation_http_status = None
+            self.last_navigation_ip_blocked = False
+            response = self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            self.last_navigation_http_status = response.status if response else None
+            if urlparse(url).hostname in {"avito.ru", "www.avito.ru"}:
+                try:
+                    snippet = self.page.locator("body").inner_text(timeout=2500)[:6000].lower()
+                    # Only a diagnostic flag. Never return page text or account content.
+                    self.last_navigation_ip_blocked = (
+                        "проблем" in snippet and ("ip" in snippet or "ip-адрес" in snippet)
+                    )
+                except Exception:
+                    pass
 
     def click(self, selector=None, x=None, y=None):
         with self.lock:
@@ -224,7 +262,7 @@ def main():
     try:
         browser.start()
     except Exception as exc:
-        browser.startup_error = type(exc).__name__ + ": " + str(exc)[:500]
+        browser.startup_error = startup_error_code(exc)
     server = HTTPServer((HOST, PORT), Handler)
     print(json.dumps({"ok": not browser.startup_error, "bind": f"{HOST}:{PORT}", "profile": str(PROFILE), "startup_error": browser.startup_error}), flush=True)
     try:

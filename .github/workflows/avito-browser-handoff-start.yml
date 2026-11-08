@@ -1,9 +1,13 @@
-name: Avito browser — start local handoff # auto HTTPS
+name: Avito browser — private SSH diagnostics
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths:
+      - 'tools/avito_browser_handoff.py'
+      - 'tools/avito_server_worker.py'
+      - '.github/workflows/avito-browser-handoff-start.yml'
 
 permissions:
   contents: read
@@ -56,6 +60,36 @@ jobs:
           fi
           REMOTE
 
+      - name: Stop obsolete public demo tunnel before private diagnostics
+        env:
+          AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          AVITO_SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${AVITO_SERVER_PORT:-22}"
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" \
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'bash -s' <<'REMOTE'
+          python3 - <<'PY'
+          import os, signal
+          for pid in os.listdir('/proc'):
+              if not pid.isdigit():
+                  continue
+              try:
+                  with open('/proc/' + pid + '/cmdline', 'rb') as inp:
+                      args = inp.read().split(b'\0')
+                  executable = args[0].rsplit(b'/', 1)[-1] if args else b''
+                  if (executable == b'cloudflared' and b'tunnel' in args
+                          and b'http://127.0.0.1:8787' in args):
+                      os.kill(int(pid), signal.SIGTERM)
+              except (OSError, PermissionError, ProcessLookupError):
+                  continue
+          PY
+          REMOTE
+
       - name: Start local handoff
         env:
           AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
@@ -72,9 +106,18 @@ jobs:
           if [ -s "$PIDFILE" ]; then
             old_pid="$(cat "$PIDFILE" 2>/dev/null || true)"
             if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-              kill "$old_pid" 2>/dev/null || true
-              sleep 1
-              kill -9 "$old_pid" 2>/dev/null || true
+              cmdline="$(tr '\0' ' ' < "/proc/$old_pid/cmdline" 2>/dev/null || true)"
+              case "$cmdline" in
+                *".avito-agent/avito_browser_handoff.py"*)
+                  curl --noproxy '*' -fsS --max-time 5 -X POST \
+                    -H 'Content-Type: application/json' --data '{}' \
+                    http://127.0.0.1:8787/api/stop >/dev/null 2>&1 || true
+                  kill "$old_pid" 2>/dev/null || true
+                  sleep 1
+                  kill -9 "$old_pid" 2>/dev/null || true
+                  ;;
+                *) echo HANDOFF_STALE_PID_IGNORED ;;
+              esac
             fi
           fi
           rm -f "$PIDFILE"
@@ -95,7 +138,7 @@ jobs:
           echo HANDOFF_STARTED
           REMOTE
 
-      - name: Start public HTTPS tunnel
+      - name: Verify Chromium readiness through private SSH
         env:
           AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
           AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
@@ -103,20 +146,26 @@ jobs:
         run: |
           set -euo pipefail
           port="${AVITO_SERVER_PORT:-22}"
-          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'bash -s' <<'REMOTE'
-          set -eu
-          mkdir -p "$HOME/.local/bin" "$HOME/.avito-agent"
-          if [ ! -x "$HOME/.local/bin/cloudflared" ]; then
-            curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o "$HOME/.local/bin/cloudflared"
-            chmod 755 "$HOME/.local/bin/cloudflared"
-          fi
-          for p in $(ps -eo pid=,args= | awk '/cloudflared tunnel --url/ && !/awk/ {print $1}'); do kill -9 "$p" 2>/dev/null || true; done
-          rm -f "$HOME/.avito-agent/cloudflared.log"
-          setsid nohup "$HOME/.local/bin/cloudflared" tunnel --no-autoupdate --url http://127.0.0.1:8787 > "$HOME/.avito-agent/cloudflared.log" 2>&1 < /dev/null &
-          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-            url="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$HOME/.avito-agent/cloudflared.log" | tail -1 || true)"
-            if [ -n "$url" ]; then echo "HANDOFF_URL=$url"; break; fi
-            sleep 1
-          done
-          test -n "${url:-}"
-          REMOTE
+          result="$(cat tools/avito_server_worker.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" \
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 - --action handoff_health --json')"
+          printf '%s\n' "$result"
+          printf '%s\n' "$result" | python3 -c 'import json,sys; status=json.load(sys.stdin); sys.exit(0 if status.get("browser_ready") is True and status.get("ok") is True else 1)'
+      - name: One-time diagnostic — navigate public Avito homepage via private SSH
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, 'AVITO_NAV_SMOKE_2026_11_08')
+        env:
+          AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          AVITO_SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${AVITO_SERVER_PORT:-22}"
+          result="$(cat tools/avito_server_worker.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" \
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 - --action avito_navigation_smoke --json')"
+          printf '%s\n' "$result"
+          printf '%s\n' "$result" | python3 -c 'import json,sys; item=json.load(sys.stdin); sys.exit(0 if item.get("ok") is True else 1)'
