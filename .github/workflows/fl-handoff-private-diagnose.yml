@@ -1,0 +1,65 @@
+name: FL.ru — diagnose owner handoff without credentials
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/fl-handoff-private-diagnose.yml'
+      - 'tools/fl_handoff_private_diagnostics.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-handoff-private-diagnose.yml'
+      - 'tools/fl_handoff_private_diagnostics.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify read-only probe compiles
+        run: |
+          python3 -m py_compile tools/fl_handoff_private_diagnostics.py
+          python3 -c 'from pathlib import Path; s=Path("tools/fl_handoff_private_diagnostics.py").read_text(); assert "write_actions" in s and "fl_handoff" in s'
+
+  private_probe:
+    needs: offline
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-diag-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-diag-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-diag-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-diag-ssh/key" "$RUNNER_TEMP/fl-diag-ssh/known_hosts"
+
+      - name: Inspect existing FL gateway and screenshot locally (no login)
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_handoff_private_diagnostics.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-diag-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-diag-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -')"
+          printf '%s\n' "$report" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("schema")=="fl.handoff.diagnostic.v1" and d.get("write_actions") is False; print(json.dumps(d,sort_keys=True))'
