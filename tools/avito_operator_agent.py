@@ -61,6 +61,10 @@ def evaluate(task: dict, checked_at: dt.datetime) -> dict:
     }
     if paid and approval.get("allow_paid") is not True:
         return {**base, "decision": "blocked_paid", "next_action": "request_owner_approval"}
+    # A server-side 403/429 is not proof that the owner's credentials expired.
+    # Never cycle login or restart the session to work around access controls.
+    if session == "blocked":
+        return {**base, "decision": "access_restricted", "next_action": "stop_and_request_support_review"}
     if session != "ready":
         return {**base, "decision": "auth_required", "next_action": "restore_session_or_handoff"}
     if approval.get("allow_send") is not True:
