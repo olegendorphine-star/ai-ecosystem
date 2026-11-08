@@ -91,11 +91,19 @@ def probe() -> dict:
     if not fontconf.is_file():
         out["result"] = "fontconfig_missing"
         return out
+    xkbdir = Path.home() / ".fl-agent/xvfb-runtime/usr/share/X11/xkb"
+    if not (xkbdir / "rules/evdev").is_file():
+        out["result"] = "xkb_data_missing"
+        return out
     xvfb = None
     pw = None
     browser = None
     with tempfile.TemporaryDirectory(prefix="fl-graphical-check-") as tmp:
         stderr_file = Path(tmp) / "xvfb.stderr"
+        xenv = os.environ.copy()
+        xenv["XKB_CONFIG_ROOT"] = str(xkbdir)
+        xenv["XKB_CONFIG_EXTRA_PATH"] = str(xkbdir)
+        xenv["XKB_OUTPUT_DIR"] = tmp
         try:
             from playwright.sync_api import sync_playwright
             # Test a private X display. Do not attach to other users' desktops.
@@ -106,10 +114,17 @@ def probe() -> dict:
             if Path(f"/tmp/.X11-unix/X{candidate}").exists():
                 out["result"] = "display_conflict"
                 return out
+            cmd = ["Xvfb", display, "-screen", "0", "1280x850x24", "-nolisten", "tcp"]
+            # Override the system XKB data path only when Xvfb supports it.
+            options = subprocess.run(
+                ["Xvfb", "-help"], stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=5, check=False
+            )
+            if b"-xkbdir" in options.stdout + options.stderr:
+                cmd += ["-xkbdir", str(xkbdir)]
             with stderr_file.open("wb") as stream:
                 xvfb = subprocess.Popen(
-                    ["Xvfb", display, "-screen", "0", "1280x850x24", "-nolisten", "tcp"],
-                    stdout=subprocess.DEVNULL, stderr=stream
+                    cmd, env=xenv, stdout=subprocess.DEVNULL, stderr=stream
                 )
             for _ in range(35):
                 if xvfb.poll() is not None:
