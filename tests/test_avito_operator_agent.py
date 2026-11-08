@@ -43,6 +43,11 @@ class OperatorAgentTests(unittest.TestCase):
         result = run(base(session_status="auth_required"))
         self.assertEqual(result["decision"], "auth_required")
 
+    def test_blocked_session_requires_support_review_not_login_retry(self):
+        result = run(base(session_status="blocked"))
+        self.assertEqual(result["decision"], "access_restricted")
+        self.assertEqual(result["next_action"], "stop_and_request_support_review")
+
     def test_expired_approval_is_rejected(self):
         result = run(base(approval={"allow_send": True, "allow_paid": False, "expires_at": "2026-11-07T11:00:00Z"}))
         self.assertEqual(result["decision"], "approval_expired")
