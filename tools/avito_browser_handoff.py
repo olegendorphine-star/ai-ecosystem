@@ -79,6 +79,8 @@ class Browser:
         self.chrome_proc = None
         self.stopped = False
         self.startup_error = ""
+        self.last_navigation_http_status = None
+        self.last_navigation_ip_blocked = False
 
     def start(self):
         from playwright.sync_api import sync_playwright
@@ -153,7 +155,7 @@ class Browser:
                     ready = not self.page.is_closed()
                 except Exception:
                     ready = False
-            return {"ok": bool(ready), "url": self.page.url if ready else "", "startup_error": self.startup_error or ("browser_not_ready" if not ready else "")}
+            return {"ok": bool(ready), "url": self.page.url if ready else "", "startup_error": self.startup_error or ("browser_not_ready" if not ready else ""), "last_navigation_http_status": self.last_navigation_http_status, "last_navigation_ip_blocked": self.last_navigation_ip_blocked}
 
     def screenshot(self):
         with self.lock:
@@ -165,7 +167,19 @@ class Browser:
         with self.lock:
             if self.page is None or self.stopped or self.startup_error:
                 raise RuntimeError("browser_not_ready")
-            self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            self.last_navigation_http_status = None
+            self.last_navigation_ip_blocked = False
+            response = self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            self.last_navigation_http_status = response.status if response else None
+            if urlparse(url).hostname in {"avito.ru", "www.avito.ru"}:
+                try:
+                    snippet = self.page.locator("body").inner_text(timeout=2500)[:6000].lower()
+                    # Only a diagnostic flag. Never return page text or account content.
+                    self.last_navigation_ip_blocked = (
+                        "проблем" in snippet and ("ip" in snippet or "ip-адрес" in snippet)
+                    )
+                except Exception:
+                    pass
 
     def click(self, selector=None, x=None, y=None):
         with self.lock:
