@@ -173,7 +173,8 @@ def avito_navigation_smoke() -> dict:
         "action": "avito_navigation_smoke", "ok": False,
         "navigation_accepted": False, "reached_avito_origin": False,
         "browser_ready": False, "startup_failed": False,
-        "startup_error_category": "none", "write_actions": False,
+        "startup_error_category": "none", "site_http_status": None,
+        "avito_ip_blocked": False, "write_actions": False,
     }
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -223,6 +224,12 @@ def avito_navigation_smoke() -> dict:
         safe_post = _safe_browser_status(post_status)
         url = post_status.get("url") if isinstance(post_status, dict) else None
         result["browser_ready"] = safe_post["browser_ready"]
+        code = post_status.get("last_navigation_http_status") if isinstance(post_status, dict) else None
+        result["site_http_status"] = code if type(code) is int and 100 <= code <= 599 else None
+        result["avito_ip_blocked"] = (
+            post_status.get("last_navigation_ip_blocked") is True
+            if isinstance(post_status, dict) else False
+        )
         result["reached_avito_origin"] = (
             isinstance(url, str)
             and (url == "https://www.avito.ru/" or url.startswith("https://www.avito.ru/"))
@@ -231,6 +238,9 @@ def avito_navigation_smoke() -> dict:
             result["navigation_accepted"]
             and result["browser_ready"]
             and result["reached_avito_origin"]
+            and result["site_http_status"] is not None
+            and 200 <= result["site_http_status"] < 400
+            and not result["avito_ip_blocked"]
         )
         return result
     except (OSError, ValueError, TypeError, UnicodeError, urllib.error.HTTPError):
