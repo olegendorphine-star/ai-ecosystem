@@ -1,0 +1,90 @@
+name: FL.ru — private font runtime and screenshot smoke
+
+on:
+  pull_request:
+    paths:
+      - 'tools/fl_private_font_runtime.py'
+      - '.github/workflows/fl-private-font-runtime.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fl_private_font_runtime.py'
+      - '.github/workflows/fl-private-font-runtime.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate isolated font config generator
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_private_font_runtime.py
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          from xml.etree import ElementTree
+          sys.path.insert(0,"tools")
+          from fl_private_font_runtime import make_config
+          text=make_config(Path("/tmp/private & fonts"),Path("/tmp/cache"))
+          parsed=ElementTree.fromstring(text)
+          assert parsed.find("dir").text=="/tmp/private & fonts"
+          assert parsed.find("cachedir").text=="/tmp/cache"
+          print("FL_FONTS_OFFLINE_OK")
+          PY
+
+  private_font_smoke:
+    needs: offline
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Pinned SSH identity
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+
+      - name: Install open-source fonts only inside FL agent home (no sudo)
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_private_font_runtime.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -')"
+          printf '%s\n' "$report" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("schema")=="fl.private.fonts.v1" and d.get("touches_avito") is False and d.get("write_account_actions") is False; print(json.dumps(d,sort_keys=True)); sys.exit(0 if d.get("ok") else 1)'
+
+      - name: Retest FL public login screenshot with isolated Fontconfig
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_headless_shell_probe.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" FONTCONFIG_FILE="$HOME/.fl-agent/fontconfig/fonts.conf" FONTCONFIG_PATH="$HOME/.fl-agent/fontconfig" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("schema")=="fl.headless.shell.smoke.v1" and d.get("owner_session_used") is False and d.get("write_actions") is False; print(json.dumps(d,sort_keys=True))'
