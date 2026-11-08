@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path.home() / ".fl-agent"
 DEST = ROOT / "xvfb-runtime"
-EXTRA_PKGS = ("libgl1", "libfontenc1", "libglx0", "libglvnd0")
+EXTRA_PKGS = ("libgl1", "libfontenc1", "libglx0", "libglvnd0", "xkb-data", "x11-xkb-utils")
 PKGS = ("xvfb", "libxfont2", "libepoxy0", "libxkbfile1", "xserver-common") + EXTRA_PKGS
 SAFE_SO = re.compile(r"^[A-Za-z0-9_.+-]+\.so(?:\.\d+)*$")
 
@@ -35,15 +35,18 @@ def install() -> dict:
         "schema": "fl.private.xvfb.v1", "ok": False,
         "xvfb_binary_present": False, "xvfb_executable": False,
         "packages_unavailable": [], "missing_shared_libraries": [],
+        "xkb_data_present": False, "xkb_compiler_present": False,
         "session_used": False, "write_account_actions": False,
     }
     try:
         ensure_private(ROOT)
         ensure_private(DEST)
         binary = DEST / "usr" / "bin" / "Xvfb"
-        missing_known = any(
-            not (DEST / "usr/lib/x86_64-linux-gnu" / soname).exists()
-            for soname in ("libGL.so.1", "libfontenc.so.1")
+        missing_known = (
+            any(not (DEST / "usr/lib/x86_64-linux-gnu" / soname).exists()
+                for soname in ("libGL.so.1", "libfontenc.so.1"))
+            or not (DEST / "usr/share/X11/xkb/rules/evdev").is_file()
+            or not (DEST / "usr/bin/xkbcomp").is_file()
         )
         if not binary.is_file() or missing_known:
             if shutil.which("apt-get") is None or shutil.which("dpkg-deb") is None:
@@ -69,6 +72,8 @@ def install() -> dict:
                     )
                     if unpack.returncode != 0:
                         result["packages_unavailable"].append(pkg)
+        result["xkb_data_present"] = (DEST / "usr/share/X11/xkb/rules/evdev").is_file()
+        result["xkb_compiler_present"] = (DEST / "usr/bin/xkbcomp").is_file()
         result["xvfb_binary_present"] = binary.is_file()
         result["xvfb_executable"] = os.access(binary, os.X_OK)
         if not result["xvfb_executable"]:
