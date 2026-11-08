@@ -174,7 +174,7 @@ def avito_navigation_smoke() -> dict:
         "navigation_accepted": False, "reached_avito_origin": False,
         "browser_ready": False, "startup_failed": False,
         "startup_error_category": "none", "site_http_status": None,
-        "avito_ip_blocked": False, "write_actions": False,
+        "avito_ip_blocked": False, "navigation_error_category": "none", "write_actions": False,
     }
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -224,6 +224,13 @@ def avito_navigation_smoke() -> dict:
         safe_post = _safe_browser_status(post_status)
         url = post_status.get("url") if isinstance(post_status, dict) else None
         result["browser_ready"] = safe_post["browser_ready"]
+        error_category = post_status.get("last_navigation_error_category") if isinstance(post_status, dict) else None
+        known_errors = {
+            "none", "navigation_timeout", "dns_resolution_failed",
+            "proxy_connection_failed", "tls_connection_failed",
+            "network_connection_failed", "navigation_failed",
+        }
+        result["navigation_error_category"] = error_category if error_category in known_errors else "unavailable"
         code = post_status.get("last_navigation_http_status") if isinstance(post_status, dict) else None
         result["site_http_status"] = code if type(code) is int and 100 <= code <= 599 else None
         result["avito_ip_blocked"] = (
