@@ -297,35 +297,23 @@ class Browser:
         self.page = None
 
     def open(self, runpath: Path):
+        """Playwright-managed Headless Shell with FL-only Fontconfig."""
         from playwright.sync_api import sync_playwright
-        chrome = chrome_executable()
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-        self.proc = subprocess.Popen(
-            [str(chrome), "--headless=new", "--no-sandbox",
-             "--disable-dev-shm-usage", "--disable-gpu", "--no-zygote",
-             "--no-first-run", "--remote-debugging-address=127.0.0.1",
-             f"--remote-debugging-port={port}", f"--user-data-dir={runpath}",
-             "about:blank"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
-        )
-        endpoint = f"http://127.0.0.1:{port}/json/version"
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        for _ in range(40):
-            if self.proc.poll() is not None:
-                raise RuntimeError("chrome_exited")
-            try:
-                with opener.open(endpoint, timeout=1) as resp:
-                    if resp.status == 200:
-                        break
-            except OSError:
-                time.sleep(0.2)
-        else:
-            raise RuntimeError("browser_unavailable")
+        fontconf = ROOT / "fontconfig" / "fonts.conf"
+        if (not fontconf.is_file() or fontconf.is_symlink()
+                or not any((ROOT / "fonts").glob("*.ttf"))):
+            raise RuntimeError("fl_font_runtime_not_ready")
+        environment = os.environ.copy()
+        environment["FONTCONFIG_FILE"] = str(fontconf)
+        environment["FONTCONFIG_PATH"] = str(fontconf.parent)
         self.p = sync_playwright().start()
-        self.browser = self.p.chromium.connect_over_cdp(
-            f"http://127.0.0.1:{port}", timeout=7000
+        # Unlike the old manually spawned chrome-linux CDP binary, this uses
+        # Playwright's verified working chromium_headless_shell binary.
+        self.browser = self.p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            env=environment,
+            timeout=15000,
         )
         opts = {"viewport": VIEWPORT}
         if STATE.is_file() and not STATE.is_symlink():
@@ -343,7 +331,7 @@ class Browser:
         A direct CDP capture avoids Playwright's document.fonts.ready wait when
         third-party font requests keep FL.ru's page in a loading state.
         """
-        if self.proc is None or self.proc.poll() is not None:
+        if not self.live_status()["chrome_alive"]:
             raise RuntimeError("chrome_process_not_alive")
         if self.page is None or self.page.is_closed():
             raise RuntimeError("browser_page_closed")
@@ -377,8 +365,12 @@ class Browser:
         """Do not equate a non-None Playwright page with a running Chrome."""
         result = {"ready": False, "chrome_alive": False, "screenshot_ready": False}
         try:
+            process_alive = self.proc is not None and self.proc.poll() is None
+            playwright_alive = (
+                self.browser is not None and self.browser.is_connected()
+            )
             result["chrome_alive"] = (
-                self.proc is not None and self.proc.poll() is None
+                process_alive if self.proc is not None else playwright_alive
             )
             if not result["chrome_alive"] or self.page is None or self.page.is_closed():
                 return result

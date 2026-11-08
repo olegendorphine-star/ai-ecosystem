@@ -59,6 +59,21 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
 
+      - name: Ensure private FL font runtime exists (no sudo)
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(cat tools/fl_private_font_runtime.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -')"
+          printf '%s\n' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("schema")=="fl.private.fonts.v1"; print(json.dumps({"font_runtime_ready":d.get("ok") is True, "font_count":d.get("fonts_count",0)},sort_keys=True)); sys.exit(0 if d.get("ok") is True else 1)'
+
       - name: Deploy FL-only temporary browser (never touch Avito session)
         env:
           HOST: ${{ secrets.AVITO_SERVER_HOST }}
