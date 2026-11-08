@@ -124,7 +124,7 @@ jobs:
           printf '%s\n' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("action")=="handoff_health" and d.get("browser_ready") is True and d.get("ok") is True else 1)'
 
       - name: One-time public Avito homepage navigation via loopback browser
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, 'AVITO_PRIVATE_PROBE_2026_11_08')
+        if: github.event_name == 'push'
         env:
           AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
           AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
