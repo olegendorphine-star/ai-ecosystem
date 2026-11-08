@@ -17,10 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Verify encryption capability without server credentials
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify one-time RSA public key without server credentials
         run: |
           set -euo pipefail
           openssl version >/dev/null
+          awk '/-----BEGIN PUBLIC KEY-----/{copy=1} copy {gsub(/^[[:space:]]+/, ""); print} /-----END PUBLIC KEY-----/{exit}' .github/workflows/avito-egress-ip-encrypted.yml > "$RUNNER_TEMP/egress_pub.pem"
+          openssl pkey -pubin -in "$RUNNER_TEMP/egress_pub.pem" -noout
           python3 -c 'import json,ipaddress,urllib.request; print("EGRESS_PROBE_OFFLINE_OK")'
 
   private_egress:
