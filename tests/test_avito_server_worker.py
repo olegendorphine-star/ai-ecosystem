@@ -287,6 +287,67 @@ class WorkerTests(unittest.TestCase):
         self.assertNotIn("private", str(result))
 
 
+    def test_owner_session_probe_filters_private_data(self):
+        import json
+        from unittest.mock import patch
+        seen = []
+        class Response:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, limit):
+                return json.dumps({
+                    "ok": True,
+                    "browser_ready": True,
+                    "profile_route_reached": True,
+                    "account_controls_seen": True,
+                    "auth_challenge_visible": False,
+                    "auth_state": "likely_active",
+                    "site_http_status": 200,
+                    "navigation_error_category": "none",
+                    "url": "https://www.avito.ru/profile",
+                    "name": "PRIVATE OWNER",
+                    "cookies": ["SECRET SESSION"],
+                }).encode()
+        class Opener:
+            def open(self, request, timeout=None):
+                seen.append((request.full_url, request.get_method(), request.data))
+                return Response()
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.avito_owner_session_probe()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["auth_state"], "likely_active")
+        self.assertTrue(result["account_controls_seen"])
+        self.assertNotIn("PRIVATE OWNER", str(result))
+        self.assertNotIn("SECRET SESSION", str(result))
+        self.assertNotIn("url", result)
+        self.assertEqual(seen, [(
+            "http://127.0.0.1:8787/api/owner-session-probe", "POST", b"{}"
+        )])
+        self.assertFalse(result["write_actions"])
+
+    def test_owner_session_probe_rejects_invalid_state(self):
+        import json
+        from unittest.mock import patch
+        class Response:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, limit):
+                return json.dumps({"ok": True, "auth_state": "user_SECRET"}).encode()
+        class Opener:
+            def open(self, request, timeout=None):
+                return Response()
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.avito_owner_session_probe()
+        self.assertEqual(result["auth_state"], "unverified")
+        self.assertNotIn("user_SECRET", str(result))
+
+
 
 if __name__ == "__main__":
     unittest.main()
