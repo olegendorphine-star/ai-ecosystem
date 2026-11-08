@@ -79,6 +79,44 @@ class HandoffSafetyTests(unittest.TestCase):
         self.assertNotIn("Страница", str(result))
 
 
+    def test_avito_navigation_waits_only_for_response_commit(self):
+        class Response:
+            status = 200
+        class Locator:
+            def inner_text(self, timeout=None):
+                return "Авито — объявления"
+        class Page:
+            url = "about:blank"
+            def is_closed(self):
+                return False
+            def goto(self, url, wait_until=None, timeout=None):
+                self.url = url
+                self.wait_until = wait_until
+                self.timeout = timeout
+                return Response()
+            def locator(self, selector):
+                return Locator()
+        b = mod.Browser()
+        b.page = Page()
+        b.navigate("https://www.avito.ru/")
+        self.assertEqual(b.page.wait_until, "commit")
+        self.assertEqual(b.page.timeout, 20000)
+        self.assertEqual(b.status()["last_navigation_http_status"], 200)
+        self.assertEqual(b.status()["last_navigation_error_category"], "none")
+
+    def test_timeout_categorized_without_private_error(self):
+        class Page:
+            url = "https://www.avito.ru/"
+            def goto(self, url, wait_until=None, timeout=None):
+                raise TimeoutError("Timeout 20000ms exceeded /home/private/TOKEN")
+        b = mod.Browser()
+        b.page = Page()
+        with self.assertRaisesRegex(RuntimeError, "^navigation_timeout$"):
+            b.navigate("https://www.avito.ru/")
+        self.assertEqual(b.last_navigation_error_category, "navigation_timeout")
+        self.assertNotIn("TOKEN", str(b.last_navigation_error_category))
+
+
 
 if __name__ == "__main__":
     unittest.main()
