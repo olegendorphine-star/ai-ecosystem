@@ -1,0 +1,74 @@
+name: FL.ru — headless shell rendering test on VPS
+
+on:
+  pull_request:
+    paths:
+      - 'tools/fl_headless_shell_probe.py'
+      - '.github/workflows/fl-headless-shell-probe.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fl_headless_shell_probe.py'
+      - '.github/workflows/fl-headless-shell-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compile and verify non-sensitive diagnostics
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_headless_shell_probe.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, "tools")
+          from fl_headless_shell_probe import category
+          assert category(RuntimeError("Executable doesn't exist")) == "headless_shell_not_installed"
+          assert category(RuntimeError("Target closed: PRIVATE")) == "browser_closed"
+          assert category(TimeoutError("private timeout")) == "timeout"
+          assert category(RuntimeError("token=PRIVATE")) == "other_error"
+          print("FL_HEADLESS_SHELL_OFFLINE_OK")
+          PY
+
+  private_probe:
+    needs: offline
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH identity
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+
+      - name: Test isolated public FL login rendering in Playwright headless shell
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_headless_shell_probe.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("schema")=="fl.headless.shell.smoke.v1" and d.get("owner_session_used") is False and d.get("write_actions") is False; print(json.dumps(d, sort_keys=True))'
