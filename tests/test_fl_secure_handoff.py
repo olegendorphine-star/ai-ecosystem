@@ -177,6 +177,33 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("FL_HANDOFF_RENDER_NOT_READY", source)
 
 
+    def test_playwright_managed_shell_can_be_reported_alive(self):
+        class BrowserConnected:
+            def is_connected(self):
+                return True
+        class Page:
+            def is_closed(self):
+                return False
+            def screenshot(self, **kwargs):
+                return b"\\x89PNG\\r\\n\\x1a\\n" + b"pixel_data"
+        browser = mod.Browser()
+        browser.browser = BrowserConnected()
+        browser.page = Page()
+        self.assertTrue(browser.live_status()["chrome_alive"])
+        self.assertTrue(browser.live_status(test_screenshot=True)["ready"])
+
+    def test_launch_uses_private_fontconfig_not_raw_chrome_cdp(self):
+        source = SRC.read_text()
+        start = source.index("    def open(self, runpath:")
+        end = source.index("    def screenshot_png(self):", start)
+        launch = source[start:end]
+        self.assertIn("chromium.launch(", launch)
+        self.assertIn("FONTCONFIG_FILE", launch)
+        self.assertIn("FONTCONFIG_PATH", launch)
+        self.assertNotIn("connect_over_cdp(", launch)
+        self.assertNotIn("cloudflared", launch)
+
+
 
 if __name__=="__main__":
     unittest.main()
