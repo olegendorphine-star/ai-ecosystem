@@ -79,7 +79,7 @@ async function refresh(){try{let r=await fetch("/api/status",{credentials:"same-
 let j=await r.json();document.querySelector("#status").textContent=j.ready?
 (j.on_fl_domain?"Браузер открыт на FL.ru. После входа нажмите «Сохранить сессию».":"Внимание: открыта НЕ страница FL.ru!"):
 "Браузер недоступен";
-document.querySelector("#shot").src="/shot?t="+Date.now()}catch(e){}}
+document.querySelector("#shot").src=j.ready?"/shot?t="+Date.now():"";}catch(e){}}
 refresh();
 </script></html>"""
 
@@ -184,7 +184,9 @@ class HandoffHandler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         if path == "/ready":
-            self.json_response(200, {"ready": bool(self.server.browser.page)})
+            # A live browser and a verified screenshot are prerequisites
+            # before giving the owner a login link.
+            self.json_response(200, self.server.browser.live_status(test_screenshot=True))
             return
         if path == "/start":
             token = parse_qs(urlsplit(self.path).query).get("token", [""])[0]
@@ -203,14 +205,21 @@ class HandoffHandler(BaseHTTPRequestHandler):
             page = PAGE.replace("__CSRF__", self.server.csrf).encode()
             self.response(200, page, "text/html; charset=utf-8")
         elif path == "/shot":
+            if not self.server.browser.live_status()["ready"]:
+                self.json_response(503, {"error": "browser_not_ready"})
+                return
             try:
-                self.response(200, self.server.browser.page.screenshot(type="png"),
-                              "image/png")
+                shot = self.server.browser.page.screenshot(
+                    type="png", timeout=6500, animations="disabled"
+                )
+                self.response(200, shot, "image/png")
             except Exception:
-                self.json_response(500, {"error": "browser_unavailable"})
+                self.json_response(503, {"error": "screenshot_unavailable"})
         elif path == "/api/status":
-            self.json_response(200, {"ready": self.server.browser.page is not None,
-                                     "on_fl_domain": is_fl_url(self.server.browser.page.url) if self.server.browser.page else False,
+            live = self.server.browser.live_status()
+            self.json_response(200, {"ready": live["ready"],
+                                     "chrome_alive": live["chrome_alive"],
+                                     "on_fl_domain": is_fl_url(self.server.browser.page.url) if live["ready"] else False,
                                      "saved": self.server.saved,
                                      "expires_in_minutes": max(0, int(
                                          (self.server.expiry-time.monotonic())/60))})
@@ -239,6 +248,9 @@ class HandoffHandler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("invalid_payload")
             op = urlsplit(self.path).path
+            if not self.server.browser.live_status()["ready"]:
+                self.json_response(503, {"error": "browser_not_ready"})
+                return
             page = self.server.browser.page
             if op in {"/api/click", "/api/type", "/api/key", "/api/save"} and not is_fl_url(page.url):
                 self.json_response(403, {"error": "not_on_fl_site"})
@@ -325,6 +337,28 @@ class Browser:
         self.context = self.browser.new_context(**opts)
         self.page = self.context.new_page()
         self.page.goto(ALLOWED_PAGES["login"], wait_until="commit", timeout=20000)
+
+    def live_status(self, *, test_screenshot=False):
+        """Do not equate a non-None Playwright page with a running Chrome."""
+        result = {"ready": False, "chrome_alive": False, "screenshot_ready": False}
+        try:
+            result["chrome_alive"] = (
+                self.proc is not None and self.proc.poll() is None
+            )
+            if not result["chrome_alive"] or self.page is None or self.page.is_closed():
+                return result
+            if test_screenshot:
+                # Read only, bounded. Never store or emit screenshot bytes.
+                raw = self.page.screenshot(
+                    type="png", timeout=6500, animations="disabled"
+                )
+                result["screenshot_ready"] = raw.startswith(b"\x89PNG\r\n\x1a\n")
+                result["ready"] = result["screenshot_ready"]
+            else:
+                result["ready"] = True
+            return result
+        except Exception:
+            return result
 
     def close(self):
         if self.context:
