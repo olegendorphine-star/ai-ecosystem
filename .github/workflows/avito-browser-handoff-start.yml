@@ -1,4 +1,4 @@
-name: Avito browser — start local handoff # auto HTTPS
+name: Avito browser — private SSH diagnostics
 
 on:
   workflow_dispatch:
@@ -106,7 +106,7 @@ jobs:
           if [ -s "$PIDFILE" ]; then
             old_pid="$(cat "$PIDFILE" 2>/dev/null || true)"
             if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-              cmdline="$(tr '\\0' ' ' < "/proc/$old_pid/cmdline" 2>/dev/null || true)"
+              cmdline="$(tr '\0' ' ' < "/proc/$old_pid/cmdline" 2>/dev/null || true)"
               case "$cmdline" in
                 *".avito-agent/avito_browser_handoff.py"*)
                   curl --noproxy '*' -fsS --max-time 5 -X POST \
@@ -138,7 +138,7 @@ jobs:
           echo HANDOFF_STARTED
           REMOTE
 
-      - name: Verify Chromium is ready through private SSH before publishing handoff
+      - name: Verify Chromium readiness through private SSH
         env:
           AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
           AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
