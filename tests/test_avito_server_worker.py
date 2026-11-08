@@ -256,6 +256,37 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(result["startup_error_category"], "missing_libatk")
 
 
+    def test_navigation_timeout_category_is_reported_without_raw_error(self):
+        import json
+        from unittest.mock import patch
+        seq = [
+            {"ok": True, "url": "about:blank", "startup_error": ""},
+            {"ok": False},
+            {"ok": True, "url": "https://www.avito.ru/", "startup_error": "",
+             "last_navigation_http_status": None, "last_navigation_ip_blocked": False,
+             "last_navigation_error_category": "navigation_timeout"},
+        ]
+        class Response:
+            status = 200
+            def __init__(self, payload):
+                self.payload = payload
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, limit):
+                return json.dumps(self.payload).encode()
+        class Opener:
+            def open(self, request, timeout=None):
+                return Response(seq.pop(0))
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.avito_navigation_smoke()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["navigation_error_category"], "navigation_timeout")
+        self.assertNotIn("url", result)
+        self.assertNotIn("private", str(result))
+
+
 
 if __name__ == "__main__":
     unittest.main()

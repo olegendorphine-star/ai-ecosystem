@@ -69,6 +69,22 @@ def startup_error_code(exc: Exception) -> str:
     return "browser_start_failed"
 
 
+def navigation_error_code(exc: Exception) -> str:
+    """Classify navigation failures without leaking page URLs or user data."""
+    msg = str(exc).lower()
+    if "timeout" in msg:
+        return "navigation_timeout"
+    if "err_name_not_resolved" in msg:
+        return "dns_resolution_failed"
+    if "err_tunnel_connection_failed" in msg or "err_proxy_connection_failed" in msg:
+        return "proxy_connection_failed"
+    if "err_cert_" in msg or "err_ssl_" in msg:
+        return "tls_connection_failed"
+    if "err_connection_" in msg or "err_network_changed" in msg:
+        return "network_connection_failed"
+    return "navigation_failed"
+
+
 class Browser:
     def __init__(self):
         self.lock = threading.RLock()
@@ -81,6 +97,7 @@ class Browser:
         self.startup_error = ""
         self.last_navigation_http_status = None
         self.last_navigation_ip_blocked = False
+        self.last_navigation_error_category = "none"
 
     def start(self):
         from playwright.sync_api import sync_playwright
@@ -155,7 +172,7 @@ class Browser:
                     ready = not self.page.is_closed()
                 except Exception:
                     ready = False
-            return {"ok": bool(ready), "url": self.page.url if ready else "", "startup_error": self.startup_error or ("browser_not_ready" if not ready else ""), "last_navigation_http_status": self.last_navigation_http_status, "last_navigation_ip_blocked": self.last_navigation_ip_blocked}
+            return {"ok": bool(ready), "url": self.page.url if ready else "", "startup_error": self.startup_error or ("browser_not_ready" if not ready else ""), "last_navigation_http_status": self.last_navigation_http_status, "last_navigation_ip_blocked": self.last_navigation_ip_blocked, "last_navigation_error_category": self.last_navigation_error_category}
 
     def screenshot(self):
         with self.lock:
@@ -169,7 +186,13 @@ class Browser:
                 raise RuntimeError("browser_not_ready")
             self.last_navigation_http_status = None
             self.last_navigation_ip_blocked = False
-            response = self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            self.last_navigation_error_category = "none"
+            try:
+                # Only wait for response commit. Avito's scripts can delay DOMContentLoaded.
+                response = self.page.goto(url, wait_until="commit", timeout=20000)
+            except Exception as exc:
+                self.last_navigation_error_category = navigation_error_code(exc)
+                raise RuntimeError(self.last_navigation_error_category) from None
             self.last_navigation_http_status = response.status if response else None
             if urlparse(url).hostname in {"avito.ru", "www.avito.ru"}:
                 try:
