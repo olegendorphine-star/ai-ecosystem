@@ -53,6 +53,22 @@ refresh();setInterval(refresh,5000)
 </script>
 """
 
+def startup_error_code(exc: Exception) -> str:
+    """Return only a known, non-sensitive startup error category."""
+    msg = str(exc).lower()
+    if "libatk-1.0.so.0" in msg:
+        return "missing_libatk"
+    if "cannot open shared object file" in msg:
+        return "missing_shared_library"
+    if "remote debugging endpoint" in msg or "connect_over_cdp" in msg:
+        return "browser_debugging_unavailable"
+    if "chrome exited" in msg:
+        return "browser_process_exited"
+    if "executable doesn't exist" in msg:
+        return "browser_executable_missing"
+    return "browser_start_failed"
+
+
 class Browser:
     def __init__(self):
         self.lock = threading.RLock()
@@ -131,7 +147,13 @@ class Browser:
 
     def status(self):
         with self.lock:
-            return {"ok": not self.stopped and not self.startup_error, "url": self.page.url if self.page else "", "title": self.page.title() if self.page else "", "profile": str(PROFILE), "startup_error": self.startup_error}
+            ready = not self.stopped and not self.startup_error and self.page is not None
+            if ready:
+                try:
+                    ready = not self.page.is_closed()
+                except Exception:
+                    ready = False
+            return {"ok": bool(ready), "url": self.page.url if ready else "", "title": "", "startup_error": self.startup_error or ("browser_not_ready" if not ready else "")}
 
     def screenshot(self):
         with self.lock:
@@ -141,6 +163,8 @@ class Browser:
         if not isinstance(url, str) or not (url.startswith("https://") or url.startswith("http://")):
             raise ValueError("url must use http or https")
         with self.lock:
+            if self.page is None or self.stopped or self.startup_error:
+                raise RuntimeError("browser_not_ready")
             self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
     def click(self, selector=None, x=None, y=None):
@@ -224,7 +248,7 @@ def main():
     try:
         browser.start()
     except Exception as exc:
-        browser.startup_error = type(exc).__name__ + ": " + str(exc)[:500]
+        browser.startup_error = startup_error_code(exc)
     server = HTTPServer((HOST, PORT), Handler)
     print(json.dumps({"ok": not browser.startup_error, "bind": f"{HOST}:{PORT}", "profile": str(PROFILE), "startup_error": browser.startup_error}), flush=True)
     try:
