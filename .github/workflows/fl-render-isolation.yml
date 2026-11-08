@@ -1,0 +1,70 @@
+name: FL.ru — isolated Chromium rendering diagnosis
+
+on:
+  pull_request:
+    paths:
+      - 'tools/fl_render_isolation_probe.py'
+      - '.github/workflows/fl-render-isolation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fl_render_isolation_probe.py'
+      - '.github/workflows/fl-render-isolation.yml'
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compile and classify offline
+        run: |
+          python3 -m py_compile tools/fl_render_isolation_probe.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0,"tools")
+          from fl_render_isolation_probe import category
+          assert category(TimeoutError("PRIVATE token: Timeout")) == "timeout"
+          assert category(RuntimeError("Target closed: private file")) == "target_closed"
+          assert category(ValueError("password")) == "other_error"
+          print("FL_RENDER_CLASSIFIER_OK")
+          PY
+
+  private_probe:
+    needs: offline
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+
+      - name: Render public FL login and blank pages without owner data
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(cat tools/fl_render_isolation_probe.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("schema")=="fl.render.isolation.v1" and d.get("write_actions") is False and d.get("owner_session_used") is False; print(json.dumps(d,sort_keys=True))'
