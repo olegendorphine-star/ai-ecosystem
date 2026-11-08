@@ -28,5 +28,105 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(result["write_actions"])
 
 
+    def test_handoff_status_ready_sanitizes_private_fields(self):
+        result = worker._safe_browser_status({
+            "ok": True, "url": "https://www.avito.ru/private",
+            "title": "PRIVATE ACCOUNT", "profile": "/home/user/private/profile",
+            "startup_error": ""
+        })
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["browser_ready"])
+        self.assertFalse(result["write_actions"])
+        self.assertNotIn("url", result)
+        self.assertNotIn("title", result)
+        self.assertNotIn("profile", result)
+        self.assertNotIn("private", str(result).lower())
+
+    def test_handoff_status_never_exposes_startup_error(self):
+        result = worker._safe_browser_status({
+            "ok": False, "url": "", "startup_error": "SECRET_PATH"
+        })
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["startup_failed"])
+        self.assertNotIn("SECRET_PATH", str(result))
+
+    def test_handoff_status_malformed_fails_closed(self):
+        for data in (None, [], "OK", {}, {"ok": True, "url": 500},
+                     {"ok": True, "url": ""}):
+            self.assertFalse(worker._safe_browser_status(data)["ok"])
+
+    def test_handoff_health_readonly_loopback(self):
+        import json
+        from unittest.mock import patch
+        seen = []
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json; charset=utf-8"}
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, n):
+                seen.append(("read", n))
+                return json.dumps({"ok": True, "url": "about:blank", "startup_error": ""}).encode()
+        class Opener:
+            def open(self, request, timeout=None):
+                seen.append(("request", request.full_url, request.get_method(), timeout))
+                return Response()
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.handoff_health()
+        self.assertTrue(result["ok"])
+        self.assertEqual(seen[0], ("request", "http://127.0.0.1:8787/api/status", "GET", 3))
+        self.assertEqual(seen[1], ("read", 4097))
+        self.assertFalse(result["write_actions"])
+        self.assertNotIn("url", result)
+
+    def test_handoff_health_connection_failure_fails_closed(self):
+        from unittest.mock import patch
+        class Opener:
+            def open(self, request, timeout=None):
+                raise OSError("cannot reach local server")
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.handoff_health()
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["local_http_ok"])
+        self.assertNotIn("cannot reach", str(result))
+
+    def test_handoff_health_rejects_redirect_and_non_json(self):
+        from unittest.mock import patch
+        class Response:
+            status = 302
+            headers = {"Content-Type": "text/html"}
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+        class Opener:
+            def open(self, request, timeout=None):
+                return Response()
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.handoff_health()
+        self.assertFalse(result["ok"])
+
+    def test_handoff_health_rejects_oversized_response(self):
+        from unittest.mock import patch
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, n):
+                return b"X" * n
+        class Opener:
+            def open(self, request, timeout=None):
+                return Response()
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.handoff_health()
+        self.assertFalse(result["ok"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
