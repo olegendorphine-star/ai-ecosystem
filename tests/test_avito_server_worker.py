@@ -142,5 +142,120 @@ class WorkerTests(unittest.TestCase):
 
 
 
+    def test_avito_navigation_smoke_only_fixed_public_url_and_no_data_leak(self):
+        import json
+        from unittest.mock import patch
+        requests = []
+        pre = {"ok": True, "url": "about:blank", "startup_error": ""}
+        post = {"ok": True, "url": "https://www.avito.ru/",
+                "startup_error": "", "last_navigation_http_status": 200,
+                "last_navigation_ip_blocked": False, "title": "PRIVATE"}
+        seq = [pre, {"ok": True}, post]
+        class Response:
+            def __init__(self, payload):
+                self.status = 200
+                self.payload = payload
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, limit):
+                return json.dumps(self.payload).encode()
+        class Opener:
+            def open(self, request, timeout=None):
+                requests.append((request.full_url, request.get_method(), request.data))
+                return Response(seq.pop(0))
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.avito_navigation_smoke()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["site_http_status"], 200)
+        self.assertNotIn("url", result)
+        self.assertNotIn("title", result)
+        self.assertNotIn("PRIVATE", str(result))
+        self.assertEqual(len(requests), 3)
+        self.assertEqual(requests[1][0], "http://127.0.0.1:8787/api/navigate")
+        self.assertEqual(requests[1][1], "POST")
+        self.assertEqual(requests[1][2], b'{"url":"https://www.avito.ru/"}')
+
+    def test_avito_navigation_smoke_detects_ip_blocked_page(self):
+        import json
+        from unittest.mock import patch
+        seq = [
+            {"ok": True, "url": "about:blank", "startup_error": ""},
+            {"ok": True},
+            {"ok": True, "url": "https://www.avito.ru/", "startup_error": "",
+             "last_navigation_http_status": 200, "last_navigation_ip_blocked": True}
+        ]
+        class Response:
+            status = 200
+            def __init__(self, payload):
+                self.payload = payload
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, limit):
+                return json.dumps(self.payload).encode()
+        class Opener:
+            def open(self, request, timeout=None):
+                return Response(seq.pop(0))
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.avito_navigation_smoke()
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["avito_ip_blocked"])
+        self.assertTrue(result["reached_avito_origin"])
+
+    def test_avito_navigation_smoke_rejects_http_403(self):
+        import json
+        from unittest.mock import patch
+        seq = [
+            {"ok": True, "url": "about:blank", "startup_error": ""},
+            {"ok": True},
+            {"ok": True, "url": "https://www.avito.ru/", "startup_error": "",
+             "last_navigation_http_status": 403, "last_navigation_ip_blocked": False}
+        ]
+        class Response:
+            status = 200
+            def __init__(self, payload):
+                self.payload = payload
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, limit):
+                return json.dumps(self.payload).encode()
+        class Opener:
+            def open(self, request, timeout=None):
+                return Response(seq.pop(0))
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.avito_navigation_smoke()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["site_http_status"], 403)
+
+    def test_avito_navigation_smoke_does_not_navigate_if_chromium_not_ready(self):
+        import json
+        from unittest.mock import patch
+        requests = []
+        class Response:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, limit):
+                return json.dumps({"ok": False, "url": "",
+                                   "startup_error": "missing_libatk"}).encode()
+        class Opener:
+            def open(self, request, timeout=None):
+                requests.append(request.get_method())
+                return Response()
+        with patch.object(worker.urllib.request, "build_opener", return_value=Opener()):
+            result = worker.avito_navigation_smoke()
+        self.assertFalse(result["ok"])
+        self.assertEqual(requests, ["GET"])
+        self.assertEqual(result["startup_error_category"], "missing_libatk")
+
+
+
 if __name__ == "__main__":
     unittest.main()
