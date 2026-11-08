@@ -127,6 +127,56 @@ class SecurityTests(unittest.TestCase):
         self.assertNotIn("SECRET", str(health))
 
 
+    def test_fallback_to_cdp_when_playwright_screenshot_times_out(self):
+        import base64
+        class Proc:
+            def poll(self):
+                return None
+        class Page:
+            def is_closed(self):
+                return False
+            def screenshot(self, **kwargs):
+                raise TimeoutError("loading third-party fonts")
+        class CDP:
+            def __init__(self):
+                self.closed = False
+            def send(self, method, data):
+                self.method = method
+                return {"data": base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"pixels").decode()}
+            def detach(self):
+                self.closed = True
+        class Context:
+            def __init__(self):
+                self.cdp = CDP()
+            def new_cdp_session(self, page):
+                return self.cdp
+        browser = mod.Browser()
+        browser.proc = Proc()
+        browser.page = Page()
+        browser.context = Context()
+        raw = browser.screenshot_png()
+        self.assertTrue(raw.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertEqual(browser.context.cdp.method, "Page.captureScreenshot")
+        self.assertTrue(browser.context.cdp.closed)
+        self.assertTrue(browser.live_status(test_screenshot=True)["ready"])
+
+    def test_chrome_exited_never_captures_screenshot_or_leaks_error(self):
+        class Proc:
+            def poll(self):
+                return 137
+        browser = mod.Browser()
+        browser.proc = Proc()
+        with self.assertRaisesRegex(RuntimeError, "chrome_process_not_alive"):
+            browser.screenshot_png()
+
+    def test_owner_token_only_issued_after_successful_render_preflight(self):
+        source = SRC.read_text()
+        first = source.index("browser.live_status(test_screenshot=True)")
+        token = source.index("token = secrets.token_urlsafe(32)", first)
+        self.assertLess(first, token)
+        self.assertIn("FL_HANDOFF_RENDER_NOT_READY", source)
+
+
 
 if __name__=="__main__":
     unittest.main()
