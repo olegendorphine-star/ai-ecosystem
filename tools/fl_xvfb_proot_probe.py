@@ -61,6 +61,9 @@ def check() -> dict:
         "proot_xvfb_ready": False,
         "proot_xkbcomp_alias_works": False,
         "proot_xkbdata_alias_works": False,
+        "proot_existing_bind_works": False,
+        "proot_bin_directory_works": False,
+        "proot_data_directory_works": False,
         "xvfb_failure_categories": [],
         "xvfb_failed": False,
         "packages_unavailable": [],
@@ -126,7 +129,16 @@ def check() -> dict:
     out["proot_xkbdata_alias_works"] = run(
         [str(PROOT), "-b", f"{XKBDATA}:/usr/share/X11/xkb",
          "/usr/bin/test", "-f", "/usr/share/X11/xkb/rules/evdev"], env, timeout=8) == 0
-    if not (out["proot_xkbcomp_alias_works"] and out["proot_xkbdata_alias_works"]):
+    out["proot_existing_bind_works"] = run(
+        [str(PROOT), "-b", "/usr/bin/true:/usr/bin/false",
+         "/usr/bin/false"], env, timeout=8) == 0
+    out["proot_bin_directory_works"] = run(
+        [str(PROOT), "-b", f"{XVFB_ROOT / 'usr/bin'}:/usr/bin",
+         "/usr/bin/xkbcomp", "-version"], env, timeout=8) == 0
+    out["proot_data_directory_works"] = run(
+        [str(PROOT), "-b", f"{XKBDATA}:/usr/share/X11/xkb",
+         "/bin/cat", "/usr/share/X11/xkb/rules/evdev"], env, timeout=8) == 0
+    if not (out["proot_bin_directory_works"] and out["proot_data_directory_works"]):
         return out
     with tempfile.TemporaryDirectory(prefix="fl-xvfb-proot-", dir=ROOT) as d:
         temp = Path(d)
@@ -144,7 +156,7 @@ def check() -> dict:
             return out
         command = [
             str(PROOT),
-            "-b", f"{XKBCOMP}:/usr/bin/xkbcomp",
+            "-b", f"{XVFB_ROOT / 'usr/bin'}:/usr/bin",
             "-b", f"{XKBDATA}:/usr/share/X11/xkb",
             str(XVFB), f":{display}", "-screen", "0", "800x600x24", "-nolisten", "tcp",
         ]
