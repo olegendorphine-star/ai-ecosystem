@@ -75,6 +75,11 @@ def probe() -> dict:
         "xvfb_log_categories": [],
         "xkb_core_keyboard_test": False,
         "xvfb_exit_code": None,
+        "system_xkb_rules_present": Path("/usr/share/X11/xkb/rules/evdev").is_file(),
+        "system_xkb_compiler_present": Path("/usr/bin/xkbcomp").is_file(),
+        "private_xkb_compiler_present": (Path.home() / ".fl-agent/xvfb-runtime/usr/bin/xkbcomp").is_file(),
+        "proot_available": shutil.which("proot") is not None,
+        "bwrap_available": shutil.which("bwrap") is not None,
         "credentials_used": False,
         "captcha_interacted": False,
         "write_actions": False,
@@ -105,6 +110,10 @@ def probe() -> dict:
         xenv["XKB_CONFIG_ROOT"] = str(xkbdir)
         xenv["XKB_CONFIG_EXTRA_PATH"] = str(xkbdir)
         xenv["XKB_OUTPUT_DIR"] = tmp
+        xenv["XKB_BIN_DIRECTORY"] = str(Path.home() / ".fl-agent/xvfb-runtime/usr/bin")
+        xenv["XKB_DEFAULT_RULES"] = "evdev"
+        xenv["XKB_DEFAULT_MODEL"] = "pc105"
+        xenv["XKB_DEFAULT_LAYOUT"] = "us"
         try:
             from playwright.sync_api import sync_playwright
             # Test a private X display. Do not attach to other users' desktops.
