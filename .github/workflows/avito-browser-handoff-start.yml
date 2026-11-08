@@ -195,6 +195,26 @@ jobs:
             "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 - --action handoff_health --json')"
           printf '%s\n' "$result"
           printf '%s\n' "$result" | python3 -c 'import json,sys; status=json.load(sys.stdin); sys.exit(0 if status.get("browser_ready") is True and status.get("ok") is True else 1)'
+      - name: Check current Avito owner session over private SSH (no login)
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, 'AVITO_OWNER_SESSION_CHECK_2026_11_08')
+        env:
+          AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          AVITO_SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${AVITO_SERVER_PORT:-22}"
+          result=""
+          ssh_rc=0
+          result="$(cat tools/avito_server_worker.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" \
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 - --action avito_owner_session_probe --json')" || ssh_rc=$?
+          if [ -z "$result" ]; then echo OWNER_SESSION_PROBE_NO_RESULT; exit 1; fi
+          printf '%s\n' "$result"
+          printf '%s\n' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("action")=="avito_owner_session_probe" and d.get("write_actions") is False and d.get("ok") is True else 1)'
+
       - name: One-time diagnostic — navigate public Avito homepage via private SSH
         if: github.event_name == 'push' && contains(github.event.head_commit.message, 'AVITO_NAV_SMOKE_2026_11_08')
         env:
