@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - 'tools/fl_graphical_browser_probe.py'
+      - 'tools/fl_private_xvfb_runtime.py'
       - '.github/workflows/fl-graphical-browser-probe.yml'
   push:
     branches: [main]
     paths:
       - 'tools/fl_graphical_browser_probe.py'
+      - 'tools/fl_private_xvfb_runtime.py'
       - '.github/workflows/fl-graphical-browser-probe.yml'
 
 permissions:
@@ -26,6 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile tools/fl_graphical_browser_probe.py
+          python3 -m py_compile tools/fl_private_xvfb_runtime.py
           python3 - <<'PY'
           import sys
           sys.path.insert(0,"tools")
@@ -55,6 +58,21 @@ jobs:
           printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
           printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Install isolated Xvfb from distro packages without sudo
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(cat tools/fl_private_xvfb_runtime.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -')"
+          printf '%s\n' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("schema")=="fl.private.xvfb.v1" and d.get("session_used") is False and d.get("write_account_actions") is False; print(json.dumps(d,sort_keys=True))'
+
       - name: Check graphical Chromium and Xvfb on existing VPS
         env:
           HOST: ${{ secrets.AVITO_SERVER_HOST }}
@@ -67,5 +85,5 @@ jobs:
             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
             -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
-            "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+            "$USER@$HOST" 'env PATH="$HOME/.fl-agent/xvfb-runtime/usr/bin:$PATH" LD_LIBRARY_PATH="$HOME/.fl-agent/xvfb-runtime/usr/lib/x86_64-linux-gnu:$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
           printf '%s\n' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("schema")=="fl.graphical.browser.probe.v1" and d.get("credentials_used") is False and d.get("captcha_interacted") is False and d.get("write_actions") is False; print(json.dumps(d,sort_keys=True))'
