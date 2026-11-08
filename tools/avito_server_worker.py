@@ -12,9 +12,10 @@ import ssl
 import time
 import threading
 import urllib.request
+import urllib.error
 from pathlib import Path
 
-ACTIONS = {"health", "browser_health", "connect_status", "handoff_health"}
+ACTIONS = {"health", "browser_health", "connect_status", "handoff_health", "avito_navigation_smoke"}
 
 
 def http_status(url: str) -> int | None:
@@ -165,12 +166,83 @@ def handoff_health() -> dict:
         return blocked
 
 
+
+def avito_navigation_smoke() -> dict:
+    """One public-page navigation via the *existing* loopback browser, never login."""
+    result = {
+        "action": "avito_navigation_smoke", "ok": False,
+        "navigation_accepted": False, "reached_avito_origin": False,
+        "browser_ready": False, "startup_failed": False,
+        "startup_error_category": "none", "write_actions": False,
+    }
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
+    status_request = urllib.request.Request(
+        "http://127.0.0.1:8787/api/status", method="GET",
+        headers={"Accept": "application/json"},
+    )
+    try:
+        with opener.open(status_request, timeout=3) as response:
+            if response.status != 200:
+                return result
+            preflight_raw = response.read(4097)
+            if len(preflight_raw) > 4096:
+                return result
+            preflight = json.loads(preflight_raw.decode("utf-8"))
+        safe = _safe_browser_status(preflight)
+        result["browser_ready"] = safe["browser_ready"]
+        result["startup_failed"] = safe["startup_failed"]
+        result["startup_error_category"] = safe.get("startup_error_category", "none")
+        if not result["browser_ready"]:
+            return result
+
+        # A single, fixed public URL. No arbitrary commands, credentials, input or clicks.
+        nav_request = urllib.request.Request(
+            "http://127.0.0.1:8787/api/navigate", method="POST",
+            data=b'{"url":"https://www.avito.ru/"}',
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        try:
+            with opener.open(nav_request, timeout=38) as response:
+                nav_raw = response.read(4097)
+                if len(nav_raw) <= 4096 and response.status == 200:
+                    answer = json.loads(nav_raw.decode("utf-8"))
+                    result["navigation_accepted"] = answer.get("ok") is True
+        except (OSError, ValueError, TypeError, urllib.error.HTTPError):
+            pass
+
+        with opener.open(status_request, timeout=3) as response:
+            if response.status != 200:
+                return result
+            status_raw = response.read(4097)
+            if len(status_raw) > 4096:
+                return result
+            post_status = json.loads(status_raw.decode("utf-8"))
+        safe_post = _safe_browser_status(post_status)
+        url = post_status.get("url") if isinstance(post_status, dict) else None
+        result["browser_ready"] = safe_post["browser_ready"]
+        result["reached_avito_origin"] = (
+            isinstance(url, str)
+            and (url == "https://www.avito.ru/" or url.startswith("https://www.avito.ru/"))
+        )
+        result["ok"] = bool(
+            result["navigation_accepted"]
+            and result["browser_ready"]
+            and result["reached_avito_origin"]
+        )
+        return result
+    except (OSError, ValueError, TypeError, UnicodeError, urllib.error.HTTPError):
+        return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--action", choices=sorted(ACTIONS), required=True)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    result = {"health": health, "browser_health": browser_health, "connect_status": connect_status, "handoff_health": handoff_health}[args.action]()
+    result = {"health": health, "browser_health": browser_health, "connect_status": connect_status, "handoff_health": handoff_health, "avito_navigation_smoke": avito_navigation_smoke}[args.action]()
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if result.get("ok") else 1
 
