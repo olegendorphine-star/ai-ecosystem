@@ -89,10 +89,49 @@ jobs:
             "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           PID="$HOME/.fl-agent/handoff.pid"
-          if [ -s "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
-            echo FL_HANDOFF_ALREADY_ACTIVE
-            exit 1
+          if [ -s "$PID" ]; then
+            old_pid="$(cat "$PID" 2>/dev/null || true)"
+            if [[ "$old_pid" =~ ^[0-9]+$ ]] && [ "$old_pid" -gt 1 ] && kill -0 "$old_pid" 2>/dev/null; then
+              probe="$(curl --noproxy '*' -fsS --max-time 9 http://127.0.0.1:8990/ready 2>/dev/null || true)"
+              if [ -n "$probe" ] && printf '%s' "$probe" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ready") is True and d.get("screenshot_ready") is True else 1)' 2>/dev/null; then
+                echo FL_HANDOFF_ALREADY_HEALTHY
+                exit 1
+              fi
+              cmdline="$(tr '\0' ' ' < "/proc/$old_pid/cmdline" 2>/dev/null || true)"
+              case "$cmdline" in
+                *"/.fl-agent/fl_secure_handoff.py"*)
+                  kill "$old_pid" 2>/dev/null || true
+                  sleep 2
+                  kill -9 "$old_pid" 2>/dev/null || true
+                  ;;
+                *) echo FL_HANDOFF_UNRECOGNIZED_PROCESS; exit 1 ;;
+              esac
+            fi
           fi
+          # Remove only orphaned FL-specific Chrome/tunnel children, never Avito.
+          python3 - <<'PY'
+          import os, signal
+          for p in os.listdir('/proc'):
+              if not p.isdigit(): continue
+              try:
+                  path = '/proc/' + p
+                  if os.stat(path).st_uid != os.getuid(): continue
+                  args = open(path + '/cmdline','rb').read().split(b'\0')
+                  if not args: continue
+                  exe = args[0].rsplit(b'/',1)[-1]
+                  is_our_chrome = (
+                      b'chrome' in exe.lower()
+                      and any(b'--user-data-dir=' in a and b'/.fl-agent/handoff-runtime-' in a for a in args)
+                  )
+                  is_our_tunnel = (
+                      exe == b'cloudflared'
+                      and any(b'http://127.0.0.1:8990' in a for a in args)
+                  )
+                  if is_our_chrome or is_our_tunnel:
+                      os.kill(int(p), signal.SIGTERM)
+              except (OSError, ProcessLookupError):
+                  continue
+          PY
           test -x "$HOME/.local/bin/cloudflared"
           test -x "$HOME/.avito-agent/venv/bin/python"
           rm -f "$HOME/.fl-agent/handoff_token" "$HOME/.fl-agent/cloudflared.log"
