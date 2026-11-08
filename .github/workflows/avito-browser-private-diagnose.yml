@@ -49,6 +49,61 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/avito-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/avito-ssh/key" "$RUNNER_TEMP/avito-ssh/known_hosts"
 
+      - name: Identify missing Chromium shared libraries without leaking local paths
+        env:
+          AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          AVITO_SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${AVITO_SERVER_PORT:-22}"
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" \
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 -' <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+          home = Path.home()
+          cache = home / ".cache" / "ms-playwright"
+          candidates = sorted(
+              p for p in cache.rglob("chrome")
+              if p.is_file() and os.access(p, os.X_OK)
+          ) if cache.is_dir() else []
+          report = {
+              "browser_binary_found": bool(candidates),
+              "dependency_check_available": False,
+              "missing_libraries": [],
+          }
+          if candidates:
+              env = os.environ.copy()
+              private_libs = [
+                  str(home / ".local" / "usr" / "lib" / "x86_64-linux-gnu"),
+                  str(home / ".local" / "lib"),
+              ]
+              env["LD_LIBRARY_PATH"] = ":".join(private_libs) + (
+                  ":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else ""
+              )
+              try:
+                  check = subprocess.run(
+                      ["ldd", str(candidates[-1])],
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                      text=True, env=env, timeout=10, check=False,
+                  )
+                  report["dependency_check_available"] = True
+                  pattern = re.compile(r"^\s*([A-Za-z0-9_.+-]+\.so(?:\.[0-9]+)*)\s+=>\s+not found\s*$")
+                  report["missing_libraries"] = sorted(set(
+                      found.group(1) for line in check.stdout.splitlines()
+                      if (found := pattern.match(line))
+                  ))[:25]
+              except (OSError, subprocess.TimeoutExpired):
+                  pass
+          print(json.dumps(report, sort_keys=True))
+          PY
+
       - name: Read existing Chromium status via private SSH (no restart)
         env:
           AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
