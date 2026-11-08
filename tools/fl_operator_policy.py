@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Fail-closed FL.ru freelancer action policy, independent of browser/UI.
+"""Fail-closed FL.ru action policy reflecting official support response.
 
-Produces decisions, never sends messages or modifies the account.
-No payment or premium offers, no duplicate bids and no unapproved edits.
+FL.ru support 2026-11-08: no open API; commercial automation is not
+permitted and project replies must be sent manually. This component NEVER
+authorizes account writes, paid actions, or automatic browser login.
 """
 from __future__ import annotations
 import datetime as dt
@@ -56,6 +57,13 @@ def evaluate(request: object, *, now: dt.datetime, already_sent: set[str] | None
     action = request.get("action")
     if request.get("login") != OWNER_LOGIN or action not in ACTIONS:
         return result
+    # Official FL.ru support confirmed on 2026-11-08: no open API,
+    # no commercial action automation, bids must be submitted manually.
+    # This rule is unconditional, even with active session, exact approval
+    # or a fee of zero. Nothing below may authorize account changes.
+    if action in {"submit_bid", "update_profile", "inspect_profile"}:
+        return {**result, "decision": "manual_only",
+                "next_action": "open_official_fl_site_for_owner"}
     if action == "scan_public":
         return {**result, "decision": "read_only_allowed", "next_action": "browser_scan"}
     if action == "draft_bid":

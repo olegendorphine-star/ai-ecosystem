@@ -111,20 +111,20 @@ class FLOperatorPolicyTests(unittest.TestCase):
 
     def test_no_bid_without_verified_owner(self):
         r = policy.evaluate(self.req("submit_bid", project_url="https://www.fl.ru/projects/5528311/a.html", session_state="unverified"), now=NOW)
-        self.assertEqual(r["decision"], "auth_required")
+        self.assertEqual(r["decision"], "manual_only")
 
     def test_no_bid_with_unknown_free_badge(self):
         r = policy.evaluate(self.req("submit_bid", project_url="https://www.fl.ru/projects/5528311/a.html",
             session_state="verified_owner", paid=False, free_badge_verified=False,
             approval={"expires_at": "2026-11-08T13:00:00Z"}),
             now=NOW)
-        self.assertEqual(r["decision"], "free_status_unverified")
+        self.assertEqual(r["decision"], "manual_only")
 
     def test_block_paid_bid_even_with_approval(self):
         r = policy.evaluate(self.req("submit_bid", session_state="verified_owner",
             paid=True, fee_rub=80, approval={"allow_send": True, "expires_at": "2026-11-08T13:00:00Z"}),
             now=NOW)
-        self.assertEqual(r["decision"], "blocked_paid")
+        self.assertEqual(r["decision"], "manual_only")
         self.assertFalse(r["payment_performed"])
 
     def test_known_bid_is_duplicate(self):
@@ -132,7 +132,7 @@ class FLOperatorPolicyTests(unittest.TestCase):
             session_state="verified_owner", paid=False, free_badge_verified=True,
             approval={"expires_at": "2026-11-08T13:00:00Z"}),
             now=NOW, already_sent={"5528311"})
-        self.assertEqual(r["decision"], "duplicate_bid")
+        self.assertEqual(r["decision"], "manual_only")
 
     def test_exact_approval_required_to_prepare_submission(self):
         proposal = "Изучил требования к обработке товаров. Предлагаю сверить 2 примера и затем сделать весь объём с проверкой."
@@ -141,10 +141,10 @@ class FLOperatorPolicyTests(unittest.TestCase):
             session_state="verified_owner", paid=False, free_badge_verified=True,
             proposal=proposal)
         base["approval"] = {"allow_send": True, "sha256": "wrong", "expires_at": "2026-11-08T13:00:00Z"}
-        self.assertEqual(policy.evaluate(base, now=NOW)["decision"], "approval_required")
+        self.assertEqual(policy.evaluate(base, now=NOW)["decision"], "manual_only")
         base["approval"]["sha256"] = policy.digest(proposal)
         result = policy.evaluate(base, now=NOW)
-        self.assertEqual(result["decision"], "approved_not_executed")
+        self.assertEqual(result["decision"], "manual_only")
         self.assertFalse(result["send_performed"])
 
     def test_profile_edit_rejects_sensitive_changes(self):
@@ -152,7 +152,7 @@ class FLOperatorPolicyTests(unittest.TestCase):
         r = policy.evaluate(self.req("update_profile", session_state="verified_owner", paid=False,
             changes=change, approval={"allow_profile_edit": True, "expires_at": "2026-11-08T13:00:00Z"}),
             now=NOW)
-        self.assertEqual(r["decision"], "blocked")
+        self.assertEqual(r["decision"], "manual_only")
         self.assertNotIn("topsecret", json.dumps(r))
 
     def test_profile_edit_only_with_exact_diff_approval(self):
@@ -161,8 +161,26 @@ class FLOperatorPolicyTests(unittest.TestCase):
         r = policy.evaluate(self.req("update_profile", session_state="verified_owner", paid=False,
             changes=change, approval={"allow_profile_edit": True, "sha256": policy.digest(canonical),
                 "expires_at": "2026-11-08T13:00:00Z"}), now=NOW)
-        self.assertEqual(r["decision"], "approved_not_executed")
+        self.assertEqual(r["decision"], "manual_only")
         self.assertFalse(r["profile_changed"])
+
+
+    def test_all_account_actions_manual_even_with_valid_approval(self):
+        for action in ("submit_bid", "update_profile", "inspect_profile"):
+            request = self.req(action, session_state="verified_owner",
+                paid=False, fee_rub=0, free_badge_verified=True,
+                project_url="https://www.fl.ru/projects/5528400/a.html",
+                proposal="Реальный текст отклика, согласованный владельцем и подходящий для отправки на FL.ru.",
+                changes={"headline": "Новая специализация"},
+                approval={"allow_send": True, "allow_profile_edit": True,
+                    "expires_at": "2026-11-08T13:00:00Z"})
+            result = policy.evaluate(request, now=NOW)
+            self.assertEqual(result["decision"], "manual_only", action)
+            self.assertEqual(result["next_action"], "open_official_fl_site_for_owner")
+            self.assertFalse(result["send_performed"])
+            self.assertFalse(result["profile_changed"])
+            self.assertFalse(result["payment_performed"])
+
 
 
 if __name__ == "__main__":
