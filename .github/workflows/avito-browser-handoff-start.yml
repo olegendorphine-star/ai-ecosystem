@@ -80,6 +80,17 @@ jobs:
           if ! install_pkg libcups2t64; then
             install_pkg libcups2 || { echo CHROMIUM_PACKAGE_UNAVAILABLE:libcups >&2; exit 1; }
           fi
+          # Transitive .so dependencies detected by real server-side ldd after the first pass.
+          for pkg in libavahi-common3 libavahi-client3 libfontconfig1 libxrender1 libxcb-render0 libxcb-shm0 libpixman-1-0 libthai0 libharfbuzz0b; do
+            if ! install_pkg "$pkg"; then echo "CHROMIUM_PACKAGE_UNAVAILABLE:$pkg" >&2; exit 1; fi
+          done
+          # Common shared dependencies of HarfBuzz, Pango, FreeType and libthai.
+          for pkg in libdatrie1 libfribidi0 libgraphite2-3 libfreetype6; do
+            install_pkg "$pkg" || echo "CHROMIUM_OPTIONAL_PACKAGE_UNAVAILABLE:$pkg"
+          done
+          if ! install_pkg libpng16-16t64; then
+            install_pkg libpng16-16 || echo CHROMIUM_OPTIONAL_PACKAGE_UNAVAILABLE:libpng16
+          fi
           chrome_path="$(find "$HOME/.cache/ms-playwright" -type f -name chrome -perm -u+x 2>/dev/null | sort | tail -1)"
           if [ -z "$chrome_path" ]; then echo CHROMIUM_BINARY_NOT_FOUND >&2; exit 1; fi
           export LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
