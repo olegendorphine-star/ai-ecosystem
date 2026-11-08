@@ -14,7 +14,7 @@ import threading
 import urllib.request
 from pathlib import Path
 
-ACTIONS = {"health", "browser_health", "connect_status"}
+ACTIONS = {"health", "browser_health", "connect_status", "handoff_health"}
 
 
 def http_status(url: str) -> int | None:
@@ -92,12 +92,66 @@ def connect_status() -> dict:
     }
 
 
+
+def _safe_browser_status(payload: object) -> dict:
+    """Convert sensitive local UI status into non-identifying readiness flags."""
+    result = {
+        "action": "handoff_health", "ok": False,
+        "local_http_ok": True, "browser_ready": False,
+        "startup_failed": False, "write_actions": False,
+    }
+    if not isinstance(payload, dict):
+        return result
+    result["startup_failed"] = bool(payload.get("startup_error"))
+    page_url = payload.get("url")
+    # about:blank counts as an initialized page, not Avito login.
+    result["browser_ready"] = (
+        payload.get("ok") is True
+        and not result["startup_failed"]
+        and isinstance(page_url, str)
+        and bool(page_url)
+    )
+    result["ok"] = result["browser_ready"]
+    return result
+
+
+def handoff_health() -> dict:
+    """GET only the loopback handoff status through SSH; never expose URL or session."""
+    blocked = {
+        "action": "handoff_health", "ok": False,
+        "local_http_ok": False, "browser_ready": False,
+        "startup_failed": False, "write_actions": False,
+    }
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    # Forbid proxy environment variables and external targets in this health check.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
+    request = urllib.request.Request(
+        "http://127.0.0.1:8787/api/status", method="GET",
+        headers={"Accept": "application/json", "User-Agent": "AvitoLocalProbe/1.0"},
+    )
+    try:
+        with opener.open(request, timeout=3) as response:
+            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            if response.status != 200 or content_type != "application/json":
+                return blocked
+            raw = response.read(4097)
+        if len(raw) > 4096:
+            return blocked
+        payload = json.loads(raw.decode("utf-8"))
+        return _safe_browser_status(payload)
+    except (OSError, ValueError, UnicodeError, TypeError):
+        return blocked
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--action", choices=sorted(ACTIONS), required=True)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    result = {"health": health, "browser_health": browser_health, "connect_status": connect_status}[args.action]()
+    result = {"health": health, "browser_health": browser_health, "connect_status": connect_status, "handoff_health": handoff_health}[args.action]()
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if result.get("ok") else 1
 
