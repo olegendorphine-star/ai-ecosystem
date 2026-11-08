@@ -28,6 +28,20 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(result["write_actions"])
 
 
+    def test_classifies_missing_libatk_without_exposing_private_error(self):
+        err = "Chrome exited: libatk-1.0.so.0 from /home/private/SECRET"
+        result = worker._safe_browser_status({"ok": False, "url": "", "startup_error": err})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["startup_error_category"], "missing_libatk")
+        self.assertNotIn("SECRET", str(result))
+
+    def test_classifies_generic_browser_failure(self):
+        result = worker._safe_browser_status({
+            "ok": False, "url": "", "startup_error": "RuntimeError: unknown private detail"
+        })
+        self.assertEqual(result["startup_error_category"], "browser_start_failed")
+        self.assertNotIn("unknown private detail", str(result))
+
     def test_handoff_status_ready_sanitizes_private_fields(self):
         result = worker._safe_browser_status({
             "ok": True, "url": "https://www.avito.ru/private",
