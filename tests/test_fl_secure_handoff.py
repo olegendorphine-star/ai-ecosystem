@@ -80,6 +80,53 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("not_on_fl_site",src)
         self.assertNotIn('print(self.server.secret)',src)
 
+    def test_liveness_fails_if_chrome_process_exited(self):
+        class DeadProc:
+            def poll(self):
+                return 137
+        class Page:
+            def is_closed(self):
+                return False
+        browser = mod.Browser()
+        browser.proc = DeadProc()
+        browser.page = Page()
+        self.assertFalse(browser.live_status()["ready"])
+        self.assertFalse(browser.live_status(test_screenshot=True)["ready"])
+
+    def test_liveness_requires_screenshot(self):
+        class Proc:
+            def poll(self):
+                return None
+        class Page:
+            def is_closed(self):
+                return False
+            def screenshot(self, **kwargs):
+                return b"\x89PNG\r\n\x1a\n" + b"0" * 16
+        browser = mod.Browser()
+        browser.proc = Proc()
+        browser.page = Page()
+        health = browser.live_status(test_screenshot=True)
+        self.assertTrue(health["chrome_alive"])
+        self.assertTrue(health["screenshot_ready"])
+        self.assertTrue(health["ready"])
+
+    def test_broken_screenshot_not_ready(self):
+        class Proc:
+            def poll(self):
+                return None
+        class Page:
+            def is_closed(self):
+                return False
+            def screenshot(self, **kwargs):
+                raise TimeoutError("SECRET_RENDER_PATH")
+        browser = mod.Browser()
+        browser.proc = Proc()
+        browser.page = Page()
+        health = browser.live_status(test_screenshot=True)
+        self.assertFalse(health["ready"])
+        self.assertNotIn("SECRET", str(health))
+
+
 
 if __name__=="__main__":
     unittest.main()
