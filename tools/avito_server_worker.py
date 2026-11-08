@@ -15,7 +15,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-ACTIONS = {"health", "browser_health", "connect_status", "handoff_health", "avito_navigation_smoke"}
+ACTIONS = {"health", "browser_health", "connect_status", "handoff_health", "avito_navigation_smoke", "avito_owner_session_probe"}
 
 
 def http_status(url: str) -> int | None:
@@ -254,12 +254,62 @@ def avito_navigation_smoke() -> dict:
         return result
 
 
+
+def avito_owner_session_probe() -> dict:
+    """One fixed, no-credential own-profile read through the existing loopback browser."""
+    result = {
+        "action": "avito_owner_session_probe", "ok": False,
+        "browser_ready": False, "profile_route_reached": False,
+        "account_controls_seen": False, "auth_challenge_visible": False,
+        "auth_state": "unverified", "site_http_status": None,
+        "navigation_error_category": "unavailable", "write_actions": False,
+    }
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
+    request = urllib.request.Request(
+        "http://127.0.0.1:8787/api/owner-session-probe",
+        method="POST", data=b"{}", headers={"Content-Type": "application/json"},
+    )
+    try:
+        with opener.open(request, timeout=32) as response:
+            if response.status != 200:
+                return result
+            body = response.read(4097)
+        if len(body) > 4096:
+            return result
+        data = json.loads(body.decode("utf-8"))
+        if not isinstance(data, dict):
+            return result
+        for key in ("ok", "browser_ready", "profile_route_reached",
+                    "account_controls_seen", "auth_challenge_visible"):
+            result[key] = data.get(key) is True
+        state = data.get("auth_state")
+        if isinstance(state, str) and state in {"unverified", "likely_active", "auth_required"}:
+            result["auth_state"] = state
+        code = data.get("site_http_status")
+        result["site_http_status"] = code if type(code) is int and 100 <= code <= 599 else None
+        reason = data.get("navigation_error_category")
+        allowed_reasons = {
+            "none", "navigation_timeout", "dns_resolution_failed",
+            "proxy_connection_failed", "tls_connection_failed",
+            "network_connection_failed", "navigation_failed",
+        }
+        result["navigation_error_category"] = (
+            reason if isinstance(reason, str) and reason in allowed_reasons else "unavailable"
+        )
+    except (OSError, ValueError, TypeError, UnicodeError, urllib.error.HTTPError):
+        return result
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--action", choices=sorted(ACTIONS), required=True)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    result = {"health": health, "browser_health": browser_health, "connect_status": connect_status, "handoff_health": handoff_health, "avito_navigation_smoke": avito_navigation_smoke}[args.action]()
+    result = {"health": health, "browser_health": browser_health, "connect_status": connect_status, "handoff_health": handoff_health, "avito_navigation_smoke": avito_navigation_smoke, "avito_owner_session_probe": avito_owner_session_probe}[args.action]()
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if result.get("ok") else 1
 
