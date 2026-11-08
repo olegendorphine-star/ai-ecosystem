@@ -153,7 +153,7 @@ class Browser:
                     ready = not self.page.is_closed()
                 except Exception:
                     ready = False
-            return {"ok": bool(ready), "url": self.page.url if ready else "", "title": "", "startup_error": self.startup_error or ("browser_not_ready" if not ready else "")}
+            return {"ok": bool(ready), "url": self.page.url if ready else "", "startup_error": self.startup_error or ("browser_not_ready" if not ready else "")}
 
     def screenshot(self):
         with self.lock:
