@@ -67,7 +67,7 @@ class Browser:
         PROFILE.mkdir(parents=True, exist_ok=True)
         self.p = sync_playwright().start()
         PROFILE.mkdir(parents=True, exist_ok=True)
-        launch_kwargs = {"headless": True, "args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-zygote"]}
+        launch_kwargs = {"headless": False, "args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-zygote"]}
         # Playwright may prefer the incompatible headless-shell binary. Prefer
         # a full Chrome binary when one is installed in the user cache.
         cache_root = Path.home() / ".cache" / "ms-playwright"
