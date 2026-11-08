@@ -317,8 +317,11 @@ class Browser:
             f"http://127.0.0.1:{port}", timeout=7000
         )
         opts = {"viewport": VIEWPORT}
-        if STATE.is_file() and not STATE.is_symlink() and STATE.stat().st_size < 2*1024*1024:
-            opts["storage_state"] = str(STATE)
+        if STATE.is_file() and not STATE.is_symlink():
+            meta = STATE.stat()
+            if (meta.st_uid == os.getuid() and (meta.st_mode & 0o077) == 0
+                    and 2 <= meta.st_size < 2*1024*1024):
+                opts["storage_state"] = str(STATE)
         self.context = self.browser.new_context(**opts)
         self.page = self.context.new_page()
         self.page.goto(ALLOWED_PAGES["login"], wait_until="commit", timeout=20000)
