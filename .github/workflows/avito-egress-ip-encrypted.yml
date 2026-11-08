@@ -24,7 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           openssl version >/dev/null
-          awk '/-----BEGIN PUBLIC KEY-----/{copy=1} copy {gsub(/^[[:space:]]+/, ""); print} /-----END PUBLIC KEY-----/{exit}' .github/workflows/avito-egress-ip-encrypted.yml > "$RUNNER_TEMP/egress_pub.pem"
+          awk '/^[[:space:]]*-----BEGIN PUBLIC KEY-----[[:space:]]*$/{copy=1} copy {gsub(/^[[:space:]]+/, ""); print} /^[[:space:]]*-----END PUBLIC KEY-----[[:space:]]*$/{exit}' .github/workflows/avito-egress-ip-encrypted.yml > "$RUNNER_TEMP/egress_pub.pem"
           openssl pkey -pubin -in "$RUNNER_TEMP/egress_pub.pem" -noout
           python3 -c 'import json,ipaddress,urllib.request; print("EGRESS_PROBE_OFFLINE_OK")'
 
