@@ -204,6 +204,75 @@ class Browser:
                 except Exception:
                     pass
 
+    def probe_owner_session(self):
+        """Check only fixed own-profile UI. Never emit page text, identity or cookies.
+
+        Profile route alone is not proof of authentication. The state may
+        remain unverified, and 2FA/CAPTCHA always requires the owner.
+        """
+        flags = {
+            "ok": False, "browser_ready": False,
+            "profile_route_reached": False, "account_controls_seen": False,
+            "auth_challenge_visible": False, "auth_state": "unverified",
+            "site_http_status": None, "navigation_error_category": "none",
+        }
+        with self.lock:
+            if self.stopped or self.startup_error or self.page is None:
+                return flags
+            try:
+                if self.page.is_closed():
+                    return flags
+                flags["browser_ready"] = True
+                # Own account route, navigated only inside the existing context.
+                response = self.page.goto(
+                    "https://www.avito.ru/profile", wait_until="commit", timeout=20000
+                )
+                status = response.status if response else None
+                if type(status) is int and 100 <= status <= 599:
+                    flags["site_http_status"] = status
+                try:
+                    self.page.wait_for_load_state("domcontentloaded", timeout=4000)
+                except Exception:
+                    pass
+                current = urlparse(self.page.url)
+                flags["profile_route_reached"] = (
+                    current.hostname == "www.avito.ru"
+                    and (current.path == "/profile" or current.path.startswith("/profile/"))
+                )
+                auth_redirect = (
+                    current.hostname == "www.avito.ru"
+                    and (current.path.startswith("/auth") or current.path.startswith("/login"))
+                )
+                # Read the DOM locally; never export it or the account identity.
+                try:
+                    content = self.page.locator("body").inner_text(timeout=2500)[:12000].lower()
+                except Exception:
+                    content = ""
+                challenge = (
+                    auth_redirect
+                    or any(x in content for x in (
+                        "войти в авито", "войдите в аккаунт",
+                        "войдите в профиль", "вход в авито",
+                        "подтвердите вход", "код подтверждения",
+                    ))
+                )
+                flags["auth_challenge_visible"] = bool(challenge)
+                flags["account_controls_seen"] = any(
+                    x in content for x in (
+                        "редактировать профиль", "настройки профиля",
+                        "управление профилем",
+                    )
+                )
+                if challenge:
+                    flags["auth_state"] = "auth_required"
+                elif flags["profile_route_reached"] and flags["account_controls_seen"]:
+                    flags["auth_state"] = "likely_active"
+                # The result is diagnostic, not proof of identity.
+                flags["ok"] = True
+            except Exception as exc:
+                flags["navigation_error_category"] = navigation_error_code(exc)
+        return flags
+
     def click(self, selector=None, x=None, y=None):
         with self.lock:
             if selector:
@@ -270,6 +339,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             body = read_json(self)
+            if path == "/api/owner-session-probe":
+                self.send_json(200, browser.probe_owner_session()); return
             if path == "/api/navigate": browser.navigate(body.get("url"))
             elif path == "/api/click": browser.click(body.get("selector"), body.get("x"), body.get("y"))
             elif path == "/api/focus": browser.focus(body.get("selector"))

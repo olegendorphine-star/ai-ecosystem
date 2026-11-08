@@ -117,6 +117,87 @@ class HandoffSafetyTests(unittest.TestCase):
         self.assertNotIn("TOKEN", str(b.last_navigation_error_category))
 
 
+    def test_profile_probe_detects_visible_login_challenge(self):
+        class Response:
+            status = 200
+        class Locator:
+            def inner_text(self, timeout=None):
+                return "Войдите в аккаунт чтобы продолжить"
+        class Page:
+            url = "https://www.avito.ru/"
+            def is_closed(self):
+                return False
+            def goto(self, url, wait_until=None, timeout=None):
+                self.url = "https://www.avito.ru/profile"
+                return Response()
+            def wait_for_load_state(self, event, timeout=None):
+                return None
+            def locator(self, selector):
+                return Locator()
+        b = mod.Browser()
+        b.page = Page()
+        result = b.probe_owner_session()
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["profile_route_reached"])
+        self.assertTrue(result["auth_challenge_visible"])
+        self.assertEqual(result["auth_state"], "auth_required")
+        self.assertNotIn("url", result)
+
+    def test_profile_probe_likely_active_is_not_proof_of_login(self):
+        class Response:
+            status = 200
+        class Locator:
+            def inner_text(self, timeout=None):
+                return "Настройки профиля  Редактировать профиль  PRIVATE USER"
+        class Page:
+            url = "https://www.avito.ru/"
+            def is_closed(self):
+                return False
+            def goto(self, url, wait_until=None, timeout=None):
+                self.url = url
+                return Response()
+            def wait_for_load_state(self, event, timeout=None):
+                return None
+            def locator(self, selector):
+                return Locator()
+        b = mod.Browser()
+        b.page = Page()
+        result = b.probe_owner_session()
+        self.assertEqual(result["auth_state"], "likely_active")
+        self.assertTrue(result["account_controls_seen"])
+        self.assertNotIn("PRIVATE USER", str(result))
+
+    def test_profile_probe_unknown_if_profile_route_lacks_signals(self):
+        class Response:
+            status = 200
+        class Locator:
+            def inner_text(self, timeout=None):
+                return "Авито"
+        class Page:
+            url = "about:blank"
+            def is_closed(self):
+                return False
+            def goto(self, url, wait_until=None, timeout=None):
+                self.url = url
+                return Response()
+            def wait_for_load_state(self, event, timeout=None):
+                return None
+            def locator(self, selector):
+                return Locator()
+        b = mod.Browser()
+        b.page = Page()
+        result = b.probe_owner_session()
+        self.assertTrue(result["profile_route_reached"])
+        self.assertEqual(result["auth_state"], "unverified")
+        self.assertFalse(result["account_controls_seen"])
+
+    def test_owner_probe_without_browser_stops(self):
+        b = mod.Browser()
+        result = b.probe_owner_session()
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["browser_ready"])
+
+
 
 if __name__ == "__main__":
     unittest.main()
