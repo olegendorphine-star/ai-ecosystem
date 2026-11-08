@@ -43,7 +43,7 @@ jobs:
           chmod 600 "$RUNNER_TEMP/avito-ssh/key" "$RUNNER_TEMP/avito-ssh/known_hosts"
           cat > "$RUNNER_TEMP/avito-ssh/egress_pub.pem" <<'PUBLIC_KEY'
           -----BEGIN PUBLIC KEY-----
-          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQEA29BOGJIBKbRRS3vQ6qC1
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA29BOGJIBKbRRS3vQ6qC1
           PLsYd1FbNeR2BdTWUy/zHdmpLwmvlI83jVmeS87+StDc4prTpXZP1ZDZB1Ijzjqk
           ijkde7KhSqwrjVQnC5GRI70yn+Cy7DpkrM8P9OKfsnpiGMyyI2uMPevUfD3HUgD5
           UQRfk5EoL/7+v87mC4HPNRPfpKZUraf+mFWuaSMEY4fIRSbf5j0w0hLEis3IV/kc
@@ -68,10 +68,10 @@ jobs:
             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" \
             -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" \
-            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 -' <<'PY' \
-            | openssl pkeyutl -encrypt -pubin -inkey "$RUNNER_TEMP/avito-ssh/egress_pub.pem" \
-                -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
-            | base64 -w0
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 -' <<'PY' | \
+              openssl pkeyutl -encrypt -pubin -inkey "$RUNNER_TEMP/avito-ssh/egress_pub.pem" \
+                -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | \
+              base64 -w0
           import datetime
           import ipaddress
           import json
