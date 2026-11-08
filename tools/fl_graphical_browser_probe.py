@@ -73,6 +73,7 @@ def probe() -> dict:
         "browser_alive_after": False,
         "result": "not_ready",
         "xvfb_log_categories": [],
+        "xkb_core_keyboard_test": False,
         "xvfb_exit_code": None,
         "credentials_used": False,
         "captcha_interacted": False,
@@ -120,8 +121,14 @@ def probe() -> dict:
                 ["Xvfb", "-help"], stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, timeout=5, check=False
             )
-            if b"-xkbdir" in options.stdout + options.stderr:
+            help_text = options.stdout + options.stderr
+            if b"-xkbdir" in help_text:
                 cmd += ["-xkbdir", str(xkbdir)]
+            # Diagnostic only: see whether legacy X core input avoids the
+            # XKB compiler failure in this minimal VPS environment.
+            if b"-kb" in help_text:
+                cmd += ["-kb"]
+                out["xkb_core_keyboard_test"] = True
             with stderr_file.open("wb") as stream:
                 xvfb = subprocess.Popen(
                     cmd, env=xenv, stdout=subprocess.DEVNULL, stderr=stream
