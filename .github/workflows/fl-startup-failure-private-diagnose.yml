@@ -1,0 +1,73 @@
+name: FL.ru — private startup failure classification
+
+on:
+  pull_request:
+    paths:
+      - 'tools/fl_startup_failure_diagnostic.py'
+      - '.github/workflows/fl-startup-failure-private-diagnose.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fl_startup_failure_diagnostic.py'
+      - '.github/workflows/fl-startup-failure-private-diagnose.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify failure classifier
+        run: |
+          python3 -m py_compile tools/fl_startup_failure_diagnostic.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, "tools")
+          from fl_startup_failure_diagnostic import classify_log
+          assert classify_log("Traceback\nTargetClosedError: private path") == "browser_target_closed"
+          assert classify_log("FL_HANDOFF_RENDER_NOT_READY") == "screenshot_preflight_failed"
+          assert classify_log("Page.goto: Timeout 20000ms") == "fl_navigation_timeout"
+          assert classify_log("secret XYZ") == "no_classifiable_log"
+          print("FL_DIAGNOSTIC_CLASSIFIER_OK")
+          PY
+
+  private_probe:
+    needs: offline
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH identity
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+
+      - name: Classify FL Chrome failure without exposing raw logs
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_startup_failure_diagnostic.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -')"
+          printf '%s\n' "$report" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x.get("schema")=="fl.owner.startup.error.v1" and x.get("write_actions") is False; print(json.dumps(x,sort_keys=True))'
