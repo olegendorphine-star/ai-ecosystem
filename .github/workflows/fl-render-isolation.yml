@@ -27,7 +27,9 @@ jobs:
           python3 - <<'PY'
           import sys
           sys.path.insert(0,"tools")
-          from fl_render_isolation_probe import category
+          from fl_render_isolation_probe import category, categorize_chrome_stderr
+          assert categorize_chrome_stderr(b"SECRET: malloc(): corrupted size in /home/person") == ["memory_corruption"]
+          assert categorize_chrome_stderr(b"SECRET COOKIE=private") == []
           assert category(TimeoutError("PRIVATE token: Timeout")) == "timeout"
           assert category(RuntimeError("Target closed: private file")) == "target_closed"
           assert category(ValueError("password")) == "other_error"

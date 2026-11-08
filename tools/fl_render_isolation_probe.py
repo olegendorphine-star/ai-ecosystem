@@ -33,11 +33,32 @@ def category(exc) -> str:
     return "other_error"
 
 
+
+def categorize_chrome_stderr(raw: bytes) -> list[str]:
+    """Only stable category labels, never raw private process error text."""
+    data = raw[-65536:].decode("utf-8", "replace").lower()
+    labels = {
+        "fatal_check": ("check failed", "fatal:", "fatal error"),
+        "memory_corruption": ("malloc():", "double free", "invalid pointer", "corrupted size"),
+        "thread_limit": ("pthread_create", "resource temporarily unavailable"),
+        "shared_library": ("cannot open shared object file", "symbol lookup error"),
+        "font_system": ("fontconfig", "freetype", "harfbuzz", "pango"),
+        "gpu_process": ("gpu process", "gpu_service", "gl_context"),
+        "zygote_error": ("zygote", "fork failed"),
+        "sandbox_error": ("sandbox", "namespace"),
+        "dbus_error": ("dbus", "bus.cc"),
+        "ssl_error": ("certificate", "ssl handshake"),
+        "renderer_crash": ("renderer process crashed", "renderprocesshost", "render process gone"),
+        "segfault_report": ("segmentation fault", "sigsegv", "sigabrt"),
+    }
+    return sorted(k for k, phrases in labels.items() if any(p in data for p in phrases))
+
 def probe(*, single_process: bool = False) -> dict:
     result = {
         "schema": "fl.render.isolation.v1",
         "mode": "single_process" if single_process else "normal",
         "chrome_exit_code": None,
+        "stderr_categories": [],
         "chrome_launched": False, "cdp_connected": False,
         "blank_screenshot": "not_checked", "fl_navigation": "not_checked",
         "fl_http_status": None, "fl_origin_seen": False,
@@ -58,6 +79,7 @@ def probe(*, single_process: bool = False) -> dict:
     p = None
     browser = None
     with tempfile.TemporaryDirectory(prefix="fl-render-smoke-") as tmp:
+        stderr_file = Path(tmp) / "stderr.local"
         try:
             from playwright.sync_api import sync_playwright
             with socket.socket() as s:
@@ -73,7 +95,8 @@ def probe(*, single_process: bool = False) -> dict:
             if single_process:
                 # Controlled compatibility experiment on a fresh, cookie-free profile.
                 args.insert(1, "--single-process")
-            proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with stderr_file.open("wb") as sink:
+                proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=sink)
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             for _ in range(30):
                 if proc.poll() is not None:
@@ -141,6 +164,12 @@ def probe(*, single_process: bool = False) -> dict:
                 proc.terminate()
                 try: proc.wait(timeout=3)
                 except subprocess.TimeoutExpired: proc.kill()
+            try:
+                result["stderr_categories"] = categorize_chrome_stderr(
+                    stderr_file.read_bytes()
+                )
+            except OSError:
+                pass
     return result
 
 
@@ -148,7 +177,7 @@ if __name__ == "__main__":
     print(json.dumps({
         "schema": "fl.render.isolation.compare.v1",
         "normal": probe(single_process=False),
-        "single_process": probe(single_process=True),
+        "single_process": {"skipped": True, "reason": "prior_failed"},
         "owner_session_used": False,
         "write_actions": False,
     }, sort_keys=True))
