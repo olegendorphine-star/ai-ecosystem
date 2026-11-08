@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import signal
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -59,6 +60,7 @@ class Browser:
         self.browser = None
         self.context = None
         self.page = None
+        self.chrome_proc = None
         self.stopped = False
         self.startup_error = ""
 
@@ -77,7 +79,36 @@ class Browser:
         ) if cache_root.exists() else []
         if chrome_candidates:
             launch_kwargs["executable_path"] = str(chrome_candidates[-1])
-        self.browser = self.p.chromium.launch(**launch_kwargs)
+        # Launch Chrome outside Playwright, then attach over CDP. This avoids
+        # BrowserType.launch failures on restricted VPS kernels.
+        if chrome_candidates:
+            debug_port = int(os.environ.get("AVITO_CHROME_DEBUG_PORT", "9222"))
+            user_data = PROFILE / "chrome-user-data"
+            user_data.mkdir(parents=True, exist_ok=True)
+            cmd = [
+                str(chrome_candidates[-1]), "--headless=new", "--no-sandbox",
+                "--disable-dev-shm-usage", "--disable-gpu", "--no-zygote",
+                "--remote-debugging-address=127.0.0.1",
+                f"--remote-debugging-port={debug_port}",
+                f"--user-data-dir={user_data}",
+                "about:blank",
+            ]
+            self.chrome_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            for _ in range(30):
+                try:
+                    import urllib.request
+                    with urllib.request.urlopen(f"http://127.0.0.1:{debug_port}/json/version", timeout=1):
+                        break
+                except Exception:
+                    if self.chrome_proc.poll() is not None:
+                        err = self.chrome_proc.stderr.read().decode("utf-8", "replace")[-1000:]
+                        raise RuntimeError(f"Chrome exited: {err}")
+                    time.sleep(0.2)
+            else:
+                raise RuntimeError("Chrome remote debugging endpoint did not start")
+            self.browser = self.p.chromium.connect_over_cdp(f"http://127.0.0.1:{debug_port}")
+        else:
+            self.browser = self.p.chromium.launch(**launch_kwargs)
         state_path = PROFILE / "storage_state.json"
         context_kwargs = {"viewport": {"width": 1280, "height": 900}}
         if state_path.exists():
@@ -93,6 +124,8 @@ class Browser:
                     self.context.storage_state(path=str(PROFILE / "storage_state.json"))
                     self.context.close()
                 if self.browser: self.browser.close()
+                if self.chrome_proc and self.chrome_proc.poll() is None:
+                    self.chrome_proc.terminate()
             finally:
                 if self.p: self.p.stop()
 
