@@ -56,6 +56,8 @@ def check() -> dict:
         "proot_package_downloaded": False,
         "proot_binary_ready": False,
         "proot_version_works": False,
+        "proot_basic_exec_works": False,
+        "proot_exec_error_categories": [],
         "proot_xvfb_ready": False,
         "proot_xkbcomp_alias_works": False,
         "proot_xkbdata_alias_works": False,
@@ -98,6 +100,25 @@ def check() -> dict:
         return out
     out["proot_version_works"] = run([str(PROOT), "--version"], env, timeout=8) == 0
     if not out["proot_version_works"]:
+        return out
+    try:
+        cmd = subprocess.run([str(PROOT), "/usr/bin/true"], env=env, timeout=8,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+        out["proot_basic_exec_works"] = cmd.returncode == 0
+        if cmd.returncode != 0:
+            err = cmd.stderr.decode("utf-8", errors="replace").lower()[-8000:]
+            patterns = {
+                "ptrace_denied": ("ptrace", "tracer"),
+                "operation_not_permitted": ("operation not permitted", "permission denied"),
+                "seccomp_restriction": ("seccomp", "system call"),
+                "runtime_link_error": ("shared libraries", "symbol lookup"),
+                "executable_missing": ("no such file", "not found", "cannot execute"),
+            }
+            out["proot_exec_error_categories"] = sorted(
+                k for k, needles in patterns.items() if any(v in err for v in needles))
+    except (OSError, subprocess.TimeoutExpired):
+        out["proot_exec_error_categories"] = ["launch_or_timeout"]
+    if not out["proot_basic_exec_works"]:
         return out
     out["proot_xkbcomp_alias_works"] = run(
         [str(PROOT), "-b", f"{XKBCOMP}:/usr/bin/xkbcomp",
