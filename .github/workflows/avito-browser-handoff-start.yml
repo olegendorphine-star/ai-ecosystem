@@ -1,4 +1,4 @@
-name: Avito browser — start local handoff
+name: Avito browser — start local handoff # auto HTTPS
 
 on:
   workflow_dispatch:
