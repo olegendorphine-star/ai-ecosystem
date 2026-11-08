@@ -57,6 +57,9 @@ def check() -> dict:
         "proot_binary_ready": False,
         "proot_version_works": False,
         "proot_xvfb_ready": False,
+        "proot_xkbcomp_alias_works": False,
+        "proot_xkbdata_alias_works": False,
+        "xvfb_failure_categories": [],
         "xvfb_failed": False,
         "packages_unavailable": [],
         "owner_session_used": False,
@@ -96,6 +99,14 @@ def check() -> dict:
     out["proot_version_works"] = run([str(PROOT), "--version"], env, timeout=8) == 0
     if not out["proot_version_works"]:
         return out
+    out["proot_xkbcomp_alias_works"] = run(
+        [str(PROOT), "-b", f"{XKBCOMP}:/usr/bin/xkbcomp",
+         "/usr/bin/xkbcomp", "-version"], env, timeout=8) == 0
+    out["proot_xkbdata_alias_works"] = run(
+        [str(PROOT), "-b", f"{XKBDATA}:/usr/share/X11/xkb",
+         "/usr/bin/test", "-f", "/usr/share/X11/xkb/rules/evdev"], env, timeout=8) == 0
+    if not (out["proot_xkbcomp_alias_works"] and out["proot_xkbdata_alias_works"]):
+        return out
     with tempfile.TemporaryDirectory(prefix="fl-xvfb-proot-", dir=ROOT) as d:
         temp = Path(d)
         compiled = temp / "compiled"
@@ -114,13 +125,14 @@ def check() -> dict:
             str(PROOT),
             "-b", f"{XKBCOMP}:/usr/bin/xkbcomp",
             "-b", f"{XKBDATA}:/usr/share/X11/xkb",
-            "-b", f"{compiled}:/var/lib/xkb/compiled",
             str(XVFB), f":{display}", "-screen", "0", "800x600x24", "-nolisten", "tcp",
         ]
         proc = None
+        stderr_path = temp / "proot-xvfb-stderr"
         try:
-            proc = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL, start_new_session=True)
+            with stderr_path.open("wb") as stderr_handle:
+                proc = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
+                                        stderr=stderr_handle, start_new_session=True)
             for _ in range(45):
                 if Path(f"/tmp/.X11-unix/X{display}").exists() and proc.poll() is None:
                     out["proot_xvfb_ready"] = True
@@ -139,6 +151,23 @@ def check() -> dict:
                 except (OSError, subprocess.TimeoutExpired):
                     try: os.killpg(proc.pid, signal.SIGKILL)
                     except OSError: pass
+            try:
+                diagnostic = stderr_path.read_text("utf-8", errors="replace").lower()[-12000:]
+                patterns = {
+                    "proot_bind_error": ("can't bind", "cannot bind", "binding", "failed to bind"),
+                    "proot_execution_error": ("proot error", "proot warning", "execve", "can't execute"),
+                    "xkb_compiler_not_found": ("xkbcomp", "can't run xkbcomp"),
+                    "xkb_path_missing": ("couldn't find", "can't open", "not found"),
+                    "xkb_fatal_error": ("xkb", "keymap", "keyboard"),
+                    "xvfb_fatal_error": ("fatal server error",),
+                    "permission_error": ("permission denied", "operation not permitted"),
+                }
+                out["xvfb_failure_categories"] = sorted(
+                    key for key, needles in patterns.items()
+                    if any(x in diagnostic for x in needles)
+                )
+            except OSError:
+                pass
     return out
 
 
