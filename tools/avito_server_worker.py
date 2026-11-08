@@ -230,7 +230,7 @@ def avito_navigation_smoke() -> dict:
             "proxy_connection_failed", "tls_connection_failed",
             "network_connection_failed", "navigation_failed",
         }
-        result["navigation_error_category"] = error_category if error_category in known_errors else "unavailable"
+        result["navigation_error_category"] = error_category if isinstance(error_category, str) and error_category in known_errors else "unavailable"
         code = post_status.get("last_navigation_http_status") if isinstance(post_status, dict) else None
         result["site_http_status"] = code if type(code) is int and 100 <= code <= 599 else None
         result["avito_ip_blocked"] = (
