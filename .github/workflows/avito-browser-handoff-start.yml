@@ -42,7 +42,7 @@ jobs:
           port="${AVITO_SERVER_PORT:-22}"
           ssh=(ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" "$AVITO_SERVER_USER@$AVITO_SERVER_HOST")
           cat tools/avito_browser_handoff.py | "${ssh[@]}" 'mkdir -p "$HOME/.avito-agent" && cat > "$HOME/.avito-agent/avito_browser_handoff.py"'
-      - name: Install Chromium system dependencies
+      - name: Install only missing Chromium runtime packages in Avito user home (no sudo)
         env:
           AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
           AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
@@ -50,14 +50,45 @@ jobs:
         run: |
           set -euo pipefail
           port="${AVITO_SERVER_PORT:-22}"
-          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'bash -s' <<'REMOTE'
-          set -eu
-          if ! ldconfig -p 2>/dev/null | grep -q 'libatk-1.0.so.0'; then
-            mkdir -p "$HOME/.local/lib" "$HOME/.cache/avito-debs"
-            cd "$HOME/.cache/avito-debs"
-            apt-get download libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 2>/dev/null || apt-get download libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0
-            for deb in ./*.deb; do dpkg-deb -x "$deb" "$HOME/.local"; done
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" \
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          install -d -m 700 "$HOME/.cache/avito-debs"
+          install -d -m 700 "$HOME/.local"
+          install_pkg() {
+            local pkg="$1" folder="$HOME/.cache/avito-debs/$1" deb
+            mkdir -p "$folder"
+            shopt -s nullglob
+            local files=("$folder"/*.deb)
+            if [ "${#files[@]}" -eq 0 ]; then
+              (cd "$folder" && timeout 35s apt-get download "$pkg" >/dev/null 2>&1) || return 1
+              files=("$folder"/*.deb)
+            fi
+            [ "${#files[@]}" -gt 0 ] || return 1
+            for deb in "${files[@]}"; do
+              dpkg-deb -x "$deb" "$HOME/.local" >/dev/null || return 1
+            done
+          }
+          for pkg in libxres1 libxcomposite1 libxdamage1 libxfixes3 libxi6 libxrandr2 libcairo2 libgbm1 libpango-1.0-0; do
+            if ! install_pkg "$pkg"; then echo "CHROMIUM_PACKAGE_UNAVAILABLE:$pkg" >&2; exit 1; fi
+          done
+          if ! install_pkg libasound2t64; then
+            install_pkg libasound2 || { echo CHROMIUM_PACKAGE_UNAVAILABLE:libasound >&2; exit 1; }
           fi
+          if ! install_pkg libcups2t64; then
+            install_pkg libcups2 || { echo CHROMIUM_PACKAGE_UNAVAILABLE:libcups >&2; exit 1; }
+          fi
+          chrome_path="$(find "$HOME/.cache/ms-playwright" -type f -name chrome -perm -u+x 2>/dev/null | sort | tail -1)"
+          if [ -z "$chrome_path" ]; then echo CHROMIUM_BINARY_NOT_FOUND >&2; exit 1; fi
+          export LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          missing="$(ldd "$chrome_path" 2>/dev/null | awk '/=> not found/ {print $1}' || true)"
+          if [ -n "$missing" ]; then
+            printf 'CHROME_STILL_MISSING_SONAMES=%s\n' "$(printf '%s' "$missing" | tr '\n' ',')" >&2
+            exit 1
+          fi
+          echo CHROME_REQUIRED_LIBRARIES_PRESENT
           REMOTE
 
       - name: Stop obsolete public demo tunnel before private diagnostics
