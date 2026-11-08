@@ -204,10 +204,13 @@ jobs:
         run: |
           set -euo pipefail
           port="${AVITO_SERVER_PORT:-22}"
+          result=""
+          ssh_rc=0
           result="$(cat tools/avito_server_worker.py | ssh -F /dev/null -4 -T \
             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" \
             -o IdentitiesOnly=yes -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" \
-            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 - --action avito_navigation_smoke --json')"
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 - --action avito_navigation_smoke --json')" || ssh_rc=$?
+          if [ -z "$result" ]; then echo AVITO_NAVIGATION_NO_SANITIZED_RESULT; exit 1; fi
           printf '%s\n' "$result"
           printf '%s\n' "$result" | python3 -c 'import json,sys; item=json.load(sys.stdin); sys.exit(0 if item.get("ok") is True else 1)'
