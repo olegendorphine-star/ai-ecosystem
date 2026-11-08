@@ -7,6 +7,7 @@ Link token and TLS tunnel originate only after owner-initiated workflow.
 """
 from __future__ import annotations
 
+import base64
 import fcntl
 import hmac
 import json
@@ -209,9 +210,7 @@ class HandoffHandler(BaseHTTPRequestHandler):
                 self.json_response(503, {"error": "browser_not_ready"})
                 return
             try:
-                shot = self.server.browser.page.screenshot(
-                    type="png", timeout=6500, animations="disabled"
-                )
+                shot = self.server.browser.screenshot_png()
                 self.response(200, shot, "image/png")
             except Exception:
                 self.json_response(503, {"error": "screenshot_unavailable"})
@@ -338,6 +337,42 @@ class Browser:
         self.page = self.context.new_page()
         self.page.goto(ALLOWED_PAGES["login"], wait_until="commit", timeout=20000)
 
+    def screenshot_png(self):
+        """Capture only for the authenticated owner. Never persist or log pixels.
+
+        A direct CDP capture avoids Playwright's document.fonts.ready wait when
+        third-party font requests keep FL.ru's page in a loading state.
+        """
+        if self.proc is None or self.proc.poll() is not None:
+            raise RuntimeError("chrome_process_not_alive")
+        if self.page is None or self.page.is_closed():
+            raise RuntimeError("browser_page_closed")
+        try:
+            image = self.page.screenshot(
+                type="png", timeout=4000, animations="disabled",
+            )
+            if image.startswith(b"\x89PNG\r\n\x1a\n"):
+                return image
+        except Exception:
+            pass
+        if self.context is None:
+            raise RuntimeError("playwright_context_unavailable")
+        cdp = self.context.new_cdp_session(self.page)
+        try:
+            data = cdp.send("Page.captureScreenshot", {
+                "format": "png", "captureBeyondViewport": False,
+                "fromSurface": True,
+            })
+            image = base64.b64decode(data.get("data", ""), validate=True)
+            if not image.startswith(b"\x89PNG\r\n\x1a\n"):
+                raise RuntimeError("invalid_screenshot")
+            return image
+        finally:
+            try:
+                cdp.detach()
+            except Exception:
+                pass
+
     def live_status(self, *, test_screenshot=False):
         """Do not equate a non-None Playwright page with a running Chrome."""
         result = {"ready": False, "chrome_alive": False, "screenshot_ready": False}
@@ -349,9 +384,7 @@ class Browser:
                 return result
             if test_screenshot:
                 # Read only, bounded. Never store or emit screenshot bytes.
-                raw = self.page.screenshot(
-                    type="png", timeout=6500, animations="disabled"
-                )
+                raw = self.screenshot_png()
                 result["screenshot_ready"] = raw.startswith(b"\x89PNG\r\n\x1a\n")
                 result["ready"] = result["screenshot_ready"]
             else:
@@ -386,6 +419,15 @@ def main():
         with tempfile.TemporaryDirectory(prefix="handoff-runtime-", dir=ROOT) as runtime:
             try:
                 browser.open(Path(runtime))
+                # A responding port or page handle is not proof of a usable browser.
+                # Fail before issuing ANY one-time owner credential link.
+                for _ in range(2):
+                    if browser.live_status(test_screenshot=True)["ready"]:
+                        break
+                    time.sleep(0.5)
+                else:
+                    print("FL_HANDOFF_RENDER_NOT_READY", flush=True)
+                    return
                 token = secrets.token_urlsafe(32)
                 csrf = secrets.token_urlsafe(24)
                 fd = os.open(TOKEN_FILE, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
