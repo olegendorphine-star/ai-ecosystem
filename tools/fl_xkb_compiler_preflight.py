@@ -17,12 +17,14 @@ BIN = BASE / "usr/bin/xkbcomp"
 XKB = BASE / "usr/share/X11/xkb"
 XVFB = BASE / "usr/bin/Xvfb"
 
+# XKB include statements are intentionally not terminated with a semicolon.
+# Semicolons terminate the containing xkb_* section, not the include directive.
 SOURCE = """xkb_keymap {
-    xkb_keycodes { include "evdev+aliases(qwerty)"; };
-    xkb_types { include "complete"; };
-    xkb_compat { include "complete"; };
-    xkb_symbols { include "pc+us+inet(evdev)"; };
-    xkb_geometry { include "pc(pc105)"; };
+    xkb_keycodes { include "evdev+aliases(qwerty)" };
+    xkb_types { include "complete" };
+    xkb_compat { include "complete" };
+    xkb_symbols { include "pc+us+inet(evdev)" };
+    xkb_geometry { include "pc(pc105)" };
 };
 """
 
