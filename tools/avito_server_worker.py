@@ -93,6 +93,24 @@ def connect_status() -> dict:
 
 
 
+def _startup_error_category(error: object) -> str:
+    """Stable categories only: do not publish traceback, paths or profile data."""
+    if not isinstance(error, str) or not error:
+        return "none"
+    s = error.lower()
+    if "libatk-1.0.so.0" in s or "missing_libatk" in s:
+        return "missing_libatk"
+    if "cannot open shared object file" in s or "missing_shared_library" in s:
+        return "missing_shared_library"
+    if "remote debugging endpoint" in s or "cdp" in s:
+        return "browser_debugging_unavailable"
+    if "chrome exited" in s or "browser_process_exited" in s:
+        return "browser_process_exited"
+    if "browser executable" in s or "executable doesn't exist" in s:
+        return "browser_executable_missing"
+    return "browser_start_failed"
+
+
 def _safe_browser_status(payload: object) -> dict:
     """Convert sensitive local UI status into non-identifying readiness flags."""
     result = {
@@ -103,6 +121,7 @@ def _safe_browser_status(payload: object) -> dict:
     if not isinstance(payload, dict):
         return result
     result["startup_failed"] = bool(payload.get("startup_error"))
+    result["startup_error_category"] = _startup_error_category(payload.get("startup_error"))
     page_url = payload.get("url")
     # about:blank counts as an initialized page, not Avito login.
     result["browser_ready"] = (
