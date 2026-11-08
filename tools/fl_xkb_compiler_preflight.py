@@ -101,11 +101,19 @@ def inspect() -> dict:
         pass
     with tempfile.TemporaryDirectory(prefix="fl-xkb-preflight-") as td:
         source = Path(td) / "example.xkb"
-        dest = Path(td) / "example.xkm"
         source.write_text(SOURCE, encoding="utf-8")
-        data["xkb_compile"] = command(
-            [str(BIN), "-I", f"-I{XKB}", "-w", "0", "-xkm", str(source), str(dest)], env)
-        data["xkb_compile"]["output_present"] = dest.is_file() and dest.stat().st_size > 20
+        variants = [
+            ("include_only", [f"-I{XKB}"]),
+            ("isolated_include", ["-I", f"-I{XKB}"]),
+            ("root_only", [f"-R{XKB}"]),
+        ]
+        data["xkb_compile_variants"] = {}
+        for name, extra in variants:
+            dest = Path(td) / (name + ".xkm")
+            status = command(
+                [str(BIN), *extra, "-w", "0", "-xkm", str(source), str(dest)], env)
+            status["output_present"] = dest.is_file() and dest.stat().st_size > 20
+            data["xkb_compile_variants"][name] = status
     return data
 
 if __name__ == "__main__":
