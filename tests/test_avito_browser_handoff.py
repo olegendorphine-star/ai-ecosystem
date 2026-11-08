@@ -54,6 +54,31 @@ class HandoffSafetyTests(unittest.TestCase):
         b.page = Page()
         self.assertFalse(b.status()["ok"])
 
+    def test_avito_ip_error_in_page_is_flagged_without_text_leak(self):
+        class Response:
+            status = 200
+        class Locator:
+            def inner_text(self, timeout=None):
+                return "Страница не загрузилась из-за проблем с IP"
+        class Page:
+            url = "https://www.avito.ru/"
+            def is_closed(self):
+                return False
+            def goto(self, url, wait_until=None, timeout=None):
+                self.url = url
+                return Response()
+            def locator(self, selector):
+                return Locator()
+        b = mod.Browser()
+        b.page = Page()
+        b.navigate("https://www.avito.ru/")
+        result = b.status()
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["last_navigation_ip_blocked"])
+        self.assertEqual(result["last_navigation_http_status"], 200)
+        self.assertNotIn("Страница", str(result))
+
+
 
 if __name__ == "__main__":
     unittest.main()
