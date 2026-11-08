@@ -77,7 +77,8 @@ let y=Math.floor((e.clientY-box.top)/box.height*850);await post("click",{x,y})}
 async function save(){let r=await post("save",{});if(r.ok){alert("Состояние сохранено. Разовый доступ закрыт.")}}
 async function refresh(){try{let r=await fetch("/api/status",{credentials:"same-origin"});
 let j=await r.json();document.querySelector("#status").textContent=j.ready?
-"Браузер готов. Вход проверяем после сохранения.":"Браузер недоступен";
+(j.on_fl_domain?"Браузер открыт на FL.ru. После входа нажмите «Сохранить сессию».":"Внимание: открыта НЕ страница FL.ru!"):
+"Браузер недоступен";
 document.querySelector("#shot").src="/shot?t="+Date.now()}catch(e){}}
 refresh();
 </script></html>"""
@@ -120,6 +121,14 @@ def save_state(context):
             os.unlink(temporary)
 
 
+def is_fl_url(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+        return parsed.scheme == "https" and parsed.hostname in {"www.fl.ru", "fl.ru"}
+    except (TypeError, ValueError):
+        return False
+
+
 def valid_host(value: str) -> bool:
     host = (value or "").split(":")[0].lower()
     return host.endswith(".trycloudflare.com") or host in {"127.0.0.1", "localhost"}
@@ -153,6 +162,8 @@ class HandoffHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy",
+                         "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
         self.end_headers()
         self.wfile.write(data)
 
@@ -177,7 +188,7 @@ class HandoffHandler(BaseHTTPRequestHandler):
             return
         if path == "/start":
             token = parse_qs(urlsplit(self.path).query).get("token", [""])[0]
-            if hmac.compare_digest(token, self.server.secret):
+            if len(token) <= 100 and hmac.compare_digest(token, self.server.secret):
                 self.send_response(303)
                 self.send_header("Set-Cookie", f"fl_handoff={self.server.secret}; HttpOnly; Secure; SameSite=Strict; Path=/")
                 self.send_header("Location", "/")
@@ -199,6 +210,7 @@ class HandoffHandler(BaseHTTPRequestHandler):
                 self.json_response(500, {"error": "browser_unavailable"})
         elif path == "/api/status":
             self.json_response(200, {"ready": self.server.browser.page is not None,
+                                     "on_fl_domain": is_fl_url(self.server.browser.page.url) if self.server.browser.page else False,
                                      "saved": self.server.saved,
                                      "expires_in_minutes": max(0, int(
                                          (self.server.expiry-time.monotonic())/60))})
@@ -228,6 +240,9 @@ class HandoffHandler(BaseHTTPRequestHandler):
                 raise ValueError("invalid_payload")
             op = urlsplit(self.path).path
             page = self.server.browser.page
+            if op in {"/api/click", "/api/type", "/api/key", "/api/save"} and not is_fl_url(page.url):
+                self.json_response(403, {"error": "not_on_fl_site"})
+                return
             if op == "/api/go":
                 route = payload.get("route")
                 if route not in ALLOWED_PAGES:
