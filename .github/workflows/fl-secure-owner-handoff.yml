@@ -7,13 +7,6 @@ on:
       - 'tools/fl_handoff_recipient_pub.pem'
       - 'tests/test_fl_secure_handoff.py'
       - '.github/workflows/fl-secure-owner-handoff.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'tools/fl_secure_handoff.py'
-      - 'tools/fl_handoff_recipient_pub.pem'
-      - 'tests/test_fl_secure_handoff.py'
-      - '.github/workflows/fl-secure-owner-handoff.yml'
   workflow_dispatch:
 
 permissions:
@@ -39,8 +32,10 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_fl_secure_handoff.py' -v
 
   server:
+    # Disabled while FL.ru's supported owner-authentication method is unresolved.
+    # Never expose the credential-capable custom handoff automatically.
     needs: offline
-    if: github.event_name != 'pull_request'
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
