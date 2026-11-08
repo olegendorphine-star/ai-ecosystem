@@ -1,0 +1,80 @@
+name: Avito connection — one-time read-only check 2026-11-08
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/avito-connection-once-2026-11-08.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  api_readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Authenticate by official Avito OAuth and GET own profile once
+        env:
+          AVITO_CLIENT_ID: ${{ secrets.AVITO_CLIENT_ID }}
+          AVITO_CLIENT_SECRET: ${{ secrets.AVITO_CLIENT_SECRET }}
+          AVITO_ALLOW_READONLY_PREFLIGHT: YES
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/avito_preflight.py
+          python3 tools/avito_preflight.py --live
+
+  existing_browser_readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH identity without logging it
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64"
+          test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/avito-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/avito-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/avito-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/avito-ssh/key" "$RUNNER_TEMP/avito-ssh/known_hosts"
+      - name: One read-only existing owner session check (no login or restart)
+        env:
+          AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          AVITO_SERVER_SSH_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${AVITO_SERVER_SSH_PORT:-22}"
+          result=""
+          if ! result="$(cat tools/avito_server_worker.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/avito-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=QUIET \
+            -i "$RUNNER_TEMP/avito-ssh/key" -p "$port" \
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" \
+            'python3 - --action avito_owner_session_probe --json' 2>/dev/null)"; then
+            echo 'OWNER_SESSION_PROBE_NONZERO_OR_RESTRICTED'
+          fi
+          if [ -z "$result" ]; then echo 'PRIVATE_SSH_OR_BROWSER_UNAVAILABLE'; exit 0; fi
+          printf '%s' "$result" | python3 -c '
+          import json,sys
+          try: d=json.load(sys.stdin)
+          except (ValueError,TypeError): print("INVALID_PRIVATE_STATUS");sys.exit(0)
+          s=d.get("site_http_status")
+          state=d.get("auth_state")
+          print("BROWSER_READY",d.get("browser_ready") is True)
+          print("PROFILE_HTTP",s if type(s) is int and 100<=s<=599 else "unknown")
+          print("OWNER_CONTROLS",d.get("account_controls_seen") is True)
+          print("AUTH_STATE",state if state in {"unverified","likely_active","auth_required"} else "unverified")
+          print("WRITE_ACTIONS",False)
+          '
