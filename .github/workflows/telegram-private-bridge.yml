@@ -1,0 +1,83 @@
+name: Telegram owner - encrypted GitHub issue bridge
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: telegram-owner-bridge
+  cancel-in-progress: false
+
+jobs:
+  encrypted_owner_command:
+    if: >-
+      github.event.issue.number == 119 &&
+      github.event.comment.user.login == 'olegendorphine-star' &&
+      startsWith(github.event.comment.body, 'TG_BRIDGE_COMMAND_V1 ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Load verified VPS SSH credentials
+        env:
+          SSH_KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/tg-ssh"
+          printf '%s' "$SSH_KEY" | base64 --decode > "$RUNNER_TEMP/tg-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/tg-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-ssh/key" "$RUNNER_TEMP/tg-ssh/known_hosts"
+      - name: Execute ciphertext on owner's VPS, return ciphertext only
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER"
+          port="${PORT:-22}"
+          result="$(printf '%s' "$COMMENT_BODY" | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/tg-ssh/key" -p "$port" \
+            "$USER@$HOST" \
+            '"$HOME/.telegram-agent/venv/bin/python" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py" execute')"
+          # Do not log plaintext commands or encrypted replies.
+          RESULT="$result" python3 - <<'PY'
+          import json, os, urllib.request
+          r = os.environ['RESULT']
+          prefix = 'TG_BRIDGE_RESULT_V1 '
+          if not r.startswith(prefix):
+              raise SystemExit('ENCRYPTED_RESULT_MISSING')
+          value = json.loads(r[len(prefix):])
+          if (not isinstance(value, dict) or
+              set(value) != {'schema', 'sender_pub', 'nonce', 'ciphertext'} or
+              value.get('schema') != 'tg.bridge.encrypted.v1' or
+              any(not isinstance(v, str) or len(v) > 90000 for v in value.values())):
+              raise SystemExit('ENCRYPTED_RESULT_INVALID')
+          data = json.dumps({'body': r}, separators=(',', ':')).encode()
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['REPO']}/issues/119/comments",
+              data=data,
+              headers={
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'TelegramEncryptedOwnerBridge/1.0',
+              }, method='POST',
+          )
+          with urllib.request.urlopen(req, timeout=20) as resp:
+              if resp.status != 201:
+                  raise SystemExit('RESULT_POST_FAILED')
+          print('TG_ENCRYPTED_RESULT_POSTED')
+          PY

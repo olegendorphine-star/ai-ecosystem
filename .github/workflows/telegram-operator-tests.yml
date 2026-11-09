@@ -1,0 +1,27 @@
+name: Telegram owner - offline tests, no credentials
+
+on:
+  pull_request:
+    paths:
+      - 'tools/telegram_*.py'
+      - 'tests/test_telegram_owner_operator.py'
+      - '.github/workflows/telegram-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install crypto only (no Telegram credentials or API calls)
+        run: python3 -m pip install --disable-pip-version-check 'cryptography>=44,<48'
+      - name: Compile and test replay controls and encrypted transport
+        run: |
+          python3 -m py_compile tools/telegram_owner_operator.py tools/telegram_secure_bridge.py tools/telegram_private_runtime.py
+          python3 -m unittest discover -s tests -p 'test_telegram_owner_operator.py' -v
