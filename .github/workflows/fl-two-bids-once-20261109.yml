@@ -1,4 +1,6 @@
 name: FL - User-approved two free bids (one-time guarded submission)
+# Finalize remaining 5527732 after independent confirmation that 5528403 was sent.
+# Durable VPS marker prevents resubmission of 5528403.
 on:
   push:
     branches: [main]
