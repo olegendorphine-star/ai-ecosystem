@@ -47,6 +47,22 @@ jobs:
                  "404","405","409","429","500","503","open","file","permission",
                  "panic","no such file","unsupported","internal","bad request")
           out["error_signals"]=[w.replace(" ","_") for w in words if w in text]
+          patterns={
+              "ipv6_dial_attempt":r'dial tcp \\[',
+              "ipv4_dial_attempt":r'dial tcp (?:[0-9]{1,3}\\.){3}[0-9]{1,3}',
+              "network_unreachable":r'network is unreachable',
+              "connection_timeout":r'(?:i/o timeout|context deadline exceeded|timeout)',
+              "connection_refused":r'connection refused',
+              "tls_handshake":r'(?:tls:|handshake)',
+              "dns_error":r'(?:no such host|lookup .* on .*:53)',
+              "remote_api_http_status":r'(?:http.*status|status code|response code)\\s*(?:=|:)?\\s*[45][0-9]{2}',
+              "api_non_json_response":r'(?:failed to parse error response|invalid character .*looking for beginning of value)',
+              "http_proxy_error":r'(?:proxyconnect|proxy error|bad gateway)',
+              "register_prompt":r'(?:you must accept|failed to read user input|user did not accept)',
+              "local_file_missing":r'no such file or directory',
+          }
+          out["categorized"]={name:bool(re.search(pattern,text)) for name,pattern in patterns.items()}
+          out["log_line_count"]=min(1000,len(text.splitlines()))
           # Never emit network addresses, API keys, config, log content, stack.
           print(json.dumps(out,sort_keys=True))
           PY
