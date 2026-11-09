@@ -1,0 +1,107 @@
+name: Telegram - private WARP TCP HTTP2 fallback on VPS
+on:
+  pull_request:
+    paths: ['.github/workflows/telegram-warp-h2-fallback.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/telegram-warp-h2-fallback.yml']
+permissions:
+  contents: read
+concurrency:
+  group: tg-private-warp-h2
+  cancel-in-progress: false
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Review fail-closed private TCP-only fallback
+        run: |
+          set -euo pipefail
+          f=.github/workflows/telegram-warp-h2-fallback.yml
+          grep -Fq 'socks -b 127.0.0.1 -p 1085 --http2' "$f"
+          grep -Fq 'NoNewPrivileges=true' "$f"
+          grep -Fq 'browser_proxy.json' "$f"
+          grep -Fq 'disable --now telegram-warp-egress.service' "$f"
+          ! grep -Eq '(^|[[:space:]])(sudo|apt|iptables|wg-quick)([[:space:]]|$)' "$f"
+          echo TG_WARP_HTTP2_FALLBACK_REVIEW_OK
+  live_tcp:
+    needs: review
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Pinned SSH identity
+        env:
+          KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KH: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY" && test -n "$KH"
+          install -d -m 700 "$RUNNER_TEMP/tg-ssh"
+          printf '%s' "$KEY" | base64 -d > "$RUNNER_TEMP/tg-ssh/key"
+          printf '%s\n' "$KH" > "$RUNNER_TEMP/tg-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-ssh/key" "$RUNNER_TEMP/tg-ssh/known_hosts"
+      - name: Reuse private device, try WARP HTTP2 on loopback only
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts"
+            -o IdentitiesOnly=yes -o LogLevel=ERROR
+            -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}")
+          ssh "${ssh_args[@]}" "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          root="$HOME/.telegram-agent"
+          test -x "$root/bin/usque-v4.2.1"
+          test -s "$root/private/warp-usque-config.json"
+          test ! -L "$root/private/warp-usque-config.json"
+          test "$(stat -c '%a' "$root/private/warp-usque-config.json")" = 600
+          mkdir -p "$HOME/.config/systemd/user"
+          systemctl --user disable --now telegram-warp-egress.service >/dev/null 2>&1 || true
+          cat > "$HOME/.config/systemd/user/telegram-warp-egress.service" <<'UNIT'
+          [Unit]
+          Description=Private Telegram WARP TCP HTTP2 SOCKS5 egress
+          After=network-online.target
+          [Service]
+          Type=simple
+          UMask=0077
+          ExecStart=%h/.telegram-agent/bin/usque-v4.2.1 -c %h/.telegram-agent/private/warp-usque-config.json socks -b 127.0.0.1 -p 1085 --http2
+          Restart=on-failure
+          RestartSec=8
+          NoNewPrivileges=true
+          [Install]
+          WantedBy=default.target
+          UNIT
+          systemctl --user daemon-reload
+          systemctl --user enable --now telegram-warp-egress.service >/dev/null
+          verified=0
+          for attempt in $(seq 1 7); do
+            code="$(curl --silent --show-error --max-time 8 --output /dev/null \
+              --write-out '%{http_code}' --socks5-hostname 127.0.0.1:1085 \
+              https://web.telegram.org/k/ 2>/dev/null || true)"
+            case "$code" in
+              200|301|302|303|307|308) verified=1; break ;;
+            esac
+            sleep 2
+          done
+          if [ "$verified" -ne 1 ]; then
+            systemctl --user disable --now telegram-warp-egress.service >/dev/null 2>&1 || true
+            echo TG_WARP_HTTP2_CANNOT_REACH_TELEGRAM
+            exit 1
+          fi
+          echo TG_WARP_HTTP2_TELEGRAM_WEB_ACCESS_OK
+          printf '{"server":"socks5://127.0.0.1:1085"}\n' > "$root/private/browser_proxy.json"
+          chmod 600 "$root/private/browser_proxy.json"
+          echo TG_WARP_PRIVATE_TELEGRAM_BROWSER_PROXY_READY
+          REMOTE
+          ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'set -eu; systemctl --user is-active --quiet telegram-warp-egress.service; curl --silent --fail --show-error --max-time 16 --output /dev/null --socks5-hostname 127.0.0.1:1085 https://web.telegram.org/k/ && echo TG_WARP_HTTP2_PERSISTS_AFTER_SSH'
