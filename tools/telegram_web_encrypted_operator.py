@@ -9,22 +9,30 @@ Allowlisted actions:
   web_status  -- boolean logged-in status only
   web_dialogs -- bounded titles/peer identifiers from visible chat list
   web_read    -- bounded visible messages in one selected chat
+  web_reply   -- only explicitly approved text in response to verified incoming
 Opening a chat may cause Telegram to mark its messages as read.
-No sending, deletion, arbitrary browser automation or scripts from caller.
+Only a reply to a verified existing inbound message can be sent, with
+explicit owner approval and a fail-closed at-most-once per-command ledger.
+No cold messages, deletion, arbitrary browser navigation or caller scripts.
 """
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
+import sqlite3
+import stat
 import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path.home() / ".telegram-agent" / "browser"
 LOCK = ROOT / "rootless_owner.lock"
-ALLOWED = frozenset({"web_status", "web_dialogs", "web_read"})
+ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_reply"})
+REPLY_LEDGER = ROOT / "owner_approved_reply_attempts.sqlite3"
+MAX_REPLY_TEXT = 2000
 
 # This checks UI state only. Chat titles and messages are collected separately,
 # and passed to the response encryptor on the VPS, NEVER to workflow logs.
@@ -110,6 +118,121 @@ def normalize_dialogs(rows, limit: int):
     return result
 
 
+def claim_reply_once(command: dict, path: Path = REPLY_LEDGER) -> str:
+    """Commit BEFORE touching Telegram; retries cannot accidentally double-send.
+
+    `attempted` includes in-flight and uncertain sends. If the process
+    crashes after claim, a repeated command fails closed (no resend).
+    Only a SHA256 digest is saved, never the reply text or chat contents.
+    """
+    if path.is_symlink() or (path.exists() and (
+            not stat.S_ISREG(path.stat().st_mode)
+            or path.stat().st_uid != os.getuid()
+            or path.stat().st_mode & 0o077)):
+        raise ValueError("unsafe_ledger")
+    digest = hashlib.sha256(
+        json.dumps(command, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+    conn = sqlite3.connect(path, timeout=10)
+    try:
+        os.chmod(path, 0o600)
+        conn.execute("PRAGMA busy_timeout=10000")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS reply_attempts ("
+            "command_id TEXT PRIMARY KEY, digest TEXT NOT NULL, state TEXT NOT NULL)"
+        )
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT digest,state FROM reply_attempts WHERE command_id=?",
+                (command["command_id"],)
+            ).fetchone()
+            if row:
+                if row[0] != digest:
+                    raise ValueError("reused_reply_command_with_different_content")
+                state = "already_attempted"
+            else:
+                conn.execute(
+                    "INSERT INTO reply_attempts(command_id,digest,state) VALUES(?,?,'attempted')",
+                    (command["command_id"], digest)
+                )
+                state = "claimed"
+            conn.commit()
+            return state
+        except Exception:
+            conn.rollback()
+            raise
+    finally:
+        conn.close()
+
+
+def complete_reply(command_id: str, path: Path = REPLY_LEDGER):
+    conn = sqlite3.connect(path, timeout=10)
+    try:
+        conn.execute("UPDATE reply_attempts SET state='confirmed' WHERE command_id=?",
+                     (command_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def send_approved_reply(page, peer_id: int, p: dict, command: dict) -> dict:
+    """Outbound side effect: call ONLY after explicit owner approval.
+
+    Require a bubble currently visible and definitely inbound, matching
+    the already-verified selected peer. Telegram Web's sendText API is the
+    same authenticated client API used by its upstream e2e tests.
+    """
+    reply_id = p["reply_to_id"]
+    text = p["text"].strip()
+    if not isinstance(text, str) or not 1 <= len(text) <= MAX_REPLY_TEXT:
+        return {"status": "reply_rejected"}
+    target = page.evaluate(
+        """(mid) => {
+          const b = [...document.querySelectorAll('#column-center .bubble[data-mid]')]
+             .find(x => x.getAttribute('data-mid') === String(mid));
+          return !!b && b.classList.contains('is-in') &&
+            !b.classList.contains('is-out');
+        }""", reply_id)
+    if target is not True:
+        return {"status": "inbound_message_not_verified"}
+    if claim_reply_once(command) != "claimed":
+        return {"status": "already_attempted_no_resend"}
+    try:
+        initiated = page.evaluate(
+            """({peer,mid,text}) => {
+              const app = window.appImManager;
+              if (!app || Number(app.chat?.peerId) !== peer) return false;
+              const send = app.managers?.appMessagesManager?.sendText;
+              if (typeof send !== 'function') return false;
+              send.call(app.managers.appMessagesManager,
+                {peerId: peer, text, replyToMsgId: mid});
+              return true;
+            }""",
+            {"peer": peer_id, "mid": reply_id, "text": text})
+        if initiated is not True:
+            return {"status": "send_not_started_no_retry"}
+        # Do not send again if confirmation is missing. The client may have
+        # transmitted the message even if UI update is delayed.
+        for _ in range(18):
+            confirmed = page.evaluate(
+                """(text) => [...document.querySelectorAll('#column-center .bubble.is-out')]
+                 .some(b => !b.classList.contains('is-sending') &&
+                    (b.querySelector('.message [data-message-text-source]')?.textContent
+                     || b.querySelector('.message')?.textContent || '').trim() === text)""",
+                text)
+            if confirmed is True:
+                complete_reply(command["command_id"])
+                return {"status": "sent_confirmed", "action": "web_reply",
+                        "command_id": command["command_id"]}
+            page.wait_for_timeout(550)
+        return {"status": "send_status_uncertain_no_retry"}
+    except Exception:
+        # Never repeat this attempted command; owner checks Telegram manually
+        # if UI acknowledgement cannot be established.
+        return {"status": "send_status_uncertain_no_retry"}
+
+
 def normalize_messages(rows, limit: int):
     if not isinstance(rows, list):
         raise ValueError("unexpected_messages")
@@ -172,8 +295,8 @@ def run_command(command: dict) -> dict:
                     items = page.evaluate(DIALOGS_JS, p.get("limit", 10))
                     return {"status": "ok", "action": action,
                             "dialogs": normalize_dialogs(items, p.get("limit", 10))}
-                # web_read can mark messages as read: caller explicitly
-                # requested this operation and receives result encrypted.
+                # Opening a chat may mark it read. For web_reply we also
+                # verify an inbound bubble before taking any send action.
                 peer_id = p["peer_id"]
                 selector = f'#column-left a.chatlist-chat[data-peer-id="{peer_id}"]'
                 row = page.locator(selector).first
@@ -215,6 +338,8 @@ def run_command(command: dict) -> dict:
                     return {"status": "requested_chat_not_opened", "action": action,
                             "selection_checks": checks}
                 page.wait_for_timeout(900)
+                if action == "web_reply":
+                    return send_approved_reply(page, peer_id, p, command)
                 messages = normalize_messages(
                     page.evaluate(MESSAGES_JS, p.get("limit", 10)),
                     p.get("limit", 10))
