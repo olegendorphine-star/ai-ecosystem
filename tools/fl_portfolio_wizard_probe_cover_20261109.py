@@ -19,7 +19,7 @@ def cover(ctx,path):
  <path d="M377 577 H515 M445 577 V480 M445 690 V743"/><circle cx="445" cy="472" r="17" fill="#22dbc6"/><circle cx="445" cy="751" r="17" fill="#22dbc6"/></g>
  <text x="80" y="850" font-family="DejaVu Sans,Arial" font-size="23" fill="#9ebed6">МОДЕЛЬ-НЕЗАВИСИМАЯ АРХИТЕКТУРА</text></svg>'''
  page.set_content('<html><body style="margin:0;background:#081a36">'+svg+'</body></html>',wait_until="load")
- page.screenshot(path=str(path),animations="disabled",timeout=17000)
+ page.screenshot(path=str(path),type="jpeg",quality=83,animations="disabled",timeout=17000)
  page.close()
 def fields(page):
  return page.evaluate("""()=>{
@@ -47,7 +47,7 @@ try:
    p.locator('button[data-id="fl-add-portfolio-button"]').first.click(timeout=7000)
    p.wait_for_timeout(350)
    OUT["stages"].append({"step":1,"detail":fields(p)})
-   cover_file=Path(temp)/"cover.png";cover(b.context,cover_file)
+   cover_file=Path(temp)/"cover.jpg";cover(b.context,cover_file)
    p.locator("#ui-input-example-name-input").fill("Персональный ИИ-Штаб — модель-независимая система")
    fileinputs=p.locator('input[type=file]')
    OUT["file_count"]=fileinputs.count()
@@ -61,6 +61,7 @@ try:
     crop=p.get_by_role("button",name="Сохранить обложку",exact=True)
     OUT["crop_buttons"]=crop.count()
     if crop.count()==1:
+     OUT["crop_button_enabled"]=crop.is_enabled()
      crop.click(timeout=8500)
      p.wait_for_timeout(2100)
      OUT["crop_after"]=p.evaluate("""()=>({cropVisible:Array.from(document.querySelectorAll("button")).some(e=>e.offsetParent!==null&&(e.innerText||"").trim()==="Сохранить обложку"),lastText:(document.body?.innerText||"").slice(-950)})""")
