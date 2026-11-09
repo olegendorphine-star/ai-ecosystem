@@ -14,13 +14,16 @@ import json
 import os
 import secrets
 import sqlite3
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 
 ROOT = Path.home() / ".telegram-agent"
 SESSION = ROOT / "auth" / "owner"
 LEDGER = ROOT / "state" / "outbound.sqlite3"
-ALLOWED = frozenset({"status", "dialogs", "read", "reply"})
+ALLOWED = frozenset({"status", "dialogs", "read", "reply",
+                     "web_status", "web_dialogs", "web_read"})
 MAX_TEXT = 3500
 
 
@@ -63,20 +66,28 @@ def validate(command: dict) -> dict:
         "status": set(), "dialogs": {"limit"},
         "read": {"chat_id", "limit"},
         "reply": {"chat_id", "reply_to_id", "text", "approved_by_owner"},
+        "web_status": set(), "web_dialogs": {"limit"},
+        "web_read": {"peer_id", "limit"},
     }[action]
     if not set(params).issubset(allowed_fields):
         raise Rejected("unexpected params")
-    if action == "dialogs":
-        if type(params.get("limit", 10)) is not int or not 1 <= params.get("limit", 10) <= 30:
+    if action in {"dialogs", "web_dialogs"}:
+        cap = 30 if action == "dialogs" else 20
+        if type(params.get("limit", 10)) is not int or not 1 <= params.get("limit", 10) <= cap:
             raise Rejected("invalid dialog limit")
     if action in {"read", "reply"}:
         if (type(params.get("chat_id")) is not int or
             not -(2**63) < params["chat_id"] < 2**63 or
             params["chat_id"] == 0):
             raise Rejected("invalid chat id")
-    if action == "read":
-        if type(params.get("limit", 10)) is not int or not 1 <= params.get("limit", 10) <= 20:
+    if action in {"read", "web_read"}:
+        cap = 20 if action == "read" else 12
+        if type(params.get("limit", 10)) is not int or not 1 <= params.get("limit", 10) <= cap:
             raise Rejected("invalid message limit")
+    if action == "web_read":
+        peer_id = params.get("peer_id")
+        if type(peer_id) is not int or not -(2**53) < peer_id < 2**53 or peer_id == 0:
+            raise Rejected("invalid web peer id")
     if action == "reply":
         if (type(params.get("reply_to_id")) is not int or params["reply_to_id"] <= 0 or
             not isinstance(params.get("text"), str) or
@@ -203,8 +214,34 @@ class TelethonBackend:
         ))
 
 
+def _run_private_web_adapter(command: dict) -> dict:
+    """Never route browser plaintext through CI; subprocess stays entirely VPS."""
+    script = ROOT / "browser" / "telegram_web_encrypted_operator.py"
+    if not script.is_file() or script.is_symlink():
+        return {"status": "web_browser_adapter_not_deployed"}
+    try:
+        process = subprocess.run(
+            [sys.executable, str(script)],
+            input=json.dumps(command, ensure_ascii=False),
+            text=True, capture_output=True, timeout=100,
+            check=False,
+        )
+        if process.returncode or len(process.stdout) > 64000:
+            return {"status": "private_web_execution_failed"}
+        response = json.loads(process.stdout)
+        if not isinstance(response, dict) or not isinstance(response.get("status"), str):
+            return {"status": "private_web_result_invalid"}
+        return response
+    except Exception:
+        # Never return browser exception text, private URLs or chat data to logs.
+        return {"status": "private_web_execution_failed"}
+
+
 async def run_command(command: dict) -> dict:
-    """Call only on owner's VPS; no codes, passwords or data leave this process."""
+    """Call only on owner's VPS; results returned only via encrypted bridge."""
+    validate(command)
+    if command["action"].startswith("web_"):
+        return await asyncio.to_thread(_run_private_web_adapter, command)
     from telethon import TelegramClient
     app_id = os.environ.get("TELEGRAM_API_ID", "")
     app_hash = os.environ.get("TELEGRAM_API_HASH", "")
