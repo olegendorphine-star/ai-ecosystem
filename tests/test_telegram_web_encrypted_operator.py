@@ -101,6 +101,15 @@ class Validation(unittest.TestCase):
                 with self.assertRaises(owner.Rejected):
                     owner.validate(command("web_phone_message", invalid))
 
+    def test_owner_contact_link_requires_no_recipient_or_arguments(self):
+        self.assertEqual(owner.validate(command("web_owner_contact_link", {}))["action"],
+                         "web_owner_contact_link")
+        with self.assertRaises(owner.Rejected):
+            owner.validate(command("web_owner_contact_link",
+                                   {"phone": "+12025550123"}))
+        with self.assertRaises(owner.Rejected):
+            owner.validate(command("web_owner_contact_link", {"username": "someone"}))
+
     def test_arbitrary_actions_forbidden(self):
         for action in ("web_send", "web_delete", "web_navigate",
                        "web_js", "web_screenshot", "web_export_cookies"):
@@ -152,6 +161,31 @@ class UIHelpers(unittest.TestCase):
         self.assertIn("inbound_message_not_verified", source)
         self.assertIn("LOCK_EX | fcntl.LOCK_NB", source)
         self.assertIn("browser.close()", source)
+
+
+class OwnContactLink(unittest.TestCase):
+    def test_returns_only_own_safe_username_url(self):
+        page = mock.Mock()
+        page.evaluate.return_value = {"status":"ok", "method":"username",
+                                      "url":"https://t.me/OwnAccount_123"}
+        res = web.get_owner_contact_link(page)
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["url"], "https://t.me/OwnAccount_123")
+
+    def test_rejects_external_or_unsafe_link(self):
+        page = mock.Mock()
+        for bad in ("https://evil.example/x", "http://t.me/OwnAccount_123",
+                    "https://t.me/OwnAccount_123?token=secret"):
+            page.evaluate.return_value = {"status":"ok", "method":"username",
+                                          "url":bad}
+            self.assertEqual(web.get_owner_contact_link(page)["status"],
+                             "contact_link_invalid")
+
+    def test_refuses_private_browser_failure(self):
+        page = mock.Mock()
+        page.evaluate.side_effect = RuntimeError("private-browser-detail")
+        self.assertEqual(web.get_owner_contact_link(page),
+                         {"status":"contact_link_unavailable"})
 
 
 class ReplyLedger(unittest.TestCase):
