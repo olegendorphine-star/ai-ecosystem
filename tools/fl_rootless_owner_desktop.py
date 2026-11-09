@@ -334,12 +334,24 @@ class HandoffHandler(BaseHTTPRequestHandler):
                     raise ValueError("invalid_key")
                 page.keyboard.press(key)
             elif op == "/api/save":
-                # A private FL path must remain at its exact route after a
-                # user-initiated navigation; never save a login-page session.
-                response = page.goto(ALLOWED_PAGES["settings"], wait_until="commit", timeout=18000)
-                if (not is_fl_url(page.url) or urlsplit(page.url).path !=
-                        urlsplit(ALLOWED_PAGES["settings"]).path
-                        or response is None or response.status != 200):
+                # Do not navigate away from an authenticated FL settings page.
+                # FL can redirect its old setup URI, making exact-path tests
+                # misleading. Verify domain + page contents + known owner
+                # identity instead. Never persist a generic login page.
+                if not is_fl_url(page.url):
+                    self.json_response(409, {"error": "login_not_verified"})
+                    return
+                page.wait_for_load_state("domcontentloaded", timeout=12000)
+                proof = page.evaluate("""() => ({
+                    settings: (document.body?.innerText || "").includes("Основные настройки"),
+                    owner: Array.from(document.querySelectorAll("input")).some(
+                      e => (e.value || "").trim().toLowerCase() === "olegendorphine@gmail.com"),
+                    loginForm: !!document.querySelector('form[action*="/account/login"]')
+                })""")
+                if (not isinstance(proof, dict)
+                        or not proof.get("settings") or not proof.get("owner")
+                        or proof.get("loginForm")
+                        or urlsplit(page.url).path.startswith(("/account/login", "/account/registration"))):
                     self.json_response(409, {"error": "login_not_verified"})
                     return
                 save_state(self.server.browser.context)
@@ -443,7 +455,13 @@ class Browser:
             executable_path=str(choices[-1]), headless=False,
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
             env=environment, timeout=20000)
-        self.context = self.browser.new_context(viewport=VIEWPORT)
+        opts = {"viewport": VIEWPORT}
+        if STATE.is_file() and not STATE.is_symlink():
+            meta = STATE.stat()
+            if (meta.st_uid == os.getuid() and (meta.st_mode & 0o077) == 0
+                    and 2 <= meta.st_size < 2*1024*1024):
+                opts["storage_state"] = str(STATE)
+        self.context = self.browser.new_context(**opts)
         self.page = self.context.new_page()
         self.page.goto(ALLOWED_PAGES["login"], wait_until="commit", timeout=20000)
 
