@@ -39,6 +39,8 @@ try:
          labels:Array.from(e.labels||[]).map(x=>(x.innerText||'').trim()),
          beforeText:(e.previousElementSibling?.innerText||'').trim().slice(0,200),
          afterText:(e.nextElementSibling?.innerText||'').trim().slice(0,200),
+         rowText:(e.closest("tr")?.innerText||"").trim().replace(/\\s+/g," ").slice(0,380),
+         previousCellText:(e.closest("td")?.previousElementSibling?.innerText||"").trim().replace(/\\s+/g," ").slice(0,200),
          parents};
      })
    }""")
