@@ -1,11 +1,7 @@
 name: FL - owner-approved 3 portfolio works with cover once
 # Read-only discovery of free profile editing fields and gated account capabilities.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-owner-portfolio-works-once-20261109.yml'
-      - 'tools/fl_owner_portfolio_publish_three_once_20261109.py'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
