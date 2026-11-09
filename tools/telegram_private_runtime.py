@@ -29,10 +29,13 @@ def load_credentials(path=CREDS):
 
 
 if __name__ == "__main__":
-    try:
-        load_credentials()
-    except Exception:
-        print("TG_CONFIG_REQUIRED")
-        sys.exit(1)
+    # A missing credential file must not prevent an encrypted status response.
+    # The owner will see configuration_required inside the encrypted result.
+    if CREDS.is_file():
+        try:
+            load_credentials()
+        except Exception:
+            print("TG_CONFIG_INVALID")
+            sys.exit(1)
     from telegram_secure_bridge import cli
     cli()
