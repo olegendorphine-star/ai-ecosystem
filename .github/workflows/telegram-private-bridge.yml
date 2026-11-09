@@ -51,7 +51,7 @@ jobs:
             -o IdentitiesOnly=yes -o LogLevel=ERROR \
             -i "$RUNNER_TEMP/tg-ssh/key" -p "$port" \
             "$USER@$HOST" \
-            '"$HOME/.telegram-agent/venv/bin/python" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py" execute')"
+            '"$HOME/.telegram-agent/bin/telegram-python" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py" execute')"
           # Do not log plaintext commands or encrypted replies.
           RESULT="$result" python3 - <<'PY'
           import json, os, urllib.request
