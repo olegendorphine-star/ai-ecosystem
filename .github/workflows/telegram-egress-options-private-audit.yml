@@ -1,0 +1,72 @@
+name: Telegram - rootless available egress options audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/telegram-egress-options-private-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare pinned SSH
+        env:
+          KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KH: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY" && test -n "$KH"
+          install -d -m 700 "$RUNNER_TEMP/tg-ssh"
+          printf '%s' "$KEY" | base64 -d > "$RUNNER_TEMP/tg-ssh/key"
+          printf '%s\n' "$KH" > "$RUNNER_TEMP/tg-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-ssh/key" "$RUNNER_TEMP/tg-ssh/known_hosts"
+      - name: Read-only network capability flags, never secrets or account contents
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" 'python3 -' <<'PY'
+          import json, os, shutil, socket, subprocess
+          from pathlib import Path
+          hosts=("web.telegram.org","www.cloudflare.com","api.cloudflareclient.com",
+                 "engage.cloudflareclient.com","connect.tg")
+          names=("warp-cli","warp-svc","tailscale","wireproxy","wg","curl","cloudflared","go","docker")
+          result={"schema":"tg.vps.egress.options.v1","rootless_only":True,
+                  "programs":{n:bool(shutil.which(n)) for n in names},
+                  "proxy_config_exists":(Path.home()/".telegram-agent/private/browser_proxy.json").is_file(),
+                  "proxy_env_present":{n:n in os.environ for n in ("HTTP_PROXY","HTTPS_PROXY","ALL_PROXY","http_proxy","https_proxy","all_proxy")},
+                  "dns_family":{},"tcp443":{},"local_proxy_port":{},"no_account_actions":True}
+          for host in hosts:
+              result["dns_family"][host]={"ipv4":False,"ipv6":False}
+              result["tcp443"][host]={"ipv4":False,"ipv6":False}
+              for family,key in ((socket.AF_INET,"ipv4"),(socket.AF_INET6,"ipv6")):
+                  try:
+                      addrs=socket.getaddrinfo(host,443,family=family,type=socket.SOCK_STREAM)
+                  except OSError:
+                      continue
+                  result["dns_family"][host][key]=bool(addrs)
+                  for entry in addrs[:2]:
+                      try:
+                          with socket.socket(family,socket.SOCK_STREAM) as s:
+                              s.settimeout(2.5)
+                              s.connect(entry[4])
+                          result["tcp443"][host][key]=True
+                          break
+                      except OSError:
+                          pass
+          for port in (1080,1081,40000):
+              try:
+                  with socket.create_connection(("127.0.0.1",port),timeout=0.4):
+                      result["local_proxy_port"][str(port)]=True
+              except OSError:
+                  result["local_proxy_port"][str(port)]=False
+          print(json.dumps(result,sort_keys=True))
+          PY
