@@ -55,8 +55,20 @@ class Validation(unittest.TestCase):
         with self.assertRaises(owner.Rejected):
             owner.validate(command("web_read", {"peer_id": 123, "limit": 13}))
 
-    def test_no_browser_send_or_arbitrary_actions(self):
-        for action in ("web_reply", "web_send", "web_delete", "web_navigate",
+    def test_owner_approval_mandatory_for_reply(self):
+        data = {"peer_id": 123, "reply_to_id": 99, "text": "Approved reply"}
+        with self.assertRaises(owner.Rejected):
+            owner.validate(command("web_reply", data))
+        with self.assertRaises(owner.Rejected):
+            owner.validate(command("web_reply", {**data, "approved_by_owner": False}))
+        with self.assertRaises(owner.Rejected):
+            owner.validate(command("web_reply", {**data, "approved_by_owner": True,
+                                                 "arbitrary_javascript": "x"}))
+        self.assertEqual(owner.validate(command(
+            "web_reply", {**data, "approved_by_owner": True}))["action"], "web_reply")
+
+    def test_arbitrary_actions_forbidden(self):
+        for action in ("web_send", "web_delete", "web_navigate",
                        "web_js", "web_screenshot", "web_export_cookies"):
             with self.assertRaises(owner.Rejected):
                 owner.validate(command(action))
@@ -101,9 +113,56 @@ class UIHelpers(unittest.TestCase):
         self.assertNotIn("page.screenshot(", source)
         self.assertNotIn("os.system(", source)
         self.assertNotIn("shell=True", source)
-        self.assertNotIn("web_reply", source.split("ALLOWED =")[1].split("\n")[0])
+        self.assertIn("send_approved_reply", source)
+        self.assertIn("claim_reply_once", source)
+        self.assertIn("inbound_message_not_verified", source)
         self.assertIn("LOCK_EX | fcntl.LOCK_NB", source)
         self.assertIn("browser.close()", source)
+
+
+class ReplyLedger(unittest.TestCase):
+    def test_attempted_once_no_replay(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.chmod(td, 0o700)
+            path = Path(td) / "reply.sqlite3"
+            cmd = command("web_reply", {"peer_id": 18, "reply_to_id": 99,
+                                         "text": "approved", "approved_by_owner": True})
+            self.assertEqual(web.claim_reply_once(cmd, path), "claimed")
+            self.assertEqual(web.claim_reply_once(cmd, path), "already_attempted")
+            self.assertEqual(path.stat().st_mode & 0o077, 0)
+            web.complete_reply(cmd["command_id"], path)
+            self.assertEqual(web.claim_reply_once(cmd, path), "already_attempted")
+
+    def test_conflicting_reuse_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.chmod(td, 0o700)
+            path = Path(td) / "reply.sqlite3"
+            cmd = command("web_reply", {"peer_id": 18, "reply_to_id": 99,
+                                         "text": "one", "approved_by_owner": True})
+            self.assertEqual(web.claim_reply_once(cmd, path), "claimed")
+            cmd["params"]["text"] = "two"
+            with self.assertRaises(ValueError):
+                web.claim_reply_once(cmd, path)
+
+    def test_inbound_required_before_ledger(self):
+        fake_page = mock.Mock()
+        fake_page.evaluate.return_value = False
+        cmd = command("web_reply", {"peer_id": 18, "reply_to_id": 99,
+                                     "text": "owner approved", "approved_by_owner": True})
+        with mock.patch.object(web, "claim_reply_once") as claim:
+            result = web.send_approved_reply(fake_page, 18, cmd["params"], cmd)
+            self.assertEqual(result["status"], "inbound_message_not_verified")
+            claim.assert_not_called()
+
+    def test_no_send_after_existing_attempt(self):
+        fake_page = mock.Mock()
+        fake_page.evaluate.return_value = True
+        cmd = command("web_reply", {"peer_id": 18, "reply_to_id": 99,
+                                     "text": "owner approved", "approved_by_owner": True})
+        with mock.patch.object(web, "claim_reply_once", return_value="already_attempted"):
+            result = web.send_approved_reply(fake_page, 18, cmd["params"], cmd)
+            self.assertEqual(result["status"], "already_attempted_no_resend")
+            self.assertEqual(fake_page.evaluate.call_count, 1)
 
 
 class BridgeRouting(unittest.TestCase):
