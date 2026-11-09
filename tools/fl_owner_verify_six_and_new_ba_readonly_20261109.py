@@ -46,7 +46,7 @@ try:
        form:!!document.querySelector('textarea#el-descr'),
        closed:/исполнитель определ[её]н|проект закрыт|проект заверш[её]н|снят с публикации/i.test(v),
        paid:/Купить 1 отклик|Купить отклики|оплатите отклик|недостаточно откликов/i.test(v),
-       description:v.slice(0,kind==='candidate'?1000:170)}}""")
+       description:v.slice(0,1000)}}""")
       item.update({"title":d["h"],"owner_reply_visible":bool(d["edit"] or d["posted"]),
         "send_form_present":bool(d["send"] and d["form"]),"free":bool(d["free"]),
         "unavailable":bool(d["closed"] or d["paid"]),"status":"checked"})
