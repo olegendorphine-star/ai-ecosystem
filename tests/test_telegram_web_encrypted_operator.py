@@ -179,7 +179,9 @@ class OwnContactLink(unittest.TestCase):
             "def send_approved_phone_message(",1)[0]
         self.assertIn("tg://contact?token", body)
         self.assertIn("parsed.hostname === 'contact'", body)
-        self.assertIn("url:'https://t.me/contact/'+encodeURIComponent(token)", body)
+        self.assertIn("normalized = 'https://t.me' + parsed.pathname", body)
+        self.assertIn("url:normalized", body)
+        self.assertIn("parsed.hostname === 'contact'", body)
         self.assertIn("u?.username", body)
         self.assertIn('telegram_url', body)
         self.assertNotIn("return {status:'ok',method:'contact_token',url:rawUrl}", body)
