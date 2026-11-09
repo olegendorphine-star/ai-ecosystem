@@ -158,3 +158,103 @@ jobs:
                 "xvfb_log_categories","xvfb_exit_code")
           print(json.dumps({k:d.get(k) for k in keep},sort_keys=True))
           '
+
+      - name: Try existing SSH key for directly authorized root login (one attempt)
+        id: root
+        if: steps.install.outputs.graphics_ready != 'true'
+        env:
+          SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${SERVER_PORT:-22}"
+          result=""
+          if ! result="$(cat <<'PY' | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o PasswordAuthentication=no \
+            -o KbdInteractiveAuthentication=no -o NumberOfPasswordPrompts=0 \
+            -o ConnectTimeout=12 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=QUIET \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "root@$SERVER_HOST" 'python3 -' 2>/dev/null
+          import json, os, subprocess
+          from pathlib import Path
+
+          root = os.geteuid() == 0
+          compiler=Path("/usr/bin/xkbcomp")
+          xvfb=Path("/usr/bin/Xvfb")
+          rules=Path("/usr/share/X11/xkb/rules/evdev")
+          initial_ready = compiler.is_file() and xvfb.is_file() and rules.is_file()
+          install_status = "already_installed" if initial_ready else "not_root"
+          if root and not initial_ready:
+              try:
+                  env=os.environ.copy()
+                  env["DEBIAN_FRONTEND"]="noninteractive"
+                  proc=subprocess.run(
+                      ["apt-get","install","-y","--no-install-recommends",
+                       "-o","DPkg::Lock::Timeout=15",
+                       "x11-xkb-utils","xkb-data","xvfb"],
+                      env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                      timeout=180,check=False)
+                  install_status="installed" if proc.returncode==0 else "apt_install_failed"
+              except (OSError,subprocess.TimeoutExpired):
+                  install_status="apt_install_unavailable"
+          out={
+              "schema":"fl.vps.direct.root.graphics.v1",
+              "root_authorized":root,
+              "install_status":install_status,
+              "graphics_ready":compiler.is_file() and xvfb.is_file() and rules.is_file(),
+              "fl_requests":0,"captcha_interacted":False,
+              "owner_session_used":False,"write_account_actions":False,
+          }
+          print(json.dumps(out,sort_keys=True))
+          PY
+          )"; then
+            echo 'EXISTING_KEY_ROOT_LOGIN_NOT_AUTHORIZED'
+            echo 'graphics_ready=false' >> "$GITHUB_OUTPUT"
+          else
+            printf '%s\n' "$result" | python3 -c '
+            import json,sys,os
+            d=json.load(sys.stdin)
+            assert d.get("schema")=="fl.vps.direct.root.graphics.v1"
+            assert d.get("fl_requests")==0
+            assert d.get("owner_session_used") is False
+            assert d.get("write_account_actions") is False
+            assert d.get("captcha_interacted") is False
+            print("EXISTING_KEY_ROOT_AUTHORIZED", d.get("root_authorized"))
+            print("ROOT_INSTALL_STATUS",d.get("install_status"))
+            print("SYSTEM_GRAPHICS_READY",d.get("graphics_ready"))
+            with open(os.environ["GITHUB_OUTPUT"],"a") as w:
+                print("graphics_ready="+("true" if d.get("graphics_ready") is True else "false"),file=w)
+            '
+          fi
+      - name: Check GUI browser after authorized root package install (public only)
+        if: steps.root.outputs.graphics_ready == 'true'
+        env:
+          SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${SERVER_PORT:-22}"
+          result="$(cat tools/fl_graphical_browser_probe.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$SERVER_USER@$SERVER_HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.graphical.browser.probe.v1"
+          assert d.get("credentials_used") is False
+          assert d.get("captcha_interacted") is False
+          assert d.get("write_actions") is False
+          keep=("xvfb_present","desktop_chrome_present","graphical_browser_started",
+                "fl_http_status","fl_public_navigation","browser_alive_after",
+                "result","xvfb_log_categories")
+          print(json.dumps({k:d.get(k) for k in keep},sort_keys=True))
+          '
