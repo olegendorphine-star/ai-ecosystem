@@ -1,0 +1,93 @@
+name: Avito firewall evidence - encrypted one-shot from existing VPS
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/avito-firewall-evidence-once-2026-11-09.yml'
+      - 'tools/avito_support_screenshot_capture_once.py'
+permissions:
+  contents: read
+jobs:
+  collect_encrypted:
+    if: >-
+      github.event.pull_request.head.repo.full_name == 'olegendorphine-star/ai-ecosystem' &&
+      github.event.pull_request.user.login == 'olegendorphine-star' &&
+      github.event.pull_request.head.ref == 'diag/avito-firewall-evidence-2026-11-09'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compile restricted read-only capture script
+        run: python3 -m py_compile tools/avito_support_screenshot_capture_once.py
+      - name: Prepare pinned SSH key without output
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64"
+          test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/firewall-private/ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/firewall-private/ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/firewall-private/ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/firewall-private/ssh/"*
+      - name: Single capture on existing VPS - no navigation to Avito
+        env:
+          AVITO_SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          AVITO_SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          AVITO_SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$AVITO_SERVER_HOST"
+          test -n "$AVITO_SERVER_USER"
+          port="${AVITO_SERVER_PORT:-22}"
+          cat tools/avito_support_screenshot_capture_once.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/firewall-private/ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=QUIET \
+            -i "$RUNNER_TEMP/firewall-private/ssh/key" -p "$port" \
+            "$AVITO_SERVER_USER@$AVITO_SERVER_HOST" 'python3 -' \
+            > "$RUNNER_TEMP/firewall-private/evidence.tar.gz" 2>/dev/null
+          tar -tzf "$RUNNER_TEMP/firewall-private/evidence.tar.gz" >/dev/null
+          echo "Remote evidence capture completed. No Avito navigation performed."
+      - name: Encrypt private images with ephemeral client public key
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/firewall-private/encrypted"
+          cat > "$RUNNER_TEMP/firewall-private/pub.pem" <<'PUB'
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAvViW26Q6y/DSHuVhlEUH
+FWin495Qt9QWMZaaDY9a+NlGT9QCNqU5p25Au0YqY7tim/d4L6/FYj2xWzj8pRHv
+aOCrW4WOElJrNbJ3EcKJcqZNOC436uFX8oqDC/VO5MWx3OEyPvunhPYrXlzvF36A
+KsRSAAXLpRMxcUe53wkEreQuMspZDQ8ecWFAji3BY7VmezG+J3zpfBwz+4T5x4vg
+z0FuFsblSbt2sM2M4AdVrYnW3/fNdIMWSVLfd9ceeP/6KdJeqTsHxYRXwHPCi+WA
+T/nXTjYSmb+wM7d2h466WUyB/ptNc6z5MA+nbjYB//NAcqjCVdugLm3dtdoQ/EoZ
+VOJgu3i14w5ksxM9di7zI1MBZ6PWsymR0mnhd1v5apnlGgB/tq931RhPAy/pdJmZ
+Y/tIMT01t2De5Sk+a4SfGkJzW4/fBJw+hK6rK4VW4ROXpNkntZ88uujzbG/hGbLI
+j1/Dt9JOyWi0X372qRxGocblv+7z2dNq6JTPjevU1DG9AgMBAAE=
+-----END PUBLIC KEY-----
+PUB
+          openssl rand -hex 32 > "$RUNNER_TEMP/firewall-private/key.secret"
+          chmod 600 "$RUNNER_TEMP/firewall-private/key.secret"
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -in "$RUNNER_TEMP/firewall-private/evidence.tar.gz" \
+            -out "$RUNNER_TEMP/firewall-private/encrypted/evidence.tar.gz.enc" \
+            -pass file:"$RUNNER_TEMP/firewall-private/key.secret"
+          openssl pkeyutl -encrypt -pubin \
+            -inkey "$RUNNER_TEMP/firewall-private/pub.pem" \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+            -in "$RUNNER_TEMP/firewall-private/key.secret" \
+            -out "$RUNNER_TEMP/firewall-private/encrypted/key.sealed"
+          tar -xOzf "$RUNNER_TEMP/firewall-private/evidence.tar.gz" report.json \
+            > "$RUNNER_TEMP/firewall-private/encrypted/report.safe.json"
+          rm -f "$RUNNER_TEMP/firewall-private/evidence.tar.gz" "$RUNNER_TEMP/firewall-private/key.secret"
+          echo "Only sealed images and sanitized metadata are preserved in the artifact."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avito-firewall-evidence-encrypted-2026-11-09
+          path: ${{ runner.temp }}/firewall-private/encrypted/
+          retention-days: 1
+          if-no-files-found: error
