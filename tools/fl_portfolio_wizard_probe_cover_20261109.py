@@ -62,9 +62,10 @@ try:
     OUT["crop_buttons"]=crop.count()
     if crop.count()==1:
      crop.click(timeout=8500)
-     p.wait_for_timeout(550)
+     p.wait_for_timeout(2100)
+     OUT["crop_after"]=p.evaluate("""()=>({cropVisible:Array.from(document.querySelectorAll("button")).some(e=>e.offsetParent!==null&&(e.innerText||"").trim()==="Сохранить обложку"),lastText:(document.body?.innerText||"").slice(-950)})""")
    nextbtn=p.get_by_role("button",name="Продолжить",exact=True)
-   nextbtn.click(timeout=8500);p.wait_for_timeout(500)
+   nextbtn.click(timeout=8500);p.wait_for_timeout(1100)
    OUT["stages"].append({"step":2,"detail":fields(p)})
    # Try to fill only a recognized description field; do not publish.
    area=p.locator("textarea").filter(visible=True)
