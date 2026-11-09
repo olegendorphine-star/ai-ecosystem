@@ -1,10 +1,7 @@
 name: FL - owner name and profile title once
 # Owner-directed one-time profile display name and professional title. No purchases.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-owner-name-and-title-once-20261109.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
