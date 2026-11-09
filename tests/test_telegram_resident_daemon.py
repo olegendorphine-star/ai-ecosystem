@@ -40,8 +40,9 @@ class MonitorTests(unittest.TestCase):
 
     def test_file_writes_do_not_store_usernames_or_contacts(self):
         with tempfile.TemporaryDirectory() as temp:
-            old = resident.RUNTIME
+            old, old_state = resident.RUNTIME, resident.STATE
             resident.RUNTIME = Path(temp)
+            resident.STATE = resident.RUNTIME / "monitor.json"
             try:
                 resident.write_private_state({"status": "running",
                          **resident.monitor_snapshot([
@@ -52,7 +53,7 @@ class MonitorTests(unittest.TestCase):
                 self.assertNotIn("peer_id", data)
                 self.assertEqual((resident.RUNTIME / "monitor.json").stat().st_mode & 0o077, 0)
             finally:
-                resident.RUNTIME = old
+                resident.RUNTIME, resident.STATE = old, old_state
 
     def test_socket_insecure_symlink_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
