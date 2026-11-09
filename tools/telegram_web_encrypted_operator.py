@@ -350,7 +350,7 @@ def send_approved_phone_message(page, command: dict) -> dict:
     p = command["params"]
     phone, text = p["phone"], p["text"].strip()
     if (p.get("approved_by_owner") is not True or
-            type(phone) is not str or not re.fullmatch(r"\\+[1-9][0-9]{7,14}", phone)
+            type(phone) is not str or not re.fullmatch(r"\+[1-9][0-9]{7,14}", phone)
             or type(text) is not str or not 1 <= len(text) <= 300):
         return {"status": "direct_phone_not_approved"}
     # Plaintext number stays inside the VPS browser. Do not return it or any
