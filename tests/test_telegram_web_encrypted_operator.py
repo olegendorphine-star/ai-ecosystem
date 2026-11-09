@@ -288,6 +288,16 @@ class ReplyLedger(unittest.TestCase):
         self.assertIn("resolved_contact_phone_mismatch", block)
         self.assertLess(block.index("getContacts("), block.index("importContact("))
 
+    def test_imported_id_requires_server_user_verification(self):
+        source = path.read_text()
+        block = source.split("def send_approved_phone_message(", 1)[1].split(
+            "def normalize_messages(", 1)[0]
+        self.assertIn("getApiUsers([importedId])", block)
+        self.assertIn("fresh.find(u => String(u?.id) === String(importedId))", block)
+        self.assertIn("phone_user_not_verified_after_import", block)
+        self.assertIn("resolved_contact_phone_mismatch", block)
+        self.assertIn("message_requires_payment_or_premium", block)
+
     def test_phone_unresolved_never_calls_send_or_ledger(self):
         page = mock.Mock()
         page.evaluate.return_value = {"status": "phone_not_found"}
