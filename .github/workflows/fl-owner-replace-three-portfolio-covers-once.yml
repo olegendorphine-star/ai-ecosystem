@@ -1,0 +1,48 @@
+name: FL - Replace 3 existing portfolio covers once
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-owner-replace-three-portfolio-covers-once.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fl-owner-three-portfolio-covers-once
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 -m py_compile tools/fl_owner_replace_portfolio_covers_20261109.py
+      - name: Replace exact existing work covers and independently read back
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+          port="${PORT:-22}"
+          result="$(cat tools/fl_owner_replace_portfolio_covers_20261109.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d["schema"]=="fl.owner.portfolio.covers.replace.once.v1"
+          assert d["owner"] and not d["payments"] and not d["messages_opened"] and not d["new_works_created"] and not d["other_account_changed"]
+          for row in d["results"]:print("FL_PORTFOLIO_COVER",row["id"],row["status"],"clicked",row["save_clicked"],"verified",row["verified"],"before_images",row.get("before_image_count",None),"after_images",row.get("after_image_count",None))
+          '
