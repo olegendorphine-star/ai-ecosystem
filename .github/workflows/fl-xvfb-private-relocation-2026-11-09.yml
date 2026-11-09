@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/fl-xvfb-private-relocation-2026-11-09.yml'
+      - 'tools/fl_rootless_xvfb_relocate.py'
 
 permissions:
   contents: read
