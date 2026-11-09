@@ -93,6 +93,7 @@ try:
      nxt.click(timeout=10000);p.wait_for_timeout(230)
      entry["stage"]="step3_open"
      p.get_by_text("AI — искусственный интеллект",exact=True).last.click(timeout=6000)
+     p.wait_for_timeout(550)
      entry["stage"]="category_open"
      p.get_by_text(svc["subcat"],exact=True).last.click(timeout=6000)
      entry["stage"]="subcategory_selected"
