@@ -1,0 +1,95 @@
+name: Telegram Web - private session persisted after Chrome restart
+
+on:
+  pull_request:
+    paths:
+      - 'tools/telegram_web_session_check.py'
+      - 'tests/test_telegram_web_session_check.py'
+      - '.github/workflows/telegram-web-session-verify.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/telegram_web_session_check.py'
+      - 'tests/test_telegram_web_session_check.py'
+      - '.github/workflows/telegram-web-session-verify.yml'
+permissions:
+  contents: read
+concurrency:
+  group: tg-private-session-verification
+  cancel-in-progress: false
+
+jobs:
+  offline_privacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Read-only UI verifier offline privacy and false-positive tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/telegram_web_session_check.py
+          python3 -m unittest discover -s tests -p test_telegram_web_session_check.py -v
+          echo TG_PERSISTENCE_CHECK_OFFLINE_PRIVACY_OK
+
+  live_vps_session:
+    needs: offline_privacy
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Prepare pinned SSH, no auth data in runner
+        env:
+          KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KH: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY" && test -n "$KH"
+          install -d -m 700 "$RUNNER_TEMP/tg-session-ssh"
+          printf '%s' "$KEY" | base64 --decode > "$RUNNER_TEMP/tg-session-ssh/key"
+          printf '%s\n' "$KH" > "$RUNNER_TEMP/tg-session-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-session-ssh/key" "$RUNNER_TEMP/tg-session-ssh/known_hosts"
+      - name: Read-only persisted Telegram Web profile check, never export chat data
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/tg-session-ssh/known_hosts"
+            -o IdentitiesOnly=yes -o LogLevel=ERROR
+            -i "$RUNNER_TEMP/tg-session-ssh/key" -p "$port")
+          # Tool is transferred to the existing owner's private Telegram folder.
+          cat tools/telegram_web_session_check.py | ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'set -eu; umask 077; test -d "$HOME/.telegram-agent/browser" && test ! -L "$HOME/.telegram-agent/browser"; cat > "$HOME/.telegram-agent/browser/telegram_web_session_check.py"; chmod 600 "$HOME/.telegram-agent/browser/telegram_web_session_check.py"'
+          # Run once only if WARP is already healthy. Do NOT touch Avito/FL,
+          # start an owner login, send messages, or export any browser storage.
+          result="$(ssh "${ssh_args[@]}" "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          if ! systemctl --user is-active --quiet telegram-warp-egress.service; then
+            echo '{"schema":"tg.web.session.restart.v1","state":"proxy_service_inactive","persistent_authenticated":false}'
+            exit 0
+          fi
+          if ! curl -fsS --max-time 18 --socks5-hostname 127.0.0.1:1085 \
+            --output /dev/null https://web.telegram.org/k/; then
+            echo '{"schema":"tg.web.session.restart.v1","state":"proxy_web_unreachable","persistent_authenticated":false}'
+            exit 0
+          fi
+          env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$HOME/.avito-agent/venv/bin/python" \
+            "$HOME/.telegram-agent/browser/telegram_web_session_check.py"
+          REMOTE
+          )"
+          # Server checks may output only a single whitelisted JSON status.
+          printf '%s\n' "$result" | tail -n 1 | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d["schema"]=="tg.web.session.restart.v1"
+          assert d.get("telegram_content_exported") is False or "telegram_content_exported" not in d
+          assert d.get("account_actions") is False or "account_actions" not in d
+          print(json.dumps(d, sort_keys=True))
+          '
