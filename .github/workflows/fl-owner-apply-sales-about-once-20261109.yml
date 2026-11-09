@@ -1,0 +1,55 @@
+name: FL - owner explicitly requested update of About text once
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-owner-apply-sales-about-once-20261109.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fl-owner-sales-about-once
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compile single-use script
+        run: python3 -m py_compile tools/fl_owner_apply_sales_about_once_20261109.py
+      - name: Apply exact owner-requested text only and independently verify
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+          port="${PORT:-22}"
+          report="$(cat tools/fl_owner_apply_sales_about_once_20261109.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c '
+          import sys,json
+          d=json.load(sys.stdin)
+          assert d["schema"]=="fl.owner.sales.about.once.v1"
+          for k in ("payment","messages_opened","other_fields_changed","passwords_read","captcha"):assert d[k] is False
+          print("FL_SALES_ABOUT_STATUS",d["status"])
+          print("FL_SALES_ABOUT_OWNER",d["owner_verified"])
+          print("FL_SALES_ABOUT_READBACK",d["readback_verified"])
+          print("FL_SALES_ABOUT_CLICKED",d["clicked"])
+          print("FL_SALES_ABOUT_LENGTHS",d["old_length"],d["new_length"])
+          assert d["owner_verified"] and d["readback_verified"]
+          '
