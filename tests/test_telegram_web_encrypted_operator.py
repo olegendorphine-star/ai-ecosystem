@@ -220,6 +220,17 @@ class ReplyLedger(unittest.TestCase):
             self.assertEqual(web.claim_reply_once(one, path), "claimed")
             self.assertEqual(web.claim_reply_once(two, path), "already_attempted")
 
+    def test_contact_import_is_preferred_over_phone_resolution(self):
+        source = path.read_text()
+        block = source.split("def send_approved_phone_message(", 1)[1].split(
+            "def normalize_messages(", 1)[0]
+        assert "importContact(" in block
+        assert "resolvePhone(" in block
+        self.assertLess(block.index("importContact("), block.index("resolvePhone("))
+        self.assertIn("resolved_contact_phone_mismatch", block)
+        self.assertIn("contact_not_resolved_by_telegram", block)
+        self.assertIn("message_requires_payment_or_premium", block)
+
     def test_phone_unresolved_never_calls_send_or_ledger(self):
         page = mock.Mock()
         page.evaluate.return_value = {"status": "phone_not_found"}
