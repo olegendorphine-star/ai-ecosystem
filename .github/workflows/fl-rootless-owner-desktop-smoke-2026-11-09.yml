@@ -1,0 +1,109 @@
+name: FL - rootless manual owner desktop offline and local GUI smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-rootless-owner-desktop-smoke-2026-11-09.yml'
+      - 'tools/fl_rootless_owner_desktop.py'
+      - 'tests/test_fl_rootless_owner_desktop.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fl-rootless-owner-desktop-smoke
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Syntax and safety properties
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_rootless_owner_desktop.py
+          python3 -m unittest discover -s tests -p 'test_fl_rootless_owner_desktop.py' -v
+
+  local_gui:
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Deploy only owner-safe GUI to user-space folder
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          cat tools/fl_rootless_owner_desktop.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'umask 077; test -d "$HOME/.fl-agent" && test ! -L "$HOME/.fl-agent" && cat > "$HOME/.fl-agent/fl_rootless_owner_desktop.py" && chmod 600 "$HOME/.fl-agent/fl_rootless_owner_desktop.py"'
+          echo FL_DESKTOP_CODE_DEPLOYED_PRIVATE
+      - name: Test rootless full Chrome on FL public login route and screenshot
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' <<'PY'
+          import sys, tempfile, json, os
+          from pathlib import Path
+          sys.path.insert(0, str(Path.home()/".fl-agent"))
+          from fl_rootless_owner_desktop import Browser, ROOT, is_fl_url
+          out={"schema":"fl.owner.desktop.local.smoke.v1",
+               "xvfb_ready":False,"chrome_ready":False,"screenshot_ready":False,
+               "public_fl_domain":False,"write_actions":False,"captcha_interacted":False,
+               "owner_session_used":False}
+          b=Browser()
+          try:
+              with tempfile.TemporaryDirectory(prefix="fl-desktop-smoke-",dir=ROOT) as tmp:
+                  b.open(Path(tmp))
+                  out["xvfb_ready"]= b.proc is not None and b.proc.poll() is None
+                  out["chrome_ready"]= b.browser.is_connected()
+                  out["public_fl_domain"]= is_fl_url(b.page.url)
+                  out["screenshot_ready"]=b.live_status(test_screenshot=True)["screenshot_ready"]
+          finally:
+              b.close()
+          print(json.dumps(out,sort_keys=True))
+          PY
+          )"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.owner.desktop.local.smoke.v1"
+          assert d.get("write_actions") is False and d.get("captcha_interacted") is False
+          assert d.get("owner_session_used") is False
+          print(json.dumps(d,sort_keys=True))
+          assert d["xvfb_ready"] and d["chrome_ready"] and d["public_fl_domain"] and d["screenshot_ready"]
+          '
