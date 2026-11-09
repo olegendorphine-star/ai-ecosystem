@@ -1,0 +1,83 @@
+name: FL - Private one-time upload of six marketing images to owner VPS
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-artwork-private-transfer-once-20261109.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Transfer encrypted link, verify ZIP digest, unpack six images privately
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+          port="${PORT:-22}"
+          cat tools/fl_artwork_transport_20261109.b64 | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" 'bash -c '"'"'
+          set -euo pipefail
+          umask 077
+          root="$HOME/.fl-agent"
+          test -d "$root" && test ! -L "$root"
+          test -s "$root/artwork_transfer_private_20261109.pem"
+          tmp="$(mktemp -d "$root/artwork-tmp-XXXXXX")"
+          trap '\''rm -rf "$tmp"'\'' EXIT
+          base64 -d > "$tmp/cipher.bin"
+          openssl pkeyutl -decrypt -inkey "$root/artwork_transfer_private_20261109.pem" \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+            -in "$tmp/cipher.bin" -out "$tmp/url" 2>/dev/null
+          python3 - "$tmp/url" <<'PY'
+          import sys
+          from urllib.parse import urlsplit
+          v=open(sys.argv[1],encoding="utf-8").read().strip()
+          u=urlsplit(v)
+          assert u.scheme=="https" and u.hostname in {"sdmntpreastus3.oaiusercontent.com","sdmntprdenmarkeast.oaiusercontent.com"} and u.path.startswith("/files/") and len(v)<600
+          PY
+          url="$(cat "$tmp/url")"
+          curl -fLsS --retry 0 --connect-timeout 15 --max-time 90 "$url" -o "$tmp/assets.zip"
+          unset url
+          echo "f918a70dc44e96e06f31ddfeec534f52b3eb3e55109e741ad80d40dc34a699a5  $tmp/assets.zip" | sha256sum -c - >/dev/null
+          python3 - "$tmp/assets.zip" "$root" <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import os,sys
+          src,dest=Path(sys.argv[1]),Path(sys.argv[2])/"artwork_20261109"
+          names=[
+          "01_banner_FL_1920x400.jpg","02_service_audit_1200x800.jpg",
+          "03_service_tz_1200x800.jpg","04_portfolio_staff_900x900.jpg",
+          "05_portfolio_vps_900x900.jpg","06_portfolio_docs_900x900.jpg"]
+          if dest.is_symlink():raise ValueError("dest symlink")
+          dest.mkdir(mode=0o700,exist_ok=True)
+          with ZipFile(src) as z:
+           assert sorted(z.namelist())==sorted(names)
+           for name in names:
+            path=dest/name
+            if path.exists():raise FileExistsError(name)
+            data=z.read(name)
+            assert data[:3]==bytes.fromhex("ffd8ff")
+            fd=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
+            with os.fdopen(fd,"wb") as f:f.write(data)
+          print("FL_ARTWORK_PRIVATE_FILES_READY",len(names))
+          PY
+          rm -f "$root/artwork_transfer_private_20261109.pem"
+          echo FL_ARTWORK_PRIVATE_TRANSFER_CONFIRMED
+          '"'"''
