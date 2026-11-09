@@ -1,6 +1,13 @@
 name: Telegram owner - private VPS deployment (manual, no login)
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/telegram_owner_operator.py'
+      - 'tools/telegram_secure_bridge.py'
+      - 'tools/telegram_private_runtime.py'
+      - '.github/workflows/telegram-private-deploy.yml'
   workflow_dispatch:
 
 permissions:
@@ -44,4 +51,5 @@ jobs:
             'umask 077; mkdir -p "$HOME/.telegram-agent/app"; tar -xf - -C "$HOME/.telegram-agent/app"'
           ssh "${ssh_args[@]}" "$USER@$HOST" \
             'set -eu; umask 077; python3 -m venv "$HOME/.telegram-agent/venv"; "$HOME/.telegram-agent/venv/bin/python" -m pip install --disable-pip-version-check --quiet "Telethon==1.45.0" "cryptography>=44,<48"; "$HOME/.telegram-agent/venv/bin/python" -m py_compile "$HOME/.telegram-agent/app/tools/telegram_owner_operator.py" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py"; echo TELEGRAM_CODE_INSTALLED_NO_ACCOUNT_LOGIN'
+          ssh "${ssh_args[@]}" "$USER@$HOST"             'set -eu; umask 077; p="$HOME/.telegram-agent/private/bridge_x25519.pem"; if [ ! -f "$p" ]; then "$HOME/.telegram-agent/venv/bin/python" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" init-key >/dev/null; fi; test -s "$p"; "$HOME/.telegram-agent/venv/bin/python" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" public-key | sed "s/^/TG_PUBLIC_KEY /"; if [ -f "$HOME/.telegram-agent/private/telegram.env" ]; then echo TG_CREDENTIAL_FILE_PRESENT; else echo TG_AUTH_SETUP_REQUIRED; fi'
           # First-time login must be done interactively on the owner's VPS.
