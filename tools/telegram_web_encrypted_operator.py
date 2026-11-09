@@ -47,7 +47,7 @@ DIALOGS_JS = r"""limit => {
   });
   return matches.slice(0, limit).map(row => {
     const peerId = Number(row.getAttribute('data-peer-id'));
-    const titleNode = row.querySelector('.dialog-title, .row-title, .user-title');
+    const titleNode = row.querySelector('.dialog-title .user-title, .user-title, .peer-title, .dialog-title, .row-title');
     const title = (titleNode?.textContent || '').trim().slice(0, 120);
     const badge = row.querySelector('.dialog-unread-count, .badge-count, .unread-count');
     const unreadRaw = badge?.textContent?.trim() || '';
@@ -181,17 +181,38 @@ def run_command(command: dict) -> dict:
                     return {"status": "chat_not_in_visible_list", "action": action}
                 row.focus()
                 page.keyboard.press("Enter")
-                # Verify exact target, never fall through to the wrong dialog.
+                # A forum row or hidden overlay can swallow Enter. The
+                # signed-in client's supported internal chat opening method is
+                # used only for the exact already-verified visible peer.
                 selected = False
-                for _ in range(20):
-                    selected = page.evaluate(
-                        "(peer) => Number(window.appImManager?.chat?.peerId) === peer",
-                        peer_id)
+                for attempt in range(20):
+                    selected = bool(page.evaluate(
+                        "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)",
+                        peer_id))
                     if selected:
                         break
-                    page.wait_for_timeout(450)
+                    if attempt == 8:
+                        try:
+                            page.evaluate(
+                                "(peer) => { const m = window.appImManager;"
+                                "if (!m || typeof m.setInnerPeer !== 'function') return false;"
+                                "m.setInnerPeer({peerId: peer}); return true; }",
+                                peer_id)
+                        except Exception:
+                            pass
+                    page.wait_for_timeout(550)
                 if not selected:
-                    return {"status": "requested_chat_not_opened", "action": action}
+                    checks = page.evaluate(
+                        "(peer) => { const r = document.querySelector("
+                        "'#column-left .chatlist-chat[data-peer-id=\\\"' + peer + '\\"]');"
+                        "return {chat_present:!!window.appImManager?.chat,"
+                        "row_active:!!r?.classList.contains('active'),"
+                        "center_visible:!!document.querySelector('#column-center .bubble')}; }",
+                        peer_id)
+                    # Diagnostic booleans only, encrypted result: never reveal
+                    # internal peer ID or chat content if selection is uncertain.
+                    return {"status": "requested_chat_not_opened", "action": action,
+                            "selection_checks": checks}
                 page.wait_for_timeout(900)
                 messages = normalize_messages(
                     page.evaluate(MESSAGES_JS, p.get("limit", 10)),
