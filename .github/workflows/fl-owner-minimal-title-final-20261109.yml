@@ -1,10 +1,7 @@
 name: FL - final minimal heading one time
 # Owner-approved final minimal SEO title, no paid actions.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-owner-minimal-title-final-20261109.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
