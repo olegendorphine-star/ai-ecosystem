@@ -133,6 +133,18 @@ class ReplyLedger(unittest.TestCase):
             web.complete_reply(cmd["command_id"], path)
             self.assertEqual(web.claim_reply_once(cmd, path), "already_attempted")
 
+    def test_same_intent_different_uuid_does_not_resend(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.chmod(td, 0o700)
+            path = Path(td) / "reply.sqlite3"
+            params = {"peer_id": 18, "reply_to_id": 99,
+                      "text": "same text", "approved_by_owner": True}
+            one = command("web_reply", params)
+            two = command("web_reply", params)
+            self.assertNotEqual(one["command_id"], two["command_id"])
+            self.assertEqual(web.claim_reply_once(one, path), "claimed")
+            self.assertEqual(web.claim_reply_once(two, path), "already_attempted")
+
     def test_conflicting_reuse_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             os.chmod(td, 0o700)
