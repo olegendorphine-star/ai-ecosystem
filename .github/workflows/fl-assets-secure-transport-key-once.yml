@@ -1,10 +1,12 @@
 name: FL - Generate private one-time artwork transport key on VPS
+# Archived after one-time execution; do not rerun without new owner approval.
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   key:
+    if: ${{ false }}
     if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 6
