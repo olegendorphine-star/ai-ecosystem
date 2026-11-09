@@ -46,7 +46,11 @@ try:
    except Exception:
     result["pages"].append({"type":label,"error":"navigate_or_parse_failed","items":[]})
 
-  details=[]
+  details=[
+   ("b2b_articles","https://www.fl.ru/projects/5528096/redaktor-b2b-statey-o-programmah-dlya-biznesa-35-tekstov-v-nedelyu.html"),
+   ("jewelry_ai_workflow","https://www.fl.ru/projects/5528403/trebuetsya-rabochiy-stsenariy-dlya-ii-dlya-kartochek-tovara-v-gruppe-yuvelirnyie-sergi.html"),
+   ("text_rewriting","https://www.fl.ru/projects/5528141/spetsialist-po-reraytingu-tekstov.html"),
+  ]
   for kind,url in details:
    try:
     response=page.goto(url,wait_until="domcontentloaded",timeout=18000)
