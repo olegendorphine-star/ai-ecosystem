@@ -371,23 +371,53 @@ def send_approved_phone_message(page, command: dict) -> dict:
                 // contacts.resolvePhone it may work when direct lookup is
                 // blocked by the other account's discovery settings.
                 let user;
-                let viaContactImport = false;
+                const userManager = managers?.appUsersManager;
+                if (!userManager || typeof userManager.importContact !== 'function')
+                  return {status:'contact_manager_unavailable'};
+                // Check existing contacts by EXACT full phone first: a past
+                // import can have succeeded even if subsequent UI steps failed.
                 try {
-                  const importedId = await managers.appUsersManager.importContact(
+                  const contactIds = await userManager.getContacts(
+                    undefined, false, 'none');
+                  if (Array.isArray(contactIds)) {
+                    for (const contactId of contactIds.slice(0, 5000)) {
+                      const entry = userManager.getUser(contactId);
+                      const existingPhone = String(entry?.phone || '').replace(/[^0-9]/g,'');
+                      if (existingPhone && existingPhone === phone.replace(/[^0-9]/g,'')) {
+                        user = entry;
+                        break;
+                      }
+                    }
+                  }
+                } catch (_) {
+                  // Read-only contact list is optional; attempt native import.
+                }
+                if (!user) try {
+                  const importedId = await userManager.importContact(
                     'Личный', 'Telegram', phone);
-                  user = managers.appUsersManager.getUser(importedId);
-                  viaContactImport = true;
+                  user = userManager.getUser(importedId);
                 } catch (importError) {
-                  if (importError?.type === 'NO_USER') {
-                    // A number can already be a known contact. Attempt the
-                    // native direct resolver once without repeated imports.
+                  const type = String(importError?.type || '');
+                  if (type === 'NO_USER') {
                     try {
-                      user = await managers.appUsersManager.resolvePhone(phone);
+                      user = await userManager.resolvePhone(phone);
                     } catch (lookupError) {
                       if (lookupError?.type === 'PHONE_NOT_OCCUPIED')
                         return {status:'contact_not_resolved_by_telegram'};
+                      if (String(lookupError?.type || '').startsWith('FLOOD_WAIT_'))
+                        return {status:'telegram_rate_limited'};
                       return {status:'contact_import_or_lookup_restricted'};
                     }
+                  } else if (type.startsWith('FLOOD_WAIT_')) {
+                    return {status:'telegram_rate_limited'};
+                  } else if (type === 'CONTACTS_TOO_MUCH') {
+                    return {status:'telegram_contacts_full'};
+                  } else if (type === 'PHONE_NUMBER_INVALID') {
+                    return {status:'telegram_phone_format_rejected'};
+                  } else if (type.includes('PRIVACY')) {
+                    return {status:'telegram_contact_privacy_restricted'};
+                  } else if (importError?.name === 'TypeError') {
+                    return {status:'contact_browser_type_error'};
                   } else {
                     return {status:'contact_import_restricted'};
                   }
