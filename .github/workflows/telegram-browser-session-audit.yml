@@ -1,0 +1,93 @@
+name: Telegram browser - read-only VPS session inventory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/telegram-browser-session-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read_only_inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: SSH key, pinned server fingerprint
+        env:
+          SSH_KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/tg-inventory-ssh"
+          printf '%s' "$SSH_KEY" | base64 --decode > "$RUNNER_TEMP/tg-inventory-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/tg-inventory-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-inventory-ssh/key" "$RUNNER_TEMP/tg-inventory-ssh/known_hosts"
+
+      - name: Probe metadata only; never print paths, messages, cookies, secrets
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER"
+          port="${PORT:-22}"
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/tg-inventory-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/tg-inventory-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -' <<'PY'
+          import json, os, sqlite3
+          from pathlib import Path
+
+          home=Path.home()
+          rootnames=(".telegram-agent", ".fl-agent", ".avito-agent", ".config/chromium", ".config/google-chrome", ".config/microsoft-edge")
+          roots=[home/n for n in rootnames]
+          result={"schema":"tg.browser.vps.private.inventory.v1",
+                  "vps_checked":True,
+                  "telegram_runtime_installed":(home/".telegram-agent/app/tools/telegram_owner_operator.py").is_file(),
+                  "telegram_user_session_file":(home/".telegram-agent/auth/owner.session").is_file(),
+                  "telegram_credentials_file":(home/".telegram-agent/private/telegram.env").is_file(),
+                  "browser_profile_roots_checked":sum(int(p.is_dir()) for p in roots),
+                  "telegram_web_local_storage_marker":False,
+                  "telegram_web_cookie_host_marker":False,
+                  "telegram_web_current_login_verified":False,
+                  "rootless_read_only":True}
+          # Presence of an origin or host-key is NOT confirmation of live login.
+          scanned=0
+          for root in roots:
+              if not root.is_dir() or root.is_symlink():
+                  continue
+              for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+                  scanned+=1
+                  if scanned>2400:
+                      break
+                  dirnames[:]=[d for d in dirnames if d not in
+                              ("node_modules","vendor","venv","bootstrap-pip","__pycache__","Cache",
+                               "Code Cache","GPUCache","ShaderCache","Service Worker","Crashpad","snapshots","site-packages")
+                              and not (Path(dirpath)/d).is_symlink()]
+                  path=Path(dirpath)
+                  if "IndexedDB" in path.parts:
+                      if any("telegram.org" in d.lower() for d in dirnames):
+                          result["telegram_web_local_storage_marker"]=True
+                  if "Cookies" in filenames:
+                      cookie=path/"Cookies"
+                      try:
+                          db=sqlite3.connect("file:"+str(cookie)+"?mode=ro&immutable=1",uri=True,timeout=1)
+                          try:
+                              row=db.execute("SELECT 1 FROM cookies WHERE host_key LIKE '%telegram.org' LIMIT 1").fetchone()
+                              if row:
+                                  result["telegram_web_cookie_host_marker"]=True
+                          finally:
+                              db.close()
+                      except (sqlite3.Error, OSError):
+                          pass
+              if scanned>2400:
+                  break
+          print(json.dumps(result,sort_keys=True))
+          PY
