@@ -72,6 +72,7 @@ def make_attempt() -> str:
     """Import storage_state only into a fresh, isolated local Chromium."""
     if not validate_state_file():
         return "state_missing_or_unsafe"
+    sys.path.insert(0, str(ROOT))
     import fl_rootless_owner_desktop as portal
     browser = portal.Browser()
     try:
