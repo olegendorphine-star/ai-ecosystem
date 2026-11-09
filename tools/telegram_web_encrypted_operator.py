@@ -13,6 +13,7 @@ Allowlisted actions:
   web_self_note -- explicitly approved note to this owner's own Saved Messages only
   web_phone_message -- one approved phone-number-resolved free personal message
   web_username_message -- one approved public-username-resolved free personal message
+  web_chat_message -- one approved free message to a visible existing personal dialog
 Opening a chat may cause Telegram to mark its messages as read.
 Only a reply to a verified existing inbound message can be sent, with
 explicit owner approval and a fail-closed at-most-once per-command ledger.
@@ -34,7 +35,7 @@ from pathlib import Path
 ROOT = Path.home() / ".telegram-agent" / "browser"
 LOCK = ROOT / "rootless_owner.lock"
 ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_reply", "web_self_note", "web_phone_message", "web_username_message",
-                     "web_owner_contact_link"})
+                     "web_chat_message", "web_owner_contact_link"})
 REPLY_LEDGER = ROOT / "owner_approved_reply_attempts.sqlite3"
 MAX_REPLY_TEXT = 2000
 
@@ -145,6 +146,8 @@ def claim_reply_once(command: dict, path: Path = REPLY_LEDGER) -> str:
         intent = ["approved_phone_once", p["phone"], p["text"].strip()]
     elif command["action"] == "web_username_message":
         intent = ["approved_public_username_once", p["username"].lstrip("@").lower(), p["text"].strip()]
+    elif command["action"] == "web_chat_message":
+        intent = ["approved_existing_personal_dialog_once", p["peer_id"], p["text"].strip()]
     else:
         intent = ["inbound_reply", p["peer_id"], p["reply_to_id"], p["text"].strip()]
     intent_digest = hashlib.sha256(
@@ -825,6 +828,86 @@ def send_approved_username_message(page, command: dict) -> dict:
         return {"status": "target_chat_unavailable"}
 
 
+def send_approved_existing_chat_message(page, command: dict) -> dict:
+    """Free one-off direct message to a visible, verified existing *user* chat.
+
+    Called only after run_command verified the exact selected row and opened it.
+    Group/channel/bot/Saved Messages targets, ambiguous users, paid messaging,
+    or a mismatch of the open chat are rejected before the durable replay claim.
+    """
+    p = command["params"]
+    peer, msg = p["peer_id"], p["text"]
+    if (p.get("approved_by_owner") is not True or
+            type(peer) is not int or not 0 < peer < 2**53 or
+            type(msg) is not str or not 1 <= len(msg.strip()) <= 1200):
+        return {"status": "existing_chat_message_not_approved"}
+    msg = msg.strip()
+    try:
+        # The opening code independently restricted the user to an already
+        # visible sidebar chat row with an exactly matching data-peer-id.
+        free_user = page.evaluate(
+            """async (peer) => {
+              const app = window.appImManager, managers = app?.managers;
+              const self = Number(window.rootScope?.myId);
+              if (Number(app?.chat?.peerId) !== peer ||
+                  !Number.isSafeInteger(self) || self <= 0 ||
+                  !managers?.appUsersManager || !managers?.appPeersManager)
+                return false;
+              try {
+                const user = managers.appUsersManager.getUser(peer);
+                if (user?._ !== 'user' || user.pFlags?.deleted ||
+                    user.pFlags?.bot || user.pFlags?.self ||
+                    Number(user.id) !== peer || peer === self)
+                  return false;
+                if (user.send_paid_messages_stars || user.pFlags?.contact_require_premium)
+                  return false;
+                const requirement =
+                  await managers.appUsersManager.getRequirementToContact(user.id);
+                const stars = await managers.appPeersManager.getStarsAmount(peer);
+                return requirement?._ === 'requirementToContactEmpty' &&
+                  !(Number(stars) > 0);
+              } catch (_) { return false; }
+            }""", peer)
+        if free_user is not True:
+            return {"status": "target_not_verified_free_personal_user"}
+        if claim_reply_once(command) != "claimed":
+            return {"status": "already_attempted_no_resend"}
+        try:
+            started = page.evaluate(
+                """({peer,text}) => {
+                  const app = window.appImManager;
+                  const m = app?.managers?.appMessagesManager;
+                  if (Number(app?.chat?.peerId) !== peer ||
+                      typeof m?.sendText !== 'function') return false;
+                  m.sendText({peerId:peer,text});
+                  return true;
+                }""", {"peer": peer, "text": msg})
+            if started is not True:
+                return {"status": "send_not_started_no_retry"}
+            for _ in range(28):
+                confirmed = page.evaluate(
+                    """({peer,text}) => {
+                      if (Number(window.appImManager?.chat?.peerId) !== peer)
+                        return false;
+                      return [...document.querySelectorAll(
+                        '#column-center .bubble.is-out[data-mid]')].some(
+                        b => !b.classList.contains('is-sending') &&
+                          (b.querySelector('.message [data-message-text-source]')?.textContent ||
+                           b.querySelector('.message')?.textContent || '').trim() === text);
+                    }""", {"peer": peer, "text": msg})
+                if confirmed is True:
+                    complete_reply(command["command_id"])
+                    return {"status": "sent_confirmed",
+                            "action": "web_chat_message",
+                            "destination": "verified_existing_private_chat"}
+                page.wait_for_timeout(450)
+            return {"status": "send_status_uncertain_no_retry"}
+        except Exception:
+            return {"status": "send_status_uncertain_no_retry"}
+    except Exception:
+        return {"status": "existing_chat_check_unavailable"}
+
+
 def normalize_messages(rows, limit: int):
     if not isinstance(rows, list):
         raise ValueError("unexpected_messages")
@@ -940,6 +1023,8 @@ def run_command(command: dict) -> dict:
                 page.wait_for_timeout(900)
                 if action == "web_reply":
                     return send_approved_reply(page, peer_id, p, command)
+                if action == "web_chat_message":
+                    return send_approved_existing_chat_message(page, command)
                 messages = normalize_messages(
                     page.evaluate(MESSAGES_JS, p.get("limit", 10)),
                     p.get("limit", 10))

@@ -24,7 +24,8 @@ SESSION = ROOT / "auth" / "owner"
 LEDGER = ROOT / "state" / "outbound.sqlite3"
 ALLOWED = frozenset({"status", "dialogs", "read", "reply",
                      "web_status", "web_dialogs", "web_read", "web_reply",
-                     "web_self_note", "web_phone_message", "web_username_message", "web_owner_contact_link"})
+                     "web_self_note", "web_phone_message", "web_username_message",
+                     "web_chat_message", "web_owner_contact_link"})
 MAX_TEXT = 3500
 
 
@@ -73,6 +74,7 @@ def validate(command: dict) -> dict:
         "web_self_note": {"text", "approved_by_owner"},
         "web_phone_message": {"phone", "text", "approved_by_owner"},
         "web_username_message": {"username", "text", "approved_by_owner"},
+        "web_chat_message": {"peer_id", "text", "approved_by_owner"},
         "web_owner_contact_link": set(),
     }[action]
     if not set(params).issubset(allowed_fields):
@@ -90,7 +92,7 @@ def validate(command: dict) -> dict:
         cap = 20 if action == "read" else 12
         if type(params.get("limit", 10)) is not int or not 1 <= params.get("limit", 10) <= cap:
             raise Rejected("invalid message limit")
-    if action in {"web_read", "web_reply"}:
+    if action in {"web_read", "web_reply", "web_chat_message"}:
         peer_id = params.get("peer_id")
         if type(peer_id) is not int or not -(2**53) < peer_id < 2**53 or peer_id == 0:
             raise Rejected("invalid web peer id")
@@ -101,6 +103,12 @@ def validate(command: dict) -> dict:
             type(msg) is not str or not 1 <= len(msg.strip()) <= 300 or
             params.get("approved_by_owner") is not True):
             raise Rejected("direct phone message requires approved text and E.164 number")
+    if action == "web_chat_message":
+        msg = params.get("text")
+        if (type(params.get("peer_id")) is not int or params["peer_id"] <= 0 or
+            type(msg) is not str or not 1 <= len(msg.strip()) <= 1200 or
+            params.get("approved_by_owner") is not True):
+            raise Rejected("existing private chat send requires exact user peer and approved text")
     if action == "web_username_message":
         username, msg = params.get("username"), params.get("text")
         if (type(username) is not str or
