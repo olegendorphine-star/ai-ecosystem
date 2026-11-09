@@ -84,8 +84,15 @@ jobs:
           if [ -s rootless_owner.pid ]; then
             pid="$(cat rootless_owner.pid)"
             if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-              echo FL_ROOTLESS_OWNER_SESSION_ALREADY_RUNNING
-              exit 1
+              echo FL_OWNER_WAIT_FOR_PREVIOUS_SESSION_AUTO_EXPIRY
+              for _ in $(seq 1 45); do
+                if ! kill -0 "$pid" 2>/dev/null; then break; fi
+                sleep 3
+              done
+              if kill -0 "$pid" 2>/dev/null; then
+                echo FL_PREVIOUS_SESSION_STILL_ACTIVE_SKIP_RESTART
+                exit 1
+              fi
             fi
           fi
           test -x "$HOME/.avito-agent/venv/bin/python"
