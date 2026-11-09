@@ -1,23 +1,21 @@
-name: FL - Verify six owner bids and candidate BA (read only)
+name: FL - Verify six owner bids and new BA candidate (read only)
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/fl-owner-verify-six-and-new-ba-readonly-20261109.yml'
-      - 'tools/fl_owner_verify_six_and_new_ba_readonly_20261109.py'
-  workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  discover:
+  inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
       - run: python3 -m py_compile tools/fl_owner_verify_six_and_new_ba_readonly_20261109.py
-      - name: Find verified free projects in owner session through pinned SSH
+      - name: Read-only checks via pinned SSH to saved owner Chromium
         env:
           KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
           KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
@@ -30,24 +28,13 @@ jobs:
           printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
           printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
-          port="${PORT:-22}"
           report="$(cat tools/fl_owner_verify_six_and_new_ba_readonly_20261109.py | ssh -F /dev/null -4 -T \
             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
             -o IdentitiesOnly=yes -o LogLevel=ERROR \
-            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
             'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
           printf '%s\n' "$report" | python3 -c '
-          import json,sys
-          d=json.load(sys.stdin)
-          assert d["schema"]=="fl.owner.free.ai.job.discovery.v1" and d["owner_verified"]
-          for k in ("bids_sent","payments","messages_read","captcha"):assert d[k] is False
-          assert d["read_only"]
-          print("FL_FREE_JOBS_DATE",d["asof_utc"])
-          print("FL_FREE_JOBS_CATEGORY",json.dumps(d["categories"],ensure_ascii=False))
-          print("FL_FREE_JOBS_CANDIDATES",len(d["candidates"]))
-          for x in d["details"]:print("FL_FREE_JOB_DETAIL",json.dumps(x,ensure_ascii=False))
-          '          printf '%s\\n' "$report" | python3 -c '
           import json,sys
           d=json.load(sys.stdin)
           assert d["schema"]=="fl.owner.readonly.verify.recent.v1"
