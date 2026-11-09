@@ -17,7 +17,7 @@ try:
    out["fields"]=p.evaluate("""()=>{
     const a=document.querySelector('textarea[name=ab_text]');if(!a)return {found:false};
     const form=a.closest('form');const btns=Array.from(form.querySelectorAll('button')).map(b=>({label:(b.innerText||'').trim(),type:b.type,enabled:!b.disabled}));
-    return {found:true, maxlength:a.maxLength,length:a.value.length, prefix:a.value.slice(0,90), is_sales_copy:(a.value.length===494 && a.value.startsWith('ИИ для реальных задач.') && a.value.endsWith('Опишите задачу — предложу первый шаг и бюджет.')),
+    return {found:true, maxlength:a.maxLength,length:a.value.length, prefix:a.value.slice(0,90), suffix:a.value.slice(-95), has_cta:a.value.includes('Опишите задачу'), has_prices:a.value.includes('150 000 ₽'), is_sales_copy:(a.value.length===494 && a.value.startsWith('ИИ для реальных задач.') && a.value.endsWith('Опишите задачу — предложу первый шаг и бюджет.')),
        formmethod:form.method,formaction:new URL(form.action,location.href).pathname,buttons:btns,
        fields:Array.from(form.querySelectorAll('input,textarea')).map(x=>({name:x.name,type:x.type,length:(x.value||'').length})).filter(x=>x.name)};
    }""")
