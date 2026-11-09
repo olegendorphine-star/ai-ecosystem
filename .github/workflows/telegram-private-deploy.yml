@@ -32,6 +32,13 @@ jobs:
           printf '%s' "$SSH_KEY" | base64 --decode > "$RUNNER_TEMP/tg-ssh/key"
           printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/tg-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/tg-ssh/key" "$RUNNER_TEMP/tg-ssh/known_hosts"
+      - name: Build isolated pip bootstrap on GitHub runner
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tg-bootstrap-pip"
+          python3 -m pip install --disable-pip-version-check --quiet --no-input \
+            --target "$RUNNER_TEMP/tg-bootstrap-pip" "pip>=25.2,<27"
+          test -s "$RUNNER_TEMP/tg-bootstrap-pip/pip/__main__.py"
       - name: Transfer source only; never export Telegram credentials
         env:
           HOST: ${{ secrets.AVITO_SERVER_HOST }}
@@ -49,6 +56,11 @@ jobs:
           tar -cf - tools/telegram_owner_operator.py tools/telegram_secure_bridge.py tools/telegram_private_runtime.py | \
             ssh "${ssh_args[@]}" "$USER@$HOST" \
             'umask 077; mkdir -p "$HOME/.telegram-agent/app"; tar -xf - -C "$HOME/.telegram-agent/app"'
+          # Transfer pip itself as a pure-Python, isolated wheel from runner;
+          # the VPS has neither ensurepip nor pip. No system changes or sudo.
+          tar -C "$RUNNER_TEMP/tg-bootstrap-pip" -cf - . | \
+            ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'umask 077; mkdir -p "$HOME/.telegram-agent/bootstrap-pip"; tar -xf - -C "$HOME/.telegram-agent/bootstrap-pip"'
           # No python3-venv/ensurepip on this rootless VPS. Reuse only an
           # existing working Python/pip executable, install dependencies to a
           # private isolated --target folder (do not change Avito/FL venv).
@@ -57,7 +69,8 @@ jobs:
           umask 077
           test -x "$HOME/.avito-agent/venv/bin/python"
           mkdir -p "$HOME/.telegram-agent/vendor" "$HOME/.telegram-agent/bin"
-          "$HOME/.avito-agent/venv/bin/python" -m pip install \
+          PYTHONPATH="$HOME/.telegram-agent/bootstrap-pip" \
+            "$HOME/.avito-agent/venv/bin/python" -m pip install \
             --disable-pip-version-check --no-input --quiet \
             --target "$HOME/.telegram-agent/vendor" \
             "Telethon==1.45.0" "cryptography>=44,<48"
