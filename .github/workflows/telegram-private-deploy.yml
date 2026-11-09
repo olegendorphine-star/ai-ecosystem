@@ -65,7 +65,7 @@ jobs:
           # encrypted bridge MUST match this checkout byte-for-byte.
           expected="$(sha256sum tools/telegram_web_encrypted_operator.py | awk '{print $1}')"
           observed="$(ssh "${ssh_args[@]}" "$USER@$HOST" \
-            'sha256sum "$HOME/.telegram-agent/browser/telegram_web_encrypted_operator.py" | awk "{print \\$1}"')"
+            'sha256sum "$HOME/.telegram-agent/browser/telegram_web_encrypted_operator.py" | cut -c1-64')"
           test "$observed" = "$expected"
           echo TG_PRIVATE_BROWSER_ADAPTER_HASH_MATCH
           # Transfer pip itself as a pure-Python, isolated wheel from runner;
