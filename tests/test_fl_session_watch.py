@@ -15,7 +15,8 @@ class FLWatchTests(unittest.TestCase):
                    login_visible=False, captcha_visible=False)
         self.assertEqual(monitor.classify_owner_page(
             "https://www.fl.ru/profile/setup/main/", 200, **yes), "healthy")
-        self.assertNotEqual(monitor.classify_owner_page(
+        # FL settings can redirect, so do not require a fixed profile URL.
+        self.assertEqual(monitor.classify_owner_page(
             "https://www.fl.ru/users/olegendorphine/", 200, **yes), "healthy")
         self.assertEqual(monitor.classify_owner_page(
             "https://www.fl.ru/profile/setup/main/", 200,
