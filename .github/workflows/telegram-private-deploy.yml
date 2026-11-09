@@ -1,0 +1,47 @@
+name: Telegram owner - private VPS deployment (manual, no login)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy_no_credentials:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Prepare existing pinned SSH access
+        env:
+          SSH_KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/tg-ssh"
+          printf '%s' "$SSH_KEY" | base64 --decode > "$RUNNER_TEMP/tg-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/tg-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-ssh/key" "$RUNNER_TEMP/tg-ssh/known_hosts"
+      - name: Transfer source only; never export Telegram credentials
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER"
+          port="${PORT:-22}"
+          ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+                    -o StrictHostKeyChecking=yes \
+                    -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+                    -o IdentitiesOnly=yes -o LogLevel=ERROR \
+                    -i "$RUNNER_TEMP/tg-ssh/key" -p "$port")
+          tar -cf - tools/telegram_owner_operator.py tools/telegram_secure_bridge.py tools/telegram_private_runtime.py | \
+            ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'umask 077; mkdir -p "$HOME/.telegram-agent/app"; tar -xf - -C "$HOME/.telegram-agent/app"'
+          ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'set -eu; umask 077; python3 -m venv "$HOME/.telegram-agent/venv"; "$HOME/.telegram-agent/venv/bin/python" -m pip install --disable-pip-version-check --quiet "Telethon==1.45.0" "cryptography>=44,<48"; "$HOME/.telegram-agent/venv/bin/python" -m py_compile "$HOME/.telegram-agent/app/tools/telegram_owner_operator.py" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py"; echo TELEGRAM_CODE_INSTALLED_NO_ACCOUNT_LOGIN'
+          # First-time login must be done interactively on the owner's VPS.
