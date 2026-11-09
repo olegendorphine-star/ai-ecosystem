@@ -54,7 +54,7 @@ DIALOGS_JS = r"""limit => {
     return {
       peer_id: Number.isSafeInteger(peerId) && peerId !== 0 ? peerId : null,
       title,
-      unread_label: /^\\d{1,5}$/.test(unreadRaw) ? unreadRaw : '',
+      unread_label: /^[0-9]{1,5}$/.test(unreadRaw) ? unreadRaw : '',
     };
   }).filter(d => d.peer_id !== null && !!d.title);
 }"""
