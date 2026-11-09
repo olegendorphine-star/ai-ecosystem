@@ -375,9 +375,17 @@ def get_owner_contact_link(page) -> dict:
               try {
                 const exported = await users.exportContactToken();
                 const url = String(exported?.url || '');
-                if (!/^https:\/\/t\.me\/contact\/[A-Za-z0-9_-]{10,160}$/.test(url))
-                  return {status:'contact_link_invalid'};
-                return {status:'ok', method:'contact_token', url,
+                // Exported Telegram contact links can use a short token,
+                // the legacy telegram.me host, or omit the scheme. Only
+                // return a canonical allowlisted https://t.me/contact/ URL.
+                const match = url.trim().match(
+                  /^(?:https?:\/\/)?(?:t\.me|telegram\.me)\/contact\/([A-Za-z0-9_-]{1,512})\/?$/i);
+                if (!match)
+                  return {status:'contact_link_invalid', token_format:'unrecognized',
+                    has_telegram_host: /(?:t\.me|telegram\.me)/i.test(url),
+                    length_bucket: Math.min(10, Math.floor(url.length / 30))};
+                return {status:'ok', method:'contact_token',
+                        url:'https://t.me/contact/'+match[1],
                         expires: Number(exported.expires) || null};
               } catch (_) { return {status:'contact_link_unavailable'}; }
             }""")
@@ -393,7 +401,7 @@ def get_owner_contact_link(page) -> dict:
             return {"status": "contact_link_invalid"}
         if method == "username" and not re.fullmatch(r"/[A-Za-z0-9_]{5,32}", parsed.path):
             return {"status": "contact_link_invalid"}
-        if method == "contact_token" and not re.fullmatch(r"/contact/[A-Za-z0-9_-]{10,160}", parsed.path):
+        if method == "contact_token" and not re.fullmatch(r"/contact/[A-Za-z0-9_-]{1,512}", parsed.path):
             return {"status": "contact_link_invalid"}
         response = {"status": "ok", "action": "web_owner_contact_link",
                     "url": url, "method": method}
