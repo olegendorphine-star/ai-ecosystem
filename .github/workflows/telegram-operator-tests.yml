@@ -6,6 +6,7 @@ on:
       - 'tools/telegram_*.py'
       - 'tests/test_telegram_owner_operator.py'
       - 'tests/test_telegram_web_encrypted_operator.py'
+      - 'tests/test_telegram_resident_daemon.py'
       - '.github/workflows/telegram-*.yml'
   workflow_dispatch:
 
@@ -24,6 +25,7 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check 'cryptography>=44,<48'
       - name: Compile and test replay controls and encrypted transport
         run: |
-          python3 -m py_compile tools/telegram_owner_operator.py tools/telegram_secure_bridge.py tools/telegram_private_runtime.py tools/telegram_web_encrypted_operator.py
+          python3 -m py_compile tools/telegram_owner_operator.py tools/telegram_secure_bridge.py tools/telegram_private_runtime.py tools/telegram_web_encrypted_operator.py tools/telegram_resident_daemon.py
           python3 -m unittest discover -s tests -p 'test_telegram_owner_operator.py' -v
           python3 -m unittest discover -s tests -p 'test_telegram_web_encrypted_operator.py' -v
+          python3 -m unittest discover -s tests -p 'test_telegram_resident_daemon.py' -v

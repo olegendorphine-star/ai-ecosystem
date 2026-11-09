@@ -8,6 +8,7 @@ on:
       - 'tools/telegram_secure_bridge.py'
       - 'tools/telegram_private_runtime.py'
       - 'tools/telegram_web_encrypted_operator.py'
+      - 'tools/telegram_resident_daemon.py'
       - '.github/workflows/telegram-private-deploy.yml'
   workflow_dispatch:
 
@@ -54,19 +55,34 @@ jobs:
                     -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
                     -o IdentitiesOnly=yes -o LogLevel=ERROR \
                     -i "$RUNNER_TEMP/tg-ssh/key" -p "$port")
-          tar -cf - tools/telegram_owner_operator.py tools/telegram_secure_bridge.py tools/telegram_private_runtime.py tools/telegram_web_encrypted_operator.py | \
+          # Stop previous owner-private daemon before replacing its code.
+          ssh "${ssh_args[@]}" "$USER@$HOST" 'bash -s' <<'STOP'
+          set -eu
+          if systemctl --user is-active --quiet telegram-resident.service 2>/dev/null; then
+            systemctl --user stop telegram-resident.service
+          fi
+          if [ -f "$HOME/.telegram-agent/browser/telegram_resident_daemon.py" ]; then
+            "$HOME/.telegram-agent/bin/telegram-python" \
+              "$HOME/.telegram-agent/browser/telegram_resident_daemon.py" stop >/dev/null 2>&1 || true
+          fi
+          STOP
+          tar -cf - tools/telegram_owner_operator.py tools/telegram_secure_bridge.py tools/telegram_private_runtime.py tools/telegram_web_encrypted_operator.py tools/telegram_resident_daemon.py | \
             ssh "${ssh_args[@]}" "$USER@$HOST" \
             'umask 077; mkdir -p "$HOME/.telegram-agent/app"; tar -xf - -C "$HOME/.telegram-agent/app"'
           # Only owner-private browser script deployment; do not move Chrome
           # profile, Telegram cookies, IndexedDB or any owner credentials.
           ssh "${ssh_args[@]}" "$USER@$HOST" \
-            'set -eu; umask 077; base="$HOME/.telegram-agent/browser"; test -d "$base" && test ! -L "$base"; cp "$HOME/.telegram-agent/app/tools/telegram_web_encrypted_operator.py" "$base/telegram_web_encrypted_operator.py"; chmod 600 "$base/telegram_web_encrypted_operator.py"; echo TG_PRIVATE_WEB_ADAPTER_DEPLOYED'
+            'set -eu; umask 077; base="$HOME/.telegram-agent/browser"; test -d "$base" && test ! -L "$base"; cp "$HOME/.telegram-agent/app/tools/telegram_web_encrypted_operator.py" "$base/telegram_web_encrypted_operator.py"; cp "$HOME/.telegram-agent/app/tools/telegram_resident_daemon.py" "$base/telegram_resident_daemon.py"; chmod 600 "$base/telegram_web_encrypted_operator.py" "$base/telegram_resident_daemon.py"; echo TG_PRIVATE_WEB_ADAPTER_DEPLOYED'
           # Prevent stale browser adapters: the VPS file used by the
           # encrypted bridge MUST match this checkout byte-for-byte.
           expected="$(sha256sum tools/telegram_web_encrypted_operator.py | awk '{print $1}')"
           observed="$(ssh "${ssh_args[@]}" "$USER@$HOST" \
             'sha256sum "$HOME/.telegram-agent/browser/telegram_web_encrypted_operator.py" | cut -c1-64')"
           test "$observed" = "$expected"
+          expected_agent="$(sha256sum tools/telegram_resident_daemon.py | awk '{print $1}')"
+          observed_agent="$(ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'sha256sum "$HOME/.telegram-agent/browser/telegram_resident_daemon.py" | cut -c1-64')"
+          test "$observed_agent" = "$expected_agent"
           echo TG_PRIVATE_BROWSER_ADAPTER_HASH_MATCH
           # Transfer pip itself as a pure-Python, isolated wheel from runner;
           # the VPS has neither ensurepip nor pip. No system changes or sudo.
@@ -95,7 +111,7 @@ jobs:
           chmod 0700 "$HOME/.telegram-agent/bin/telegram-python"
           py="$HOME/.telegram-agent/bin/telegram-python"
           "$py" -c 'import telethon,cryptography; print("TG_RUNTIME_IMPORTS_OK")'
-          "$py" -m py_compile "$HOME/.telegram-agent/app/tools/telegram_owner_operator.py" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py" "$HOME/.telegram-agent/browser/telegram_web_encrypted_operator.py"
+          "$py" -m py_compile "$HOME/.telegram-agent/app/tools/telegram_owner_operator.py" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py" "$HOME/.telegram-agent/browser/telegram_web_encrypted_operator.py" "$HOME/.telegram-agent/browser/telegram_resident_daemon.py"
           echo TELEGRAM_CODE_INSTALLED_NO_ACCOUNT_LOGIN
           if [ ! -f "$HOME/.telegram-agent/private/bridge_x25519.pem" ]; then
             "$py" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" init-key >/dev/null
@@ -108,4 +124,66 @@ jobs:
             echo TG_AUTH_SETUP_REQUIRED
           fi
           REMOTE
+          # Try user systemd supervision; fall back to detached rootless process.
+          # No external listener: this daemon owns only a same-user Unix socket.
+          ssh "${ssh_args[@]}" "$USER@$HOST" 'bash -s' <<'RESIDENT'
+          set -euo pipefail
+          umask 077
+          base="$HOME/.telegram-agent/browser"
+          py="$HOME/.telegram-agent/bin/telegram-python"
+          test -f "$base/telegram_resident_daemon.py"
+          mkdir -p -m 700 "$HOME/.config/systemd/user"
+          use_systemd=0
+          if command -v systemctl >/dev/null 2>&1 &&
+             systemctl --user show-environment >/dev/null 2>&1; then
+            cat > "$HOME/.config/systemd/user/telegram-resident.service" <<EOF
+          [Unit]
+          Description=Owner-private resident Telegram Web operator
+          After=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart=$py $base/telegram_resident_daemon.py serve
+          WorkingDirectory=$base
+          Restart=always
+          RestartSec=10
+          NoNewPrivileges=true
+          UMask=0077
+          StandardOutput=null
+          StandardError=null
+
+          [Install]
+          WantedBy=default.target
+          EOF
+            systemctl --user daemon-reload
+            if systemctl --user enable --now telegram-resident.service >/dev/null 2>&1; then
+              use_systemd=1
+            fi
+          fi
+          if [ "$use_systemd" -eq 0 ]; then
+            nohup "$py" "$base/telegram_resident_daemon.py" serve \
+              </dev/null >/dev/null 2>&1 &
+            disown || true
+          fi
+          ready=0
+          for attempt in $(seq 1 45); do
+            state="$("$py" "$base/telegram_resident_daemon.py" status || true)"
+            if printf '%s' "$state" | grep -Fq '"status":"running"'; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -eq 1 ]; then
+            echo TG_RESIDENT_SOCKET_READY
+          else
+            echo TG_RESIDENT_START_UNVERIFIED
+            exit 1
+          fi
+          if [ "$use_systemd" -eq 1 ]; then
+            echo TG_RESIDENT_SUPERVISOR_SYSTEMD_USER
+          else
+            echo TG_RESIDENT_SUPERVISOR_SESSION_NO_REBOOT_GUARANTEE
+          fi
+          RESIDENT
           # First-time login must be done interactively on the owner's VPS.
