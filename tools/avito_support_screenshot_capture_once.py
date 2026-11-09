@@ -67,11 +67,50 @@ def private_environment():
     env["LD_LIBRARY_PATH"] = ":".join(add + ([env["LD_LIBRARY_PATH"]] if env.get("LD_LIBRARY_PATH") else []))
     return env
 
+
+def chromium_cli_screenshots(allow_one_avito_navigation):
+    """Chrome built-in --screenshot fallback; no Playwright package required.
+
+    HTTP status is unknown in this fallback, so resulting images must be
+    inspected by the operator before they can be treated as error evidence.
+    """
+    chrome = find_chrome()
+    if not chrome:
+        return None, None, None, 0, "chrome_missing"
+    with tempfile.TemporaryDirectory(prefix="avito-firewall-cli-", dir="/tmp") as directory:
+        os.chmod(directory, 0o700)
+        base = Path(directory)
+        screenshots = []
+        for index, url in enumerate((["https://2ip.ru/"] + ([PROFILE_URL] if allow_one_avito_navigation else []))):
+            shot = base / ("ip.png" if index == 0 else "profile.png")
+            profile = base / ("profile-ip" if index == 0 else "profile-avito")
+            command = [
+                chrome, "--headless=new", "--no-sandbox",
+                "--disable-dev-shm-usage", "--disable-gpu", "--no-zygote",
+                "--disable-extensions", "--no-first-run", "--no-proxy-server",
+                "--window-size=1280,900", "--virtual-time-budget=12000",
+                "--run-all-compositor-stages-before-draw",
+                "--user-data-dir=" + str(profile),
+                "--screenshot=" + str(shot), url,
+            ]
+            try:
+                subprocess.run(command, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=45,
+                               check=False, env=private_environment())
+                shots = png_ok(shot.read_bytes()) if shot.is_file() else None
+            except (OSError, subprocess.TimeoutExpired):
+                shots = None
+            screenshots.append(shots)
+        ip_image = screenshots[0] if screenshots else None
+        error_image = screenshots[1] if len(screenshots) > 1 else None
+        return ip_image, error_image, None, int(allow_one_avito_navigation), (
+            "ip_chrome_cli_unverified" if ip_image else "ip_chrome_cli_failed")
+
 def browser_screenshots(allow_one_avito_navigation):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return None, None, None, 0, "playwright_missing"
+        return chromium_cli_screenshots(allow_one_avito_navigation)
     chrome = find_chrome()
     if not chrome:
         return None, None, None, 0, "chrome_missing"
