@@ -1,10 +1,6 @@
 name: FL - Replace 3 existing portfolio covers once
+# Archived after one-time execution; do not rerun without new owner approval.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-owner-replace-three-portfolio-covers-once.yml'
-      - 'tools/fl_owner_replace_portfolio_covers_20261109.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,6 +9,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   apply:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
