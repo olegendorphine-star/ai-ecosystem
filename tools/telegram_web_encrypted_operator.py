@@ -362,8 +362,8 @@ def get_owner_contact_link(page) -> dict:
               // authorized session even if the client hasn't populated its
               // local self User object. Do not unnecessarily block fallback.
               const usernames = [
-                u.username,
-                ...(Array.isArray(u.usernames)
+                u?.username,
+                ...(Array.isArray(u?.usernames)
                   ? u.usernames.filter(x => x?.active !== false)
                     .map(x => x?.username)
                   : [])
@@ -374,24 +374,47 @@ def get_owner_contact_link(page) -> dict:
                 return {status:'contact_link_unavailable'};
               try {
                 const exported = await users.exportContactToken();
-                const url = String(exported?.url || '');
-                // Exported Telegram contact links can use a short token,
-                // the legacy telegram.me host, or omit the scheme. Only
-                // return a canonical allowlisted https://t.me/contact/ URL.
-                const match = url.trim().match(
-                  /^(?:https?:\/\/)?(?:t\.me|telegram\.me)\/contact\/([A-Za-z0-9_-]{1,512})\/?$/i);
-                if (!match)
-                  return {status:'contact_link_invalid', token_format:'unrecognized',
-                    has_telegram_host: /(?:t\.me|telegram\.me)/i.test(url),
-                    length_bucket: Math.min(10, Math.floor(url.length / 30))};
+                const rawUrl = String(exported?.url || '').trim();
+                if (rawUrl.length < 12 || rawUrl.length > 800)
+                  return {status:'contact_link_invalid', url_length_class:'unexpected'};
+                // Trust only Telegram's contacts.exportContactToken, never
+                // arbitrary command-provided URLs. Normalize standard
+                // t.me/contact and tg://contact?token forms to a single
+                // official HTTPS link.
+                let token = '';
+                try {
+                  const lower = rawUrl.toLowerCase();
+                  const input = (lower.startsWith('t.me/') ||
+                    lower.startsWith('telegram.me/')) ? 'https://' + rawUrl : rawUrl;
+                  const parsed = new URL(input);
+                  const host = parsed.hostname.toLowerCase();
+                  if (parsed.protocol === 'https:' &&
+                      (host === 't.me' || host === 'telegram.me') &&
+                      !parsed.username && !parsed.password &&
+                      parsed.pathname.startsWith('/contact/')) {
+                    token = decodeURIComponent(parsed.pathname.substring('/contact/'.length));
+                  } else if (parsed.protocol === 'tg:' &&
+                             parsed.hostname === 'contact') {
+                    token = parsed.searchParams.get('token') || '';
+                  }
+                } catch (_) {}
+                // The token may include standard base64/URL characters.
+                // Do not echo raw token in diagnostics on failure.
+                if (!/^[A-Za-z0-9_+=-]{1,512}$/.test(token)) {
+                  return {status:'contact_link_invalid',
+                    telegram_url: /(?:t\\.me|telegram\\.me|tg:\\/\\/contact)/i.test(rawUrl),
+                    length_bucket: Math.min(10, Math.floor(rawUrl.length / 30))};
+                }
                 return {status:'ok', method:'contact_token',
-                        url:'https://t.me/contact/'+match[1],
+                        url:'https://t.me/contact/'+encodeURIComponent(token),
                         expires: Number(exported.expires) || null};
               } catch (_) { return {status:'contact_link_unavailable'}; }
             }""")
         if not isinstance(result, dict) or result.get("status") != "ok":
-            return {"status": result.get("status", "own_profile_unavailable")
-                    if isinstance(result, dict) else "own_profile_unavailable"}
+            if not isinstance(result, dict):
+                return {"status": "own_profile_unavailable"}
+            return {k: v for k, v in result.items()
+                    if k in {"status", "telegram_url", "length_bucket", "url_length_class"}}
         from urllib.parse import urlsplit
         url, method = result.get("url"), result.get("method")
         if not isinstance(url, str) or method not in {"username", "contact_token"}:
@@ -401,7 +424,7 @@ def get_owner_contact_link(page) -> dict:
             return {"status": "contact_link_invalid"}
         if method == "username" and not re.fullmatch(r"/[A-Za-z0-9_]{5,32}", parsed.path):
             return {"status": "contact_link_invalid"}
-        if method == "contact_token" and not re.fullmatch(r"/contact/[A-Za-z0-9_-]{1,512}", parsed.path):
+        if method == "contact_token" and not re.fullmatch(r"/contact/[A-Za-z0-9_+%=-]{1,750}", parsed.path):
             return {"status": "contact_link_invalid"}
         response = {"status": "ok", "action": "web_owner_contact_link",
                     "url": url, "method": method}
