@@ -1,4 +1,5 @@
 name: FL - verify two owner bids without duplicate submissions
+# Second independent verification following owner-authorized portrait submission attempt
 on:
   push:
     branches: [main]
