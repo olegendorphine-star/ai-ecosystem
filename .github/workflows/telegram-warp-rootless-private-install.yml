@@ -1,5 +1,7 @@
 name: Telegram - isolated WARP SOCKS5 egress bootstrap
 on:
+  pull_request:
+    paths: ['.github/workflows/telegram-warp-rootless-private-install.yml']
   push:
     branches: [main]
     paths: ['.github/workflows/telegram-warp-rootless-private-install.yml']
@@ -9,7 +11,26 @@ concurrency:
   group: tg-private-warp-install
   cancel-in-progress: false
 jobs:
+  static_review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate pinned release, local binding, no privileged system changes
+        run: |
+          set -euo pipefail
+          script=.github/workflows/telegram-warp-rootless-private-install.yml
+          grep -Fq '4117e20695078af9c11edecd1a826c009bbc7ea0b7f64458612b4198910bc313' "$script"
+          grep -Fq 'l4-socks -b 127.0.0.1 -p 1085' "$script"
+          grep -Fq 'warp=on' "$script"
+          grep -Fq 'browser_proxy.json' "$script"
+          ! grep -Eq '(^|[[:space:]])(sudo|apt|docker run|iptables|ip route|wg-quick)([[:space:]]|$)' "$script"
+          echo TG_WARP_BOOTSTRAP_STATIC_REVIEW_OK
   bootstrap:
+    needs: static_review
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
