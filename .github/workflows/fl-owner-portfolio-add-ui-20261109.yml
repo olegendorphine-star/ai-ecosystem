@@ -1,0 +1,44 @@
+name: FL - inspect owner free add-work editor
+# Read-only discovery of free profile editing fields and gated account capabilities.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-owner-portfolio-add-ui-20261109.yml'
+      - 'tools/fl_owner_portfolio_add_ui_20261109.py'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 -m py_compile tools/fl_owner_portfolio_add_ui_20261109.py
+      - name: Prepare pinned SSH credentials
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Inspect own profile and settings without changes
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          cat tools/fl_owner_portfolio_add_ui_20261109.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -'
