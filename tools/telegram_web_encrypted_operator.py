@@ -32,7 +32,8 @@ from pathlib import Path
 
 ROOT = Path.home() / ".telegram-agent" / "browser"
 LOCK = ROOT / "rootless_owner.lock"
-ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_reply", "web_self_note", "web_phone_message"})
+ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_reply", "web_self_note", "web_phone_message",
+                     "web_owner_contact_link"})
 REPLY_LEDGER = ROOT / "owner_approved_reply_attempts.sqlite3"
 MAX_REPLY_TEXT = 2000
 
@@ -340,6 +341,67 @@ def send_owner_self_note(page, command: dict) -> dict:
         return {"status": "send_status_uncertain_no_retry"}
 
 
+def get_owner_contact_link(page) -> dict:
+    """Find existing username, else export owner's time-limited contact link.
+
+    No phone number, cookies or Telegram auth tokens leave the VPS. The
+    returned Telegram contact URL is intended to be shared with the owner
+    through the existing encrypted X25519 bridge only.
+    """
+    try:
+        result = page.evaluate(
+            """async () => {
+              const app = window.appImManager;
+              const users = app?.managers?.appUsersManager;
+              const self = Number(window.rootScope?.myId);
+              if (!users || !Number.isSafeInteger(self) || self <= 0)
+                return {status:'own_profile_unavailable'};
+              const u = users.getUser(self);
+              if (!u || Number(u.id) !== self)
+                return {status:'own_profile_unavailable'};
+              const usernames = [
+                u.username,
+                ...(Array.isArray(u.usernames)
+                  ? u.usernames.filter(x => x?.active !== false)
+                    .map(x => x?.username)
+                  : [])
+              ].filter(x => typeof x === 'string' && /^[A-Za-z0-9_]{5,32}$/.test(x));
+              if (usernames.length)
+                return {status:'ok', method:'username', url:'https://t.me/'+usernames[0]};
+              if (typeof users.exportContactToken !== 'function')
+                return {status:'contact_link_unavailable'};
+              try {
+                const exported = await users.exportContactToken();
+                const url = String(exported?.url || '');
+                if (!/^https:\/\/t\.me\/contact\/[A-Za-z0-9_-]{10,160}$/.test(url))
+                  return {status:'contact_link_invalid'};
+                return {status:'ok', method:'contact_token', url,
+                        expires: Number(exported.expires) || null};
+              } catch (_) { return {status:'contact_link_unavailable'}; }
+            }""")
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            return {"status": result.get("status", "own_profile_unavailable")
+                    if isinstance(result, dict) else "own_profile_unavailable"}
+        from urllib.parse import urlsplit
+        url, method = result.get("url"), result.get("method")
+        if not isinstance(url, str) or method not in {"username", "contact_token"}:
+            return {"status": "contact_link_invalid"}
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or parsed.hostname != "t.me" or parsed.query or parsed.fragment:
+            return {"status": "contact_link_invalid"}
+        if method == "username" and not re.fullmatch(r"/[A-Za-z0-9_]{5,32}", parsed.path):
+            return {"status": "contact_link_invalid"}
+        if method == "contact_token" and not re.fullmatch(r"/contact/[A-Za-z0-9_-]{10,160}", parsed.path):
+            return {"status": "contact_link_invalid"}
+        response = {"status": "ok", "action": "web_owner_contact_link",
+                    "url": url, "method": method}
+        if method == "contact_token" and type(result.get("expires")) in (int,float):
+            response["expires_at"] = result["expires"]
+        return response
+    except Exception:
+        return {"status": "contact_link_unavailable"}
+
+
 def send_approved_phone_message(page, command: dict) -> dict:
     """Only one user-requested direct message to exact Telegram phone resolution.
 
@@ -609,6 +671,8 @@ def run_command(command: dict) -> dict:
                             "dialogs": normalize_dialogs(items, p.get("limit", 10))}
                 if action == "web_self_note":
                     return send_owner_self_note(page, command)
+                if action == "web_owner_contact_link":
+                    return get_owner_contact_link(page)
                 if action == "web_phone_message":
                     return send_approved_phone_message(page, command)
                 # Opening a chat may mark it read. For web_reply we also
