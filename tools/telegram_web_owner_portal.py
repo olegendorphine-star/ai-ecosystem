@@ -146,6 +146,40 @@ def save_state(context):
     raise RuntimeError("telegram_persistent_profile_only")
 
 
+PROXY_FILE = Path.home() / ".telegram-agent" / "private" / "browser_proxy.json"
+
+def load_private_browser_proxy():
+    """Optional owner-owned proxy; secrets never copied to GitHub/logs."""
+    if PROXY_FILE.is_symlink():
+        raise RuntimeError("unsafe_proxy_symlink")
+    if not PROXY_FILE.exists():
+        return None
+    mode = PROXY_FILE.stat()
+    if not stat.S_ISREG(mode.st_mode) or mode.st_uid != os.getuid() or mode.st_mode & 0o077:
+        raise RuntimeError("unsafe_proxy_permissions")
+    if not 10 <= mode.st_size <= 2048:
+        raise RuntimeError("unsafe_proxy_size")
+    with PROXY_FILE.open("r", encoding="utf-8") as reader:
+        data = json.load(reader)
+    if not isinstance(data, dict) or set(data) - {"server", "username", "password"}:
+        raise RuntimeError("invalid_proxy_config")
+    server = data.get("server")
+    if not isinstance(server, str) or not 5 < len(server) < 256:
+        raise RuntimeError("invalid_proxy_server")
+    parsed = urlsplit(server)
+    if parsed.scheme not in {"http", "https", "socks5"} or not parsed.hostname or parsed.username or parsed.password or parsed.path not in {"", "/"}:
+        raise RuntimeError("invalid_proxy_server")
+    config = {"server": server}
+    for name in ("username", "password"):
+        if name in data:
+            value = data[name]
+            if not isinstance(value, str) or not 0 < len(value) <= 256:
+                raise RuntimeError("invalid_proxy_auth")
+            config[name] = value
+    if ("username" in config) != ("password" in config):
+        raise RuntimeError("incomplete_proxy_auth")
+    return config
+
 def is_telegram_url(url: str) -> bool:
     try:
         parsed = urlsplit(url)
@@ -427,11 +461,19 @@ class Browser:
         # browser restarts. A Playwright storage_state JSON is NOT enough.
         if PROFILE.is_symlink():
             raise RuntimeError("unsafe_browser_profile_symlink")
-        self.context = self.p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE),
-            executable_path=str(choices[-1]), headless=False,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-            env=environment, viewport=VIEWPORT, timeout=20000)
+        options = {
+            "user_data_dir": str(PROFILE),
+            "executable_path": str(choices[-1]),
+            "headless": False,
+            "args": ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+            "env": environment,
+            "viewport": VIEWPORT,
+            "timeout": 20000,
+        }
+        proxy = load_private_browser_proxy()
+        if proxy:
+            options["proxy"] = proxy
+        self.context = self.p.chromium.launch_persistent_context(**options)
         self.browser = self.context  # persistent context owns Chromium
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
         self.page.goto(ALLOWED_PAGES["login"], wait_until="commit", timeout=20000)

@@ -37,6 +37,21 @@ jobs:
           assert not tg.is_telegram_url("https://evil.example/k/")
           assert not tg.is_telegram_url("http://web.telegram.org/k/")
           assert tg.PORT == 8992
+          import tempfile,os
+          from pathlib import Path
+          with tempfile.TemporaryDirectory() as root:
+              tg.PROXY_FILE = Path(root)/"proxy.json"
+              assert tg.load_private_browser_proxy() is None
+              tg.PROXY_FILE.write_text('{"server":"socks5://127.0.0.1:1080"}')
+              os.chmod(tg.PROXY_FILE,0o600)
+              assert tg.load_private_browser_proxy()["server"]=="socks5://127.0.0.1:1080"
+              os.chmod(tg.PROXY_FILE,0o644)
+              try:
+                  tg.load_private_browser_proxy()
+              except RuntimeError:
+                  pass
+              else:
+                  raise AssertionError("unsafe permissions allowed")
           print("TG_BROWSER_PRIVACY_OFFLINE_OK")
           PY
 
