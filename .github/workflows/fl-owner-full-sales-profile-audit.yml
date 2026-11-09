@@ -1,0 +1,60 @@
+name: FL - Full sales profile inventory (owner, read only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-owner-full-sales-profile-audit.yml'
+      - 'tools/fl_owner_full_profile_readonly_audit_20261109.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fl-owner-full-sales-profile-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Syntax check
+        run: python3 -m py_compile tools/fl_owner_full_profile_readonly_audit_20261109.py
+      - name: Prepare existing pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Check own profile, services, prices, portfolio, controls without writes
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_owner_full_profile_readonly_audit_20261109.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c '
+          import sys,json
+          d=json.load(sys.stdin)
+          assert d["schema"]=="fl.owner.full.profile.readonly.audit.v1"
+          assert d["account"]=="olegendorphine"
+          for k in ("write_actions","payments","messages_opened","bids_submitted"): assert d[k] is False,k
+          print("FL_FULL_PROFILE_STATUS",d["status"])
+          print("FL_FULL_OWNER_VERIFIED",d["verified_owner"])
+          for key,v in d["pages"].items():
+           print("FL_FULL_PAGE",key,json.dumps(v,ensure_ascii=False,sort_keys=True))
+          assert d["verified_owner"] and d["status"] in ("ok","partial")
+          '
