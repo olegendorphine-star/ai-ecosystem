@@ -44,10 +44,12 @@ def run() -> dict:
     if not (XVFB.is_file() and COMP.is_file()):
         return d
     data = XVFB.read_bytes()
-    old = b"/usr/bin\\x00"
     d["xvfb_bin_path_mentions"] = data.count(b"/usr/bin")
-    d["xvfb_bin_exact_cstring_count"] = data.count(old)
-    if not 1 <= data.count(old) <= 5:
+    d["xvfb_bin_exact_cstring_count"] = data.count(b"/usr/bin\\x00")
+    old = b"/usr/bin\\x00"
+    if data.count(old) == 0 and data.count(b"/usr/bin/") == 1:
+        old = b"/usr/bin/"
+    if data.count(old) != 1:
         d["failure_categories"].append("xkb_binary_dir_constant_unavailable")
         return d
 
@@ -82,7 +84,7 @@ def run() -> dict:
 
     try:
         (xkb_wrapper_dir / "xkbcomp").symlink_to(COMP)
-        new = str(xkb_wrapper_dir).encode("ascii") + b"\\x00"
+        new = str(xkb_wrapper_dir).encode("ascii") + old[-1:]
         if len(new) != len(old):
             d["failure_categories"].append("binary_patch_size_mismatch")
             return d
