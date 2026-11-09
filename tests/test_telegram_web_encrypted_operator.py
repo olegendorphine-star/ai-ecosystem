@@ -231,6 +231,18 @@ class ReplyLedger(unittest.TestCase):
         self.assertIn("contact_not_resolved_by_telegram", block)
         self.assertIn("message_requires_payment_or_premium", block)
 
+    def test_exact_contact_precheck_and_failure_types(self):
+        source = path.read_text()
+        block = source.split("def send_approved_phone_message(", 1)[1].split(
+            "def normalize_messages(", 1)[0]
+        self.assertIn("getContacts(", block)
+        self.assertIn("contact_browser_type_error", block)
+        self.assertIn("telegram_rate_limited", block)
+        self.assertIn("telegram_contact_privacy_restricted", block)
+        self.assertIn("contact_not_resolved_by_telegram", block)
+        self.assertIn("resolved_contact_phone_mismatch", block)
+        self.assertLess(block.index("getContacts("), block.index("importContact("))
+
     def test_phone_unresolved_never_calls_send_or_ledger(self):
         page = mock.Mock()
         page.evaluate.return_value = {"status": "phone_not_found"}
