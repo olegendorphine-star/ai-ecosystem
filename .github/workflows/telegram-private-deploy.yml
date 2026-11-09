@@ -1,4 +1,4 @@
-name: Telegram owner - private VPS deployment (manual, no login)
+name: Telegram owner - rootless VPS bootstrap (no login)
 
 on:
   push:
@@ -49,7 +49,38 @@ jobs:
           tar -cf - tools/telegram_owner_operator.py tools/telegram_secure_bridge.py tools/telegram_private_runtime.py | \
             ssh "${ssh_args[@]}" "$USER@$HOST" \
             'umask 077; mkdir -p "$HOME/.telegram-agent/app"; tar -xf - -C "$HOME/.telegram-agent/app"'
-          ssh "${ssh_args[@]}" "$USER@$HOST" \
-            'set -eu; umask 077; python3 -m venv "$HOME/.telegram-agent/venv"; "$HOME/.telegram-agent/venv/bin/python" -m pip install --disable-pip-version-check --quiet "Telethon==1.45.0" "cryptography>=44,<48"; "$HOME/.telegram-agent/venv/bin/python" -m py_compile "$HOME/.telegram-agent/app/tools/telegram_owner_operator.py" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py"; echo TELEGRAM_CODE_INSTALLED_NO_ACCOUNT_LOGIN'
-          ssh "${ssh_args[@]}" "$USER@$HOST"             'set -eu; umask 077; p="$HOME/.telegram-agent/private/bridge_x25519.pem"; if [ ! -f "$p" ]; then "$HOME/.telegram-agent/venv/bin/python" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" init-key >/dev/null; fi; test -s "$p"; "$HOME/.telegram-agent/venv/bin/python" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" public-key | sed "s/^/TG_PUBLIC_KEY /"; if [ -f "$HOME/.telegram-agent/private/telegram.env" ]; then echo TG_CREDENTIAL_FILE_PRESENT; else echo TG_AUTH_SETUP_REQUIRED; fi'
+          # No python3-venv/ensurepip on this rootless VPS. Reuse only an
+          # existing working Python/pip executable, install dependencies to a
+          # private isolated --target folder (do not change Avito/FL venv).
+          ssh "${ssh_args[@]}" "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          test -x "$HOME/.avito-agent/venv/bin/python"
+          mkdir -p "$HOME/.telegram-agent/vendor" "$HOME/.telegram-agent/bin"
+          "$HOME/.avito-agent/venv/bin/python" -m pip install \
+            --disable-pip-version-check --no-input --quiet \
+            --target "$HOME/.telegram-agent/vendor" \
+            "Telethon==1.45.0" "cryptography>=44,<48"
+          cat > "$HOME/.telegram-agent/bin/telegram-python" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          export PYTHONPATH="$HOME/.telegram-agent/vendor${PYTHONPATH:+:$PYTHONPATH}"
+          exec "$HOME/.avito-agent/venv/bin/python" "$@"
+          SH
+          chmod 0700 "$HOME/.telegram-agent/bin/telegram-python"
+          py="$HOME/.telegram-agent/bin/telegram-python"
+          "$py" -c 'import telethon,cryptography; print("TG_RUNTIME_IMPORTS_OK")'
+          "$py" -m py_compile "$HOME/.telegram-agent/app/tools/telegram_owner_operator.py" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py"
+          echo TELEGRAM_CODE_INSTALLED_NO_ACCOUNT_LOGIN
+          if [ ! -f "$HOME/.telegram-agent/private/bridge_x25519.pem" ]; then
+            "$py" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" init-key >/dev/null
+          fi
+          test -s "$HOME/.telegram-agent/private/bridge_x25519.pem"
+          "$py" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" public-key | sed 's/^/TG_PUBLIC_KEY /'
+          if [ -f "$HOME/.telegram-agent/private/telegram.env" ]; then
+            echo TG_CREDENTIAL_FILE_PRESENT
+          else
+            echo TG_AUTH_SETUP_REQUIRED
+          fi
+          REMOTE
           # First-time login must be done interactively on the owner's VPS.
