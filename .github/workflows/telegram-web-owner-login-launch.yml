@@ -1,0 +1,241 @@
+name: Telegram Web - secure single-owner VPS login window
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/telegram-web-owner-login-launch.yml'
+      - 'tools/telegram_web_owner_handoff_public_2026-11-09.pem'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/telegram-web-owner-login-launch.yml'
+permissions:
+  contents: read
+concurrency:
+  group: tg-owner-one-time-window
+  cancel-in-progress: false
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify public-only handoff and privacy properties
+        run: |
+          set -euo pipefail
+          openssl pkey -pubin -in tools/telegram_web_owner_handoff_public_2026-11-09.pem -noout
+          python3 -m py_compile tools/telegram_web_owner_portal.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0,"tools")
+          import telegram_web_owner_portal as tg
+          assert tg.PORT==8992 and tg.ALLOWED_PAGES["login"]=="https://web.telegram.org/k/"
+          assert tg.PROFILE.parent == tg.ROOT and tg.ROOT.name=="browser"
+          assert tg.is_telegram_url("https://web.telegram.org/k/")
+          assert not tg.is_telegram_url("https://evil.telegram.org/k/")
+          print("TG_OWNER_PORTAL_OFFLINE_OK")
+          PY
+          f=.github/workflows/telegram-web-owner-login-launch.yml
+          grep -Fq 'pkeyutl -encrypt -pubin' "$f"
+          grep -Fq 'rsa_padding_mode:oaep' "$f"
+          grep -Fq 'rootless_owner_token' "$f"
+          grep -Fq 'TG_HANDOFF_PORT=8992' "$f"
+          grep -Fq 'http://127.0.0.1:8992' "$f"
+          grep -Fq 'TG_OWNER_WINDOW_ENCRYPTED_BASE64=' "$f"
+  launch:
+    needs: safety
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Pinned SSH access
+        env:
+          KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KH: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY" && test -n "$KH"
+          install -d -m 700 "$RUNNER_TEMP/tg-ssh"
+          printf '%s' "$KEY" | base64 -d > "$RUNNER_TEMP/tg-ssh/key"
+          printf '%s\n' "$KH" > "$RUNNER_TEMP/tg-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-ssh/key" "$RUNNER_TEMP/tg-ssh/known_hosts"
+      - name: Deploy owner-only portal code, no credentials, verify loopback proxy
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts"
+            -o IdentitiesOnly=yes -o LogLevel=ERROR
+            -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}")
+          cat tools/telegram_web_owner_portal.py | ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'umask 077; mkdir -p "$HOME/.telegram-agent/browser"; test ! -L "$HOME/.telegram-agent/browser"; cat > "$HOME/.telegram-agent/browser/telegram_web_owner_portal.py"; chmod 600 "$HOME/.telegram-agent/browser/telegram_web_owner_portal.py"'
+          ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'set -eu; test -s "$HOME/.telegram-agent/private/browser_proxy.json"; systemctl --user is-active --quiet telegram-warp-egress.service; curl --fail --silent --show-error --max-time 18 --socks5-hostname 127.0.0.1:1085 --output /dev/null https://web.telegram.org/k/ && echo TG_WEB_PROXY_CONFIRMED'
+      - name: Check disposable graphical Chrome on Telegram Web through WARP
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          result="$(ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' <<'PY'
+          import json,sys,tempfile
+          from pathlib import Path
+          sys.path.insert(0,str(Path.home()/".telegram-agent/browser"))
+          import telegram_web_owner_portal as tg
+          r={"schema":"tg.owner.chrome.smoke.v1","chrome":False,"screen":False,
+             "tg_origin":False,"temporary_profile":False,
+             "owner_login":False,"private_data_exported":False}
+          b=tg.Browser()
+          try:
+              with tempfile.TemporaryDirectory(prefix="tg-safe-test-",dir=tg.ROOT) as tmp:
+                  tg.PROFILE=Path(tmp)/"temp_profile"
+                  b.open(Path(tmp))
+                  r["chrome"]=b.live_status()["chrome_alive"]
+                  r["screen"]=b.live_status(test_screenshot=True)["screenshot_ready"]
+                  r["tg_origin"]=tg.is_telegram_url(b.page.url)
+                  r["temporary_profile"]=tg.PROFILE.is_dir()
+          finally:
+              b.close()
+          print(json.dumps(r,sort_keys=True))
+          PY
+          )"
+          printf '%s\n' "$result" | tail -n 1 | python3 -c '
+          import json,sys
+          r=json.load(sys.stdin)
+          assert r["schema"]=="tg.owner.chrome.smoke.v1"
+          assert r["owner_login"] is False and r["private_data_exported"] is False
+          assert r["chrome"] and r["screen"] and r["tg_origin"] and r["temporary_profile"]
+          print("TG_OWNER_BROWSER_CHROME_RENDER_OK")
+          '
+      - name: Start expiring owner portal 127.0.0.1:8992 with independent persistent Chromium profile
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          root="$HOME/.telegram-agent/browser"
+          cd "$root"
+          if [ -s rootless_owner.pid ]; then
+            pid="$(cat rootless_owner.pid)"
+            if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+              echo TG_OWNER_EXISTING_PORTAL_ACTIVE
+              exit 1
+            fi
+          fi
+          test -x "$HOME/.local/bin/cloudflared"
+          test -x "$HOME/.avito-agent/venv/bin/python"
+          rm -f rootless_owner_token rootless_owner_cloudflared.log
+          : > rootless_owner.log
+          chmod 600 rootless_owner.log
+          setsid nohup timeout -s TERM -k 5s 940s env \
+            LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            TG_HANDOFF_PORT=8992 TG_HANDOFF_TTL_SECONDS=900 \
+            "$HOME/.avito-agent/venv/bin/python" \
+            "$root/telegram_web_owner_portal.py" \
+            > rootless_owner.log 2>&1 < /dev/null &
+          echo $! > rootless_owner.pid
+          chmod 600 rootless_owner.pid
+          live=0
+          for attempt in $(seq 1 35); do
+            status="$(curl --noproxy '*' -fsS --max-time 7 http://127.0.0.1:8992/ready 2>/dev/null || true)"
+            if [ -n "$status" ] && printf '%s' "$status" | python3 -c 'import json,sys; x=json.load(sys.stdin); sys.exit(0 if x.get("ready") and x.get("chrome_alive") and x.get("screenshot_ready") else 1)' 2>/dev/null; then
+              live=1
+              break
+            fi
+            if ! kill -0 "$(cat rootless_owner.pid)" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          if [ "$live" != 1 ]; then echo TG_OWNER_PORTAL_NOT_READY; exit 1; fi
+          unauth="$(curl --noproxy '*' -s --max-time 4 -o /dev/null -w '%{http_code}' http://127.0.0.1:8992/shot || true)"
+          test "$unauth" = 403
+          test -s rootless_owner_token
+          echo TG_OWNER_PORTAL_LOCAL_READY_UNAUTHORIZED_SCREEN_403
+          REMOTE
+      - name: Open expiring HTTPS Cloudflare tunnel for owner window only
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          cd "$HOME/.telegram-agent/browser"
+          : > rootless_owner_cloudflared.log
+          chmod 600 rootless_owner_cloudflared.log
+          setsid nohup timeout -s TERM -k 5s 930s \
+             "$HOME/.local/bin/cloudflared" tunnel --no-autoupdate \
+             --url http://127.0.0.1:8992 \
+             > rootless_owner_cloudflared.log 2>&1 < /dev/null &
+          echo $! > rootless_owner_cloudflared.pid
+          chmod 600 rootless_owner_cloudflared.pid
+          ready=0
+          for attempt in $(seq 1 30); do
+            if grep -Eq 'https://[a-z0-9-]+\.trycloudflare\.com' rootless_owner_cloudflared.log; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != 1 ]; then
+            echo TG_OWNER_PRIVATE_TUNNEL_NOT_READY
+            exit 1
+          fi
+          echo TG_OWNER_PRIVATE_HTTPS_TUNNEL_READY
+          REMOTE
+      - name: Emit ONLY RSA-OAEP-encrypted short-lived owner URL; no plaintext token anywhere in CI
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          encrypted="$(ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" 'python3 -' <<'PY' | \
+            openssl pkeyutl -encrypt -pubin \
+              -inkey tools/telegram_web_owner_handoff_public_2026-11-09.pem \
+              -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | base64 -w0
+          import json,re,sys
+          from pathlib import Path
+          root=Path.home()/".telegram-agent/browser"
+          token=(root/"rootless_owner_token").read_text().strip()
+          raw=(root/"rootless_owner_cloudflared.log").read_text(errors="replace")
+          links=re.findall(r"https://[a-z0-9-]+[.]trycloudflare[.]com",raw)
+          if not links or not 32<=len(token)<=110:
+              raise SystemExit("TG_OWNER_LINK_NOT_READY")
+          output=json.dumps({"link":links[-1]+"/#"+token,
+                             "valid_for_seconds":780},separators=(",",":")).encode()
+          if not 110<=len(output)<=290:
+              raise SystemExit("TG_OWNER_LINK_LENGTH_INVALID")
+          sys.stdout.buffer.write(output)
+          PY
+          )"
+          test -n "$encrypted"
+          printf 'TG_OWNER_WINDOW_ENCRYPTED_BASE64=%s\n' "$encrypted"
+          echo TG_OWNER_WINDOW_ENCRYPTED_READY
