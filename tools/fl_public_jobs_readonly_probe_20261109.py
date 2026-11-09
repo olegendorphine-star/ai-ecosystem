@@ -10,7 +10,7 @@ urls=[
 ("python","https://www.fl.ru/projects/category/programmirovanie/python/"),
 ("automation","https://www.fl.ru/projects/category/avtomatizaciya-biznesa/"),
 ]
-result={"schema":"fl.public.work.discovery.v1","pages":[],"error":"none","account_writes":False,"passwords_read":False,"cookie_contents_read":False,"paid_actions":False,"captcha_interacted":False}
+result={"schema":"fl.public.work.discovery.v1","details":[],"pages":[],"error":"none","account_writes":False,"passwords_read":False,"cookie_contents_read":False,"paid_actions":False,"captcha_interacted":False}
 b=Browser()
 try:
  with tempfile.TemporaryDirectory(prefix="fl-work-discovery-",dir=ROOT) as tmp:
@@ -42,6 +42,30 @@ try:
     result["pages"].append({"type":label,"http":response.status if response else None,"items":cards})
    except Exception:
     result["pages"].append({"type":label,"error":"navigate_or_parse_failed","items":[]})
+
+  details=[
+   ("senior_assistant","https://www.fl.ru/projects/5528431/senior-ai-injener-personalnyiy-assistent-s-brauzerom-i-telegram-na-vps.html"),
+   ("dental_automation","https://www.fl.ru/projects/5528498/avtomatizatsiya-zakaz-naryadov-n8n--ocr--ii--google-sheets.html"),
+  ]
+  for kind,url in details:
+   try:
+    response=page.goto(url,wait_until="domcontentloaded",timeout=18000)
+    page.wait_for_timeout(350)
+    detail=page.evaluate("""() => {
+      const body=(document.body?.innerText||'').replace(/\\r/g,'');
+      const h=document.querySelector('h1');
+      const name=(h?.innerText||'').trim().slice(0,200);
+      const at=body.indexOf(name);
+      const segment=body.slice(Math.max(0,at), Math.max(0,at)+6800);
+      const free=/для всех/i.test(segment);
+      const banned=/снят[а]? с публикации|проект заверш[её]н|исполнитель определ[её]н/i.test(segment);
+      const html=Array.from(document.querySelectorAll('button,a')).map(x=>(x.innerText||'').trim()).filter(x=>/отклик|ответить|снять с публикации|для всех/i.test(x)).slice(0,12);
+      const bounded=segment.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}/ig,'[email hidden]');
+      return {title:name,excerpt:bounded,free_text_present:free,closed_text_present:banned,cta_labels:html};
+    }""")
+    result["details"].append({"type":kind,"url":url,"http":response.status if response else None,"detail":detail})
+   except Exception:
+    result["details"].append({"type":kind,"error":"navigate_or_parse_failed"})
 finally:
  b.close()
 print(json.dumps(result,ensure_ascii=False,sort_keys=True))
