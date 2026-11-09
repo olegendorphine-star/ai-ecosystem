@@ -1,11 +1,10 @@
 name: FL - User-approved two free bids (one-time guarded submission)
 # Finalize remaining 5527732 after independent confirmation that 5528403 was sent.
 # Durable VPS marker prevents resubmission of 5528403.
+# ARCHIVED / DISABLED: no automatic or manual account/customer actions.
+# Re-enable only after explicit owner request and current platform policy review.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-two-bids-once-20261109.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -13,6 +12,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   send_one_time:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
