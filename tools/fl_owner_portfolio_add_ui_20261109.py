@@ -10,11 +10,17 @@ b=Browser()
 try:
  with tempfile.TemporaryDirectory(prefix="fl-add-work-ui-",dir=root) as t:
   b.open(Path(t));p=b.page
-  p.goto(ALLOWED_PAGES["settings"],wait_until="domcontentloaded",timeout=20000)
+  try:p.goto(ALLOWED_PAGES["settings"],wait_until="domcontentloaded",timeout=20000)
+  except Exception:
+   p.goto(ALLOWED_PAGES["settings"],wait_until="commit",timeout=20000)
+   p.wait_for_timeout(1700)
   s=p.evaluate("""()=>({a:(document.body?.innerText||'').includes('Основные настройки'),b:Array.from(document.querySelectorAll('input')).some(e=>(e.value||'').trim().toLowerCase()==='olegendorphine@gmail.com')})""")
   out["owner"]=bool(s["a"] and s["b"] and is_fl_url(p.url))
   if out["owner"]:
-   p.goto("https://www.fl.ru/users/olegendorphine/portfolio/",wait_until="domcontentloaded",timeout=24000)
+   try:p.goto("https://www.fl.ru/users/olegendorphine/portfolio/",wait_until="domcontentloaded",timeout=24000)
+   except Exception:
+    p.goto("https://www.fl.ru/users/olegendorphine/portfolio/",wait_until="commit",timeout=22000)
+    p.wait_for_timeout(1500)
    p.wait_for_timeout(500)
    out["before"]=p.evaluate("""()=>({
      buttons:Array.from(document.querySelectorAll('button')).filter(e=>/Добавить работу/i.test(e.innerText||'')).map(e=>({id:e.getAttribute('data-id'),text:e.innerText.trim(),visible:e.offsetParent!==null})),
