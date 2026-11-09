@@ -101,6 +101,23 @@ class Validation(unittest.TestCase):
                 with self.assertRaises(owner.Rejected):
                     owner.validate(command("web_phone_message", invalid))
 
+    def test_existing_chat_send_requires_owner_and_private_user_id(self):
+        p = {"peer_id": 12345, "text": "Hi", "approved_by_owner": True}
+        self.assertEqual(owner.validate(command("web_chat_message", p))["action"],
+                         "web_chat_message")
+        for bad in (
+            {**p, "approved_by_owner": False},
+            {**p, "peer_id": -12345},
+            {**p, "peer_id": 0},
+            {**p, "peer_id": "12345"},
+            {**p, "text": ""},
+            {**p, "text": "x" * 1201},
+            {**p, "unsafe": True},
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaises(owner.Rejected):
+                    owner.validate(command("web_chat_message", bad))
+
     def test_username_send_requires_exact_username_and_one_approved_text(self):
         base = {"username": "@ExampleUser", "text": "Hello", "approved_by_owner": True}
         self.assertEqual(owner.validate(command("web_username_message", base))["action"],
@@ -296,6 +313,34 @@ class ReplyLedger(unittest.TestCase):
             one, two = command("web_phone_message", params), command("web_phone_message", params)
             self.assertEqual(web.claim_reply_once(one, path), "claimed")
             self.assertEqual(web.claim_reply_once(two, path), "already_attempted")
+
+    def test_existing_chat_intent_dedup_and_user_verification(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.chmod(td, 0o700)
+            path = Path(td) / "reply.sqlite3"
+            p = {"peer_id": 12345, "text": "Hello", "approved_by_owner": True}
+            self.assertEqual(web.claim_reply_once(command("web_chat_message", p), path),
+                             "claimed")
+            self.assertEqual(web.claim_reply_once(command("web_chat_message", p), path),
+                             "already_attempted")
+        request = command("web_chat_message", p)
+        page = mock.Mock()
+        page.evaluate.return_value = False
+        with mock.patch.object(web, "claim_reply_once") as claim:
+            self.assertEqual(web.send_approved_existing_chat_message(page, request),
+                             {"status": "target_not_verified_free_personal_user"})
+            claim.assert_not_called()
+
+    def test_existing_chat_unsupported_peer_never_claimed(self):
+        for peer in (-99, 0):
+            request = command("web_chat_message", {
+                "peer_id": peer, "text": "Hello", "approved_by_owner": True})
+            page = mock.Mock()
+            with mock.patch.object(web, "claim_reply_once") as claim:
+                self.assertEqual(
+                    web.send_approved_existing_chat_message(page, request)["status"],
+                    "existing_chat_message_not_approved")
+                claim.assert_not_called()
 
     def test_username_intent_casefolds_and_deduplicates(self):
         with tempfile.TemporaryDirectory() as td:
