@@ -1,0 +1,106 @@
+name: Telegram - deliver one owner-approved encrypted phone command
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/telegram-once-encrypted-phone.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/telegram-once-encrypted-phone.yml'
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: telegram-owner-approved-once-6737856163
+  cancel-in-progress: false
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify ciphertext-only owner re-delivery
+        run: |
+          set -euo pipefail
+          file=.github/workflows/telegram-once-encrypted-phone.yml
+          grep -Fq '6737856163' "$file"
+          grep -Fq 'TG_BRIDGE_COMMAND_V1 ' "$file"
+          grep -Fq 'StrictHostKeyChecking=yes' "$file"
+          grep -Fq 'TG_ENCRYPTED_RESULT_POSTED' "$file"
+          ! grep -Fq '+7995' "$file"
+          ! grep -Fq 'approved_by_owner' "$file"
+          echo TG_ONE_OFF_CIPHERTEXT_ONLY_REVIEW_OK
+  run_once:
+    if: github.event_name == 'push'
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Prepare pinned SSH identity
+        env:
+          SSH_KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/tg-once"
+          printf '%s' "$SSH_KEY" | base64 --decode > "$RUNNER_TEMP/tg-once/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/tg-once/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-once/key" "$RUNNER_TEMP/tg-once/known_hosts"
+      - name: Replay EXACT existing ciphertext owner comment, never plaintext
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER" && test -n "$GH_TOKEN"
+          comment_json="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$REPO/issues/comments/6737856163")"
+          body="$(COMMENT_JSON="$comment_json" python3 - <<'PY'
+          import json,os
+          comment=json.loads(os.environ["COMMENT_JSON"])
+          assert comment["id"]==6737856163
+          assert comment["user"]["login"]=="olegendorphine-star"
+          assert comment["body"].startswith("TG_BRIDGE_COMMAND_V1 ")
+          parsed=json.loads(comment["body"].split(" ",1)[1])
+          assert parsed.get("schema")=="tg.bridge.encrypted.v1"
+          assert set(parsed)=={"schema","sender_pub","nonce","ciphertext"}
+          print(comment["body"],end="")
+          PY
+          )"
+          test -n "$body"
+          result="$(printf '%s' "$body" | ssh -F /dev/null -4 -T \
+             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+             -o StrictHostKeyChecking=yes \
+             -o UserKnownHostsFile="$RUNNER_TEMP/tg-once/known_hosts" \
+             -o IdentitiesOnly=yes -o LogLevel=ERROR \
+             -i "$RUNNER_TEMP/tg-once/key" -p "${PORT:-22}" \
+             "$USER@$HOST" \
+             '"$HOME/.telegram-agent/bin/telegram-python" "$HOME/.telegram-agent/app/tools/telegram_private_runtime.py" execute')"
+          RESULT="$result" python3 - <<'PY'
+          import json,os,urllib.request
+          r=os.environ["RESULT"]
+          prefix="TG_BRIDGE_RESULT_V1 "
+          assert r.startswith(prefix)
+          value=json.loads(r[len(prefix):])
+          assert set(value)=={"schema","sender_pub","nonce","ciphertext"}
+          assert value["schema"]=="tg.bridge.encrypted.v1"
+          assert all(isinstance(z,str) and 1<=len(z)<=90000 for z in value.values())
+          req=urllib.request.Request(
+            f"https://api.github.com/repos/{os.environ['REPO']}/issues/119/comments",
+            data=json.dumps({"body":r},separators=(",",":")).encode(),
+            headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],
+                     "Accept":"application/vnd.github+json",
+                     "Content-Type":"application/json",
+                     "User-Agent":"TelegramOwnerOnceFallback/1.0"}, method="POST")
+          with urllib.request.urlopen(req,timeout=20) as resp:
+            if resp.status!=201: raise RuntimeError("Result POST failed")
+          print("TG_ENCRYPTED_RESULT_POSTED")
+          PY
