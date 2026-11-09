@@ -468,6 +468,14 @@ def send_approved_phone_message(page, command: dict) -> dict:
                   const importedId = await userManager.importContact(
                     'Личный', 'Telegram', phone);
                   user = userManager.getUser(importedId);
+                  // importContact may resolve an ID before the User cache
+                  // is hydrated. Verify the returned user with Telegram's
+                  // own users.getUsers method rather than assuming no user.
+                  if (!user && typeof userManager.getApiUsers === 'function') {
+                    const fresh = await userManager.getApiUsers([importedId]);
+                    if (Array.isArray(fresh))
+                      user = fresh.find(u => String(u?.id) === String(importedId));
+                  }
                 } catch (importError) {
                   const type = String(importError?.type || '');
                   if (type === 'NO_USER') {
@@ -508,7 +516,10 @@ def send_approved_phone_message(page, command: dict) -> dict:
                   return {status:'resolved_contact_phone_mismatch'};
                 const id = Number(user?.id);
                 if (user?._ !== 'user' || !Number.isSafeInteger(id) || id <= 0)
-                  return {status:'phone_not_found'};
+                  return {status:'phone_user_not_verified_after_import',
+                          imported_user_present:!!user,
+                          user_object_tag_valid:user?._ === 'user',
+                          user_id_valid:Number.isSafeInteger(id) && id > 0};
                 if (id === self) return {status:'target_is_current_account'};
                 if (user.pFlags?.deleted || user.pFlags?.bot)
                   return {status:'target_not_personal_user'};
