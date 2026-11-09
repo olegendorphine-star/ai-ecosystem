@@ -1,0 +1,68 @@
+name: FL - rootless private Xvfb relocation and Chrome blank-only test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-xvfb-private-relocation-2026-11-09.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compile isolated copy-only probe
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_rootless_xvfb_relocate.py
+  existing_vps:
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare existing pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Probe copied Xvfb executable and headed Chromium locally only
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(cat tools/fl_rootless_xvfb_relocate.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.rootless.xvfb.relocate.v1"
+          assert d.get("network_requests")==0
+          assert d.get("owner_session_used") is False
+          assert d.get("captcha_interacted") is False
+          assert d.get("write_account_actions") is False
+          print(json.dumps(d,sort_keys=True))
+          '
