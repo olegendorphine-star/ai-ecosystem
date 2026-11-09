@@ -1,5 +1,8 @@
 name: FL - owner services moderation read-only audit
 on:
+  schedule:
+    # Daily owner-only read-only moderation check; no customer conversations.
+    - cron: '37 5 * * *'
   push:
     branches: [main]
     paths:
