@@ -32,5 +32,23 @@ try:
           cards,links,controls,
           inputs:Array.from(document.querySelectorAll('input[type=file]')).map(e=>({accept:e.accept}))};
     }""")
+   out["details"]=[]
+   for sid,slug in [(42901,"audit-odnogo-processa-i-karta-ii-avtomatizacii"),(42902,"razrabotayu-tz-na-personalnogo-ii-assistenta")]:
+    url=f"https://www.fl.ru/uslugi-freelancera/{sid}/{slug}.html"
+    row={"id":sid,"status":"not_opened"}
+    out["details"].append(row)
+    try:
+     rsp=p.goto(url,wait_until="domcontentloaded",timeout=24000)
+     p.wait_for_timeout(300)
+     row["status"]="ok" if rsp and rsp.status==200 and is_fl_url(p.url) else "unavailable"
+     row["http"]=rsp.status if rsp else None
+     if row["status"]=="ok":
+      row["ui"]=p.evaluate("""()=>({
+       title:(document.querySelector('h1')?.innerText||'').slice(0,150),
+       controls:Array.from(document.querySelectorAll('a,button,[role=button]')).filter(x=>/редактир|изменить|облож|управл|на провер|опубликов/i.test((x.innerText||'')+' '+(x.title||''))).slice(0,25).map(x=>({label:(x.innerText||x.title||'').trim().slice(0,95),tag:x.tagName,href:x.getAttribute('href'),dataid:x.getAttribute('data-id')})),
+       inputFiles:document.querySelectorAll('input[type=file]').length,
+       pending:(document.body.innerText||'').includes('На проверке')
+      })""")
+    except Exception:row["status"]="technical_error"
 finally:b.close()
 print(json.dumps(out,ensure_ascii=False,sort_keys=True))
