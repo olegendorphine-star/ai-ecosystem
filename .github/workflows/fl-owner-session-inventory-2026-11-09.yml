@@ -1,0 +1,80 @@
+name: FL - Verify saved owner session after manual login (read only)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fl-owner-session-inventory-2026-11-09.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Prepare existing pinned SSH key
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Inspect FL owner saved file and panel state without reading any cookie
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -' <<'PY'
+          import json,os,stat,socket,urllib.request
+          from pathlib import Path
+          root=Path.home()/".fl-agent"
+          folder=root/"profile"
+          state=folder/"storage_state.json"
+          info={
+              "schema":"fl.owner.session.inventory.v1",
+              "saved_session_present":False,
+              "saved_state_owner_only":False,
+              "portal_alive":False,
+              "portal_screenshot_ready":False,
+              "portal_saved_flag":None,
+              "account_login_confirmed":False,
+              "passwords_read":False,
+              "cookie_contents_read":False,
+              "write_actions":False,
+          }
+          if not folder.is_symlink() and not state.is_symlink() and state.is_file():
+              st=state.stat()
+              info["saved_session_present"]=(stat.S_ISREG(st.st_mode)
+                  and st.st_uid==os.getuid() and 2 <= st.st_size <= 2097152)
+              info["saved_state_owner_only"]=info["saved_session_present"] and (st.st_mode&0o077)==0
+          opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+          try:
+              with opener.open("http://127.0.0.1:8991/ready",timeout=6) as response:
+                  d=json.load(response)
+                  info["portal_alive"]=bool(d.get("ready"))
+                  info["portal_screenshot_ready"]=bool(d.get("screenshot_ready"))
+          except Exception:
+              pass
+          print(json.dumps(info,sort_keys=True))
+          PY
+          )"
+          printf '%s\n' "$report" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.owner.session.inventory.v1"
+          assert d.get("passwords_read") is False
+          assert d.get("cookie_contents_read") is False
+          assert d.get("write_actions") is False
+          print(json.dumps(d,sort_keys=True))
+          '
