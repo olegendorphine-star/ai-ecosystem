@@ -158,11 +158,19 @@ def claim_reply_once(command: dict, path: Path = REPLY_LEDGER) -> str:
                     raise ValueError("reused_reply_command_with_different_content")
                 state = "already_attempted"
             else:
-                conn.execute(
-                    "INSERT INTO reply_attempts(command_id,digest,state) VALUES(?,?,'attempted')",
-                    (command["command_id"], digest)
-                )
-                state = "claimed"
+                prior = conn.execute(
+                    "SELECT command_id FROM reply_attempts WHERE intent_digest=?",
+                    (intent_digest,)
+                ).fetchone()
+                if prior:
+                    state = "already_attempted"
+                else:
+                    conn.execute(
+                        "INSERT INTO reply_attempts(command_id,digest,intent_digest,state) "
+                        "VALUES(?,?,?,'attempted')",
+                        (command["command_id"], digest, intent_digest)
+                    )
+                    state = "claimed"
             conn.commit()
             return state
         except Exception:
