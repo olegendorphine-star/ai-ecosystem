@@ -1,0 +1,109 @@
+name: Telegram Web - persistent VPS browser rootless smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/telegram_web_owner_portal.py'
+      - '.github/workflows/telegram-web-browser-smoke.yml'
+  pull_request:
+    paths:
+      - 'tools/telegram_web_owner_portal.py'
+      - '.github/workflows/telegram-web-browser-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compile and inspect hard privacy boundaries
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/telegram_web_owner_portal.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0,"tools")
+          import telegram_web_owner_portal as tg
+          assert tg.ROOT.name == "browser" and ".telegram-agent" in str(tg.ROOT)
+          assert tg.PROFILE.parent == tg.ROOT
+          assert tg.ALLOWED_PAGES["login"] == "https://web.telegram.org/k/"
+          assert tg.is_telegram_url("https://web.telegram.org/k/")
+          assert not tg.is_telegram_url("https://evil.example/k/")
+          assert not tg.is_telegram_url("http://web.telegram.org/k/")
+          assert tg.PORT == 8992
+          print("TG_BROWSER_PRIVACY_OFFLINE_OK")
+          PY
+
+  vps_browser_smoke:
+    needs: syntax
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Pinned SSH
+        env:
+          SSH_KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/tg-web-ssh"
+          printf '%s' "$SSH_KEY" | base64 --decode > "$RUNNER_TEMP/tg-web-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/tg-web-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-web-ssh/key" "$RUNNER_TEMP/tg-web-ssh/known_hosts"
+      - name: Deploy code only and smoke a disposable public Telegram login
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/tg-web-ssh/known_hosts"
+            -o IdentitiesOnly=yes -o LogLevel=ERROR
+            -i "$RUNNER_TEMP/tg-web-ssh/key" -p "$port")
+          cat tools/telegram_web_owner_portal.py | ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'umask 077; mkdir -p "$HOME/.telegram-agent/browser"; test ! -L "$HOME/.telegram-agent/browser"; cat > "$HOME/.telegram-agent/browser/telegram_web_owner_portal.py"; chmod 600 "$HOME/.telegram-agent/browser/telegram_web_owner_portal.py"'
+          status="$(ssh "${ssh_args[@]}" "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' <<'PY'
+          import json,sys,tempfile
+          from pathlib import Path
+          sys.path.insert(0, str(Path.home()/".telegram-agent/browser"))
+          import telegram_web_owner_portal as tg
+          result={"schema":"tg.web.rootless.browser.smoke.v1","chrome":False,"screenshot":False,
+                  "on_telegram_domain":False,"persistent_profile":False,
+                  "account_login_attempted":False,"message_sent":False,
+                  "private_data_exported":False}
+          browser=tg.Browser()
+          try:
+              with tempfile.TemporaryDirectory(prefix="tg-browser-smoke-",dir=tg.ROOT) as tmp:
+                  tg.PROFILE=Path(tmp)/"disposable_profile"
+                  browser.open(Path(tmp))
+                  result["chrome"]=browser.live_status()["chrome_alive"]
+                  result["screenshot"]=browser.live_status(test_screenshot=True)["screenshot_ready"]
+                  result["on_telegram_domain"]=tg.is_telegram_url(browser.page.url)
+                  result["persistent_profile"]=tg.PROFILE.is_dir()
+          finally:
+              browser.close()
+          print(json.dumps(result,sort_keys=True))
+          PY
+          )"
+          printf '%s\n' "$status" | tail -n 1 | python3 -c '
+          import json,sys
+          x=json.load(sys.stdin)
+          assert x["schema"] == "tg.web.rootless.browser.smoke.v1"
+          assert x["account_login_attempted"] is False and x["message_sent"] is False
+          assert x["private_data_exported"] is False
+          print(json.dumps(x,sort_keys=True))
+          assert x["chrome"] and x["screenshot"] and x["on_telegram_domain"] and x["persistent_profile"]
+          '
