@@ -203,8 +203,9 @@ def run_command(command: dict) -> dict:
                     page.wait_for_timeout(550)
                 if not selected:
                     checks = page.evaluate(
-                        "(peer) => { const r = document.querySelector("
-                        "'#column-left .chatlist-chat[data-peer-id=\\\"' + peer + '\\"]');"
+                        "(peer) => { const r = [...document.querySelectorAll("
+                        "'#column-left .chatlist-chat')].find(x =>"
+                        "x.getAttribute('data-peer-id') === String(peer));"
                         "return {chat_present:!!window.appImManager?.chat,"
                         "row_active:!!r?.classList.contains('active'),"
                         "center_visible:!!document.querySelector('#column-center .bubble')}; }",
