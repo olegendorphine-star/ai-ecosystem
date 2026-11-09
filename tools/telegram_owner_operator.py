@@ -24,7 +24,7 @@ SESSION = ROOT / "auth" / "owner"
 LEDGER = ROOT / "state" / "outbound.sqlite3"
 ALLOWED = frozenset({"status", "dialogs", "read", "reply",
                      "web_status", "web_dialogs", "web_read", "web_reply",
-                     "web_self_note", "web_phone_message"})
+                     "web_self_note", "web_phone_message", "web_owner_contact_link"})
 MAX_TEXT = 3500
 
 
@@ -72,6 +72,7 @@ def validate(command: dict) -> dict:
         "web_reply": {"peer_id", "reply_to_id", "text", "approved_by_owner"},
         "web_self_note": {"text", "approved_by_owner"},
         "web_phone_message": {"phone", "text", "approved_by_owner"},
+        "web_owner_contact_link": set(),
     }[action]
     if not set(params).issubset(allowed_fields):
         raise Rejected("unexpected params")
