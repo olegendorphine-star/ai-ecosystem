@@ -10,6 +10,7 @@ Allowlisted actions:
   web_dialogs -- bounded titles/peer identifiers from visible chat list
   web_read    -- bounded visible messages in one selected chat
   web_reply   -- only explicitly approved text in response to verified incoming
+  web_self_note -- explicitly approved note to this owner's own Saved Messages only
 Opening a chat may cause Telegram to mark its messages as read.
 Only a reply to a verified existing inbound message can be sent, with
 explicit owner approval and a fail-closed at-most-once per-command ledger.
@@ -30,7 +31,7 @@ from pathlib import Path
 
 ROOT = Path.home() / ".telegram-agent" / "browser"
 LOCK = ROOT / "rootless_owner.lock"
-ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_reply"})
+ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_reply", "web_self_note"})
 REPLY_LEDGER = ROOT / "owner_approved_reply_attempts.sqlite3"
 MAX_REPLY_TEXT = 2000
 
@@ -134,9 +135,12 @@ def claim_reply_once(command: dict, path: Path = REPLY_LEDGER) -> str:
         json.dumps(command, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
     p = command["params"]
+    if command["action"] == "web_self_note":
+        intent = ["saved_messages_only", p["text"].strip()]
+    else:
+        intent = ["inbound_reply", p["peer_id"], p["reply_to_id"], p["text"].strip()]
     intent_digest = hashlib.sha256(
-        json.dumps([p["peer_id"], p["reply_to_id"], p["text"].strip()],
-                   ensure_ascii=False, separators=(",", ":")).encode()
+        json.dumps(intent, ensure_ascii=False, separators=(",", ":")).encode()
     ).hexdigest()
     conn = sqlite3.connect(path, timeout=10)
     try:
@@ -247,6 +251,91 @@ def send_approved_reply(page, peer_id: int, p: dict, command: dict) -> dict:
         return {"status": "send_status_uncertain_no_retry"}
 
 
+def send_owner_self_note(page, command: dict) -> dict:
+    """Explicitly approved one-time message to the account's own Saved Messages.
+
+    The peer identifier comes exclusively from Telegram Web rootScope.myId.
+    Nothing supplied by the caller can select an arbitrary account/contact.
+    Do not send more than once if the operation is uncertain.
+    """
+    p = command["params"]
+    text = p["text"].strip()
+    if not (p.get("approved_by_owner") is True and
+            isinstance(text, str) and 1 <= len(text) <= 300):
+        return {"status": "self_note_not_approved"}
+    selected = page.evaluate(
+        """() => {
+          const w = window;
+          const app = w.appImManager;
+          const self = Number(w.rootScope?.myId);
+          if (!Number.isSafeInteger(self) || self <= 0 ||
+              !app || typeof app.setInnerPeer !== 'function') return false;
+          app.setInnerPeer({peerId:self});
+          return true;
+        }""")
+    if selected is not True:
+        return {"status": "self_chat_unavailable"}
+    self_chat_ready = False
+    for _ in range(25):
+        self_chat_ready = page.evaluate(
+            """() => {
+              const self = Number(window.rootScope?.myId);
+              const chat = window.appImManager?.chat;
+              return Number.isSafeInteger(self) && self > 0 &&
+                Number(chat?.peerId) === self && !chat?.setPeerPromise &&
+                !!chat?.bubbles?.chatInner?.isConnected;
+            }""")
+        if self_chat_ready is True:
+            break
+        page.wait_for_timeout(450)
+    if self_chat_ready is not True:
+        return {"status": "self_chat_not_verified"}
+    # Durable local ledger is claimed before Telegram performs ANY send.
+    # The hash includes the unique text, never plaintext on disk.
+    if claim_reply_once(command) != "claimed":
+        return {"status": "already_attempted_no_resend"}
+    try:
+        # The same sendText interface is used in upstream Telegram Web K e2e
+        # tests for Saved Messages. Double-check the self peer immediately
+        # before sending, all on the private Chromium process.
+        initiated = page.evaluate(
+            """(text) => {
+              const app = window.appImManager;
+              const self = Number(window.rootScope?.myId);
+              const manager = app?.managers?.appMessagesManager;
+              if (!Number.isSafeInteger(self) || self <= 0 ||
+                  Number(app?.chat?.peerId) !== self ||
+                  typeof manager?.sendText !== 'function') return false;
+              manager.sendText({peerId:self, text});
+              return true;
+            }""", text)
+        if initiated is not True:
+            return {"status": "send_not_started_no_retry"}
+        for _ in range(25):
+            confirmed = page.evaluate(
+                """(text) => {
+                  const app = window.appImManager;
+                  const self = Number(window.rootScope?.myId);
+                  if (!Number.isSafeInteger(self) ||
+                      Number(app?.chat?.peerId) !== self) return false;
+                  return [...document.querySelectorAll(
+                    '#column-center .bubble[data-mid]')].some(
+                      b => !b.classList.contains('is-sending') &&
+                        (b.querySelector('.message [data-message-text-source]')?.textContent
+                          || b.querySelector('.message')?.textContent || ''
+                        ).trim() === text);
+                }""", text)
+            if confirmed is True:
+                complete_reply(command["command_id"])
+                return {"status": "sent_confirmed", "action": "web_self_note",
+                        "command_id": command["command_id"],
+                        "destination": "saved_messages"}
+            page.wait_for_timeout(450)
+        return {"status": "send_status_uncertain_no_retry"}
+    except Exception:
+        return {"status": "send_status_uncertain_no_retry"}
+
+
 def normalize_messages(rows, limit: int):
     if not isinstance(rows, list):
         raise ValueError("unexpected_messages")
@@ -309,6 +398,8 @@ def run_command(command: dict) -> dict:
                     items = page.evaluate(DIALOGS_JS, p.get("limit", 10))
                     return {"status": "ok", "action": action,
                             "dialogs": normalize_dialogs(items, p.get("limit", 10))}
+                if action == "web_self_note":
+                    return send_owner_self_note(page, command)
                 # Opening a chat may mark it read. For web_reply we also
                 # verify an inbound bubble before taking any send action.
                 peer_id = p["peer_id"]
