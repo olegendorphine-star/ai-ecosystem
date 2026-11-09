@@ -84,6 +84,23 @@ class Validation(unittest.TestCase):
                                      "approved_by_owner":True})
         self.assertEqual(owner.validate(c)["action"], "web_self_note")
 
+    def test_approved_phone_message_requires_e164_and_consent(self):
+        params = {"phone": "+12025550123", "text": "Test", "approved_by_owner": True}
+        self.assertEqual(owner.validate(command("web_phone_message", params))["action"],
+                         "web_phone_message")
+        for invalid in (
+            {**params, "approved_by_owner": False},
+            {**params, "phone": "not-phone"},
+            {**params, "phone": "2025550123"},
+            {**params, "phone": "+0"},
+            {**params, "phone": "+12025550123", "text": ""},
+            {**params, "text": "x"*301},
+            {**params, "peer_id": 111},
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(owner.Rejected):
+                    owner.validate(command("web_phone_message", invalid))
+
     def test_arbitrary_actions_forbidden(self):
         for action in ("web_send", "web_delete", "web_navigate",
                        "web_js", "web_screenshot", "web_export_cookies"):
@@ -193,6 +210,35 @@ class ReplyLedger(unittest.TestCase):
             result = web.send_owner_self_note(page, c)
             self.assertEqual(result["status"], "already_attempted_no_resend")
             self.assertEqual(page.evaluate.call_count, 2)
+
+    def test_phone_intent_is_deduplicated_across_command_ids(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.chmod(td, 0o700)
+            path = Path(td) / "reply.sqlite3"
+            params = {"phone": "+12025550123", "text": "Test", "approved_by_owner": True}
+            one, two = command("web_phone_message", params), command("web_phone_message", params)
+            self.assertEqual(web.claim_reply_once(one, path), "claimed")
+            self.assertEqual(web.claim_reply_once(two, path), "already_attempted")
+
+    def test_phone_unresolved_never_calls_send_or_ledger(self):
+        page = mock.Mock()
+        page.evaluate.return_value = {"status": "phone_not_found"}
+        request = command("web_phone_message", {"phone": "+12025550123",
+                                 "text": "Test", "approved_by_owner": True})
+        with mock.patch.object(web, "claim_reply_once") as claim:
+            result = web.send_approved_phone_message(page, request)
+            self.assertEqual(result["status"], "phone_not_found")
+            claim.assert_not_called()
+
+    def test_phone_paid_requirement_blocks_before_ledger(self):
+        page = mock.Mock()
+        page.evaluate.return_value = {"status": "message_requires_payment_or_premium"}
+        request = command("web_phone_message", {"phone": "+12025550123",
+                                 "text": "Test", "approved_by_owner": True})
+        with mock.patch.object(web, "claim_reply_once") as claim:
+            result = web.send_approved_phone_message(page, request)
+            self.assertEqual(result["status"], "message_requires_payment_or_premium")
+            claim.assert_not_called()
 
     def test_conflicting_reuse_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:
