@@ -1,10 +1,7 @@
 name: FL - owner-approved one-time public price-list entries
 # Read-only discovery of free profile editing fields and gated account capabilities.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-owner-price-list-once-20261109.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
