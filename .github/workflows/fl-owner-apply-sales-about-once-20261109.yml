@@ -1,9 +1,5 @@
 name: FL - owner explicitly requested update of About text once
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-owner-apply-sales-about-once-20261109.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -12,6 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   apply:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 7
     steps:
