@@ -1,0 +1,57 @@
+name: FL - one-time read-only relevant public jobs discovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-public-work-readonly-20261109.yml'
+permissions:
+  contents: read
+jobs:
+  inspect_public_jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Syntax validation
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_public_jobs_readonly_probe_20261109.py
+      - name: Prepare SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Read-only project listing via saved owner Chromium
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_public_jobs_readonly_probe_20261109.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.public.work.discovery.v1"
+          for k in ("account_writes","passwords_read","cookie_contents_read","paid_actions","captcha_interacted"):
+              assert d.get(k) is False
+          for p in d.get("pages",[]):
+              print("CATEGORY",p.get("type"),"HTTP",p.get("http"),"COUNT",len(p.get("items",[])))
+              for card in p.get("items",[]):
+                  print(json.dumps(card,ensure_ascii=False))
+          '
