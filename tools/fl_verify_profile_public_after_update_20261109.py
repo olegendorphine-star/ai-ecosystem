@@ -49,6 +49,6 @@ try:
          errors
       };
     }""")
-    o["pages"].push({"page":label,"http":r.status if r else None,"result":data})
+    o["pages"].append({"page":label,"http":r.status if r else None,"result":data})
 finally:b.close()
 print(json.dumps(o,ensure_ascii=False))
