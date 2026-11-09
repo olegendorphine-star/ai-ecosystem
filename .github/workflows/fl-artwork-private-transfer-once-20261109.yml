@@ -29,19 +29,26 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
           port="${PORT:-22}"
-          cat tools/fl_artwork_transport_20261109.b64 | ssh -F /dev/null -4 -T \
+          scp -F /dev/null -4 -q \
+            -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -P "$port" \
+            tools/fl_artwork_transport_20261109.b64 \
+            "$USER@$HOST:.fl-agent/artwork_transport_20261109.b64"
+          ssh -F /dev/null -4 -T \
             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
             -o IdentitiesOnly=yes -o LogLevel=ERROR \
-            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" 'bash -c '"'"'
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           umask 077
           root="$HOME/.fl-agent"
           test -d "$root" && test ! -L "$root"
           test -s "$root/artwork_transfer_private_20261109.pem"
           tmp="$(mktemp -d "$root/artwork-tmp-XXXXXX")"
-          trap '\''rm -rf "$tmp"'\'' EXIT
-          base64 -d > "$tmp/cipher.bin"
+          trap 'rm -rf "$tmp"' EXIT
+          base64 -d "$root/artwork_transport_20261109.b64" > "$tmp/cipher.bin"
           openssl pkeyutl -decrypt -inkey "$root/artwork_transfer_private_20261109.pem" \
             -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
             -in "$tmp/cipher.bin" -out "$tmp/url" 2>/dev/null
@@ -71,13 +78,13 @@ jobs:
            assert sorted(z.namelist())==sorted(names)
            for name in names:
             path=dest/name
-            if path.exists():raise FileExistsError(name)
             data=z.read(name)
             assert data[:3]==bytes.fromhex("ffd8ff")
-            fd=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
+            if path.exists() and path.read_bytes()==data:continue
+            fd=os.open(path,os.O_CREAT|os.O_TRUNC|os.O_WRONLY|os.O_NOFOLLOW,0o600)
             with os.fdopen(fd,"wb") as f:f.write(data)
           print("FL_ARTWORK_PRIVATE_FILES_READY",len(names))
           PY
-          rm -f "$root/artwork_transfer_private_20261109.pem"
+          rm -f "$root/artwork_transfer_private_20261109.pem" "$root/artwork_transport_20261109.b64"
           echo FL_ARTWORK_PRIVATE_TRANSFER_CONFIRMED
-          '"'"''
+          REMOTE
