@@ -419,7 +419,14 @@ def send_approved_phone_message(page, command: dict) -> dict:
                   } else if (importError?.name === 'TypeError') {
                     return {status:'contact_browser_type_error'};
                   } else {
-                    return {status:'contact_import_restricted'};
+                    // Telegram RPC error *code only*, never expose raw
+                    // exception text: it can contain private phone/contact.
+                    const code = /^[A-Z][A-Z0-9_]{1,48}$/.test(type) ? type : '';
+                    const kind = ['Error','ApiError','TypeError','TimeoutError']
+                      .includes(importError?.name) ? importError.name : 'other';
+                    return {status:'contact_import_restricted',
+                            error_code:code || 'UNCLASSIFIED',
+                            error_class:kind};
                   }
                 }
                 // When a full phone is provided in Telegram's User object,

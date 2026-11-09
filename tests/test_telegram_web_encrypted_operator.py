@@ -229,6 +229,8 @@ class ReplyLedger(unittest.TestCase):
         self.assertLess(block.index("importContact("), block.index("resolvePhone("))
         self.assertIn("resolved_contact_phone_mismatch", block)
         self.assertIn("contact_not_resolved_by_telegram", block)
+        self.assertIn("error_code:code", block)
+        self.assertIn("error_class:kind", block)
         self.assertIn("message_requires_payment_or_premium", block)
 
     def test_exact_contact_precheck_and_failure_types(self):
