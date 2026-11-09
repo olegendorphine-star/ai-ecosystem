@@ -1,0 +1,116 @@
+name: FL - Finalize confirmed manual owner login into private saved state
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-save-owner-session-once-2026-11-09.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  save_after_owner_login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Prepare pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Invoke only existing private owner portal save, verifying exact FL settings route
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -' <<'PY'
+          import json,os,re,stat,urllib.error,urllib.request
+          from pathlib import Path
+          root=Path.home()/".fl-agent"
+          tokenpath=root/"rootless_owner_token"
+          statepath=root/"profile/storage_state.json"
+          d={"schema":"fl.owner.session.finalization.v1",
+             "save_status":"not_started","saved_state_exists":False,
+             "saved_state_permissions_private":False,
+             "login_verified_by_private_route":False,
+             "fl_paid_actions":False,"profile_changed":False,
+             "captcha_interacted":False,"fl_cookies_output":False,
+             "passwords_read":False,"live_portal_found":False}
+          def file_status():
+              if statepath.is_file() and not statepath.is_symlink():
+                  s=statepath.stat()
+                  d["saved_state_exists"]=(stat.S_ISREG(s.st_mode)
+                      and s.st_uid==os.getuid() and 2<=s.st_size<=2097152)
+                  d["saved_state_permissions_private"]=bool(
+                      d["saved_state_exists"] and (s.st_mode & 0o077)==0)
+          file_status()
+          if d["saved_state_exists"] and d["saved_state_permissions_private"]:
+              d["save_status"]="already_saved"
+          elif not tokenpath.is_file() or tokenpath.is_symlink():
+              d["save_status"]="portal_token_missing"
+          else:
+              try:
+                  token=tokenpath.read_text().strip()
+                  if not 32<=len(token)<=100:
+                      raise ValueError("invalid_portal_token")
+                  url="http://127.0.0.1:8991/"
+                  client=urllib.request.build_opener(
+                      urllib.request.ProxyHandler({}))
+                  base_headers={"Cookie":"fl_handoff="+token}
+                  req=urllib.request.Request(url,headers=base_headers)
+                  with client.open(req,timeout=8) as response:
+                      body=response.read(65536).decode("utf-8","replace")
+                  d["live_portal_found"]=True
+                  csrf=re.search(r'const csrf="([A-Za-z0-9_-]{20,100})";',body)
+                  if csrf is None:
+                      d["save_status"]="csrf_unavailable"
+                  else:
+                      headers={**base_headers,"X-FL-CSRF":csrf.group(1),
+                               "Content-Type":"application/json"}
+                      request=urllib.request.Request(
+                          url+"api/save",data=b"{}",headers=headers,method="POST")
+                      try:
+                          with client.open(request,timeout=28) as response:
+                              content=json.load(response)
+                              if response.status==200 and content.get("ok") is True:
+                                  d["save_status"]="saved"
+                                  d["login_verified_by_private_route"]=True
+                              else:
+                                  d["save_status"]="save_not_confirmed"
+                      except urllib.error.HTTPError as exc:
+                          d["save_status"]=(
+                              "fl_owner_private_route_not_verified"
+                              if exc.code==409 else "portal_http_error")
+                  file_status()
+              except Exception:
+                  d["save_status"]="connection_or_portal_error"
+          print(json.dumps(d,sort_keys=True))
+          PY
+          )"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.owner.session.finalization.v1"
+          assert d.get("fl_paid_actions") is False
+          assert d.get("profile_changed") is False
+          assert d.get("captcha_interacted") is False
+          assert d.get("fl_cookies_output") is False
+          assert d.get("passwords_read") is False
+          print(json.dumps(d,sort_keys=True))
+          '
