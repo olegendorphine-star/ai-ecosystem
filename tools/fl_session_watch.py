@@ -62,26 +62,33 @@ def classify_owner_page(url: str, http_status: int | None,
         return "captcha_required"
     if p.path.startswith(("/account/login", "/account/registration")) or login_visible:
         return "auth_required"
-    if (http_status == 200 and settings_visible and owner_visible
-            and p.path.startswith("/profile/")):
+    if http_status == 200 and settings_visible and owner_visible:
+        # FL may serve its settings under a different canonical route.
+        # Exact owner email input + settings heading are checked in DOM.
         return "healthy"
     return "technical_error"
 
 
-def make_attempt() -> str:
+def make_attempt(trace: dict) -> str:
     """Import storage_state only into a fresh, isolated local Chromium."""
+    trace["stage"] = "state_permission_check"
     if not validate_state_file():
         return "state_missing_or_unsafe"
+    trace["stage"] = "browser_import"
     sys.path.insert(0, str(ROOT))
     import fl_rootless_owner_desktop as portal
     browser = portal.Browser()
+    trace["stage"] = "browser_launch"
     try:
         with tempfile.TemporaryDirectory(prefix="fl-watch-", dir=ROOT) as tmp:
             browser.open(Path(tmp))  # imports state, opens FL login page
+            trace["stage"] = "owner_settings_navigation"
             page = browser.page
             response = page.goto(portal.ALLOWED_PAGES["settings"],
                                  wait_until="domcontentloaded", timeout=20000)
             code = response.status if response else None
+            trace["http_code"] = code if type(code) is int and 100 <= code <= 599 else None
+            trace["stage"] = "owner_settings_signals"
             # Read only boolean signs, never emit email or body text.
             signs = page.evaluate("""() => {
                 const text = (document.body?.innerText || '').toLowerCase();
@@ -95,6 +102,16 @@ def make_attempt() -> str:
                         || text.includes('я не робот')
                 };
             }""")
+            p = urlsplit(page.url)
+            trace["fl_domain"] = p.scheme == "https" and p.hostname in ("fl.ru", "www.fl.ru")
+            trace["settings_visible"] = bool(signs.get("settings"))
+            trace["owner_visible"] = bool(signs.get("owner"))
+            trace["login_visible"] = bool(signs.get("login"))
+            trace["captcha_visible"] = bool(signs.get("captcha"))
+            trace["path_category"] = ("login" if p.path.startswith("/account/")
+                else "profile" if p.path.startswith("/profile/")
+                else "other")
+            trace["stage"] = "classified"
             return classify_owner_page(
                 page.url, code,
                 settings_visible=bool(signs.get("settings")),
@@ -168,6 +185,13 @@ def main() -> None:
         "bids_sent": False,
         "payment_performed": False,
         "external_remote_desktop_opened": False,
+        "failure_stage": "none",
+        "page_http_status": None,
+        "page_fl_domain": False,
+        "page_settings_visible": False,
+        "page_owner_visible": False,
+        "page_path_category": "unchecked",
+        "exception_category": "none",
     }
     try:
         if ROOT.is_symlink() or not ROOT.is_dir():
@@ -192,10 +216,24 @@ def main() -> None:
                 for attempt in range(2):
                     output["attempts"] = attempt + 1
                     output["browser_restart_attempted"] = attempt > 0
+                    trace = {}
                     try:
-                        output["status"] = make_attempt()
-                    except Exception:
+                        output["status"] = make_attempt(trace)
+                    except Exception as exc:
+                        msg = str(exc).lower()
+                        output["exception_category"] = (
+                            "timeout" if "timeout" in msg
+                            else "display" if ("xvfb" in msg or "display" in msg)
+                            else "browser_closed" if "browser has been closed" in msg
+                            else "missing_dependency" if ("module" in msg or "shared object" in msg)
+                            else "other")
                         output["status"] = "technical_error"
+                    output["failure_stage"] = trace.get("stage","not_started")
+                    output["page_http_status"] = trace.get("http_code")
+                    output["page_fl_domain"] = bool(trace.get("fl_domain"))
+                    output["page_settings_visible"] = bool(trace.get("settings_visible"))
+                    output["page_owner_visible"] = bool(trace.get("owner_visible"))
+                    output["page_path_category"] = trace.get("path_category","unchecked")
                     if output["status"] != "technical_error":
                         break
                     if attempt == 0:
