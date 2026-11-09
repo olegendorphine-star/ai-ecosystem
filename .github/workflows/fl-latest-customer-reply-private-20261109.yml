@@ -1,0 +1,52 @@
+name: FL - private read latest AI assistant customer reply
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-latest-customer-reply-private-20261109.yml'
+permissions:
+  contents: read
+jobs:
+  read_dialogue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Syntax and one-time recipient certificate
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_read_latest_customer_reply_20261109.py
+          openssl x509 -in tools/fl_reply_reader_one_time_cert_20261109.pem -noout
+      - name: Prepare owner VPS verified SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Read private dialogue and export ONLY recipient-encrypted text
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          ciphertext="$(cat tools/fl_read_latest_customer_reply_20261109.py | \
+            ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' | \
+            openssl cms -encrypt -aes-256-cbc -recip tools/fl_reply_reader_one_time_cert_20261109.pem -outform DER | base64 -w0)"
+          test -n "$ciphertext"
+          printf 'FL_LAST_REPLY_CMS_BASE64=%s\n' "$ciphertext"
+          echo 'FL_PRIVATE_DIALOGUE_EXPORTED_AS_CIPHERTEXT_ONLY'
