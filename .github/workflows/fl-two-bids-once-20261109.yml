@@ -1,0 +1,62 @@
+name: FL - User-approved two free bids (one-time guarded submission)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-two-bids-once-20261109.yml'
+permissions:
+  contents: read
+concurrency:
+  group: fl-two-bids-user-approved-20261109
+  cancel-in-progress: false
+jobs:
+  send_one_time:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate exact one-time submission code
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_two_bids_once_20261109.py
+      - name: Prepare pinned SSH private credentials
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Verify owner and submit only two allowlisted free project proposals once
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_two_bids_once_20261109.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.owner.2.bids.once.v1"
+          assert d.get("owner_verified") is True
+          for k in ("payment_actions","captcha_interacted","login_performed","cookies_exported","secrets_logged"):
+              assert d.get(k) is False,k
+          for p in d.get("projects",[]):
+              assert p["id"] in ("5528403","5527732")
+              print("FL_OWNER_FREE_BID",p["id"],"PRICE",p["cost"],"DAYS",p["days"],
+                    "FREE",p["free_verified"],"CLICKED",p["clicked"],"RESULT",p["result"])
+          assert len(d.get("projects",[]))==2
+          '
