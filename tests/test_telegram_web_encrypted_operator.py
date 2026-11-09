@@ -173,6 +173,17 @@ class OwnContactLink(unittest.TestCase):
         self.assertEqual(res["status"], "ok")
         self.assertEqual(res["url"], "https://t.me/contact/abc_def-12")
 
+    def test_canonicalizes_only_official_contact_token_shapes(self):
+        source = path.read_text()
+        body = source.split("def get_owner_contact_link(",1)[1].split(
+            "def send_approved_phone_message(",1)[0]
+        self.assertIn("tg://contact?token", body)
+        self.assertIn("parsed.hostname === 'contact'", body)
+        self.assertIn("url:'https://t.me/contact/'+encodeURIComponent(token)", body)
+        self.assertIn("u?.username", body)
+        self.assertIn('telegram_url', body)
+        self.assertNotIn("return {status:'ok',method:'contact_token',url:rawUrl}", body)
+
     def test_returns_only_own_safe_username_url(self):
         page = mock.Mock()
         page.evaluate.return_value = {"status":"ok", "method":"username",
