@@ -365,25 +365,38 @@ def send_approved_phone_message(page, command: dict) -> dict:
                   typeof managers?.appUsersManager?.resolvePhone !== 'function')
                 return {status:'phone_lookup_unavailable'};
               try {
+                // Owner explicitly authorized adding this exact phone to
+                // the Telegram contacts. Native importContacts maps one
+                // inputPhoneContact to the returned Telegram user ID; unlike
+                // contacts.resolvePhone it may work when direct lookup is
+                // blocked by the other account's discovery settings.
                 let user;
+                let viaContactImport = false;
                 try {
-                  user = await managers.appUsersManager.resolvePhone(phone);
-                } catch (lookupError) {
-                  // Telegram may restrict direct phone resolution while
-                  // permitting normal address-book contact resolution.
-                  if (lookupError?.type !== 'PHONE_NOT_OCCUPIED' ||
-                      typeof managers.appUsersManager.importContact !== 'function')
-                    throw lookupError;
-                  try {
-                    const importedId = await managers.appUsersManager.importContact(
-                      'Личный', 'Telegram', phone);
-                    user = managers.appUsersManager.getUser(importedId);
-                  } catch (importError) {
-                    if (importError?.type === 'NO_USER')
-                      return {status:'phone_not_found_after_contact_lookup'};
-                    throw importError;
+                  const importedId = await managers.appUsersManager.importContact(
+                    'Личный', 'Telegram', phone);
+                  user = managers.appUsersManager.getUser(importedId);
+                  viaContactImport = true;
+                } catch (importError) {
+                  if (importError?.type === 'NO_USER') {
+                    // A number can already be a known contact. Attempt the
+                    // native direct resolver once without repeated imports.
+                    try {
+                      user = await managers.appUsersManager.resolvePhone(phone);
+                    } catch (lookupError) {
+                      if (lookupError?.type === 'PHONE_NOT_OCCUPIED')
+                        return {status:'contact_not_resolved_by_telegram'};
+                      return {status:'contact_import_or_lookup_restricted'};
+                    }
+                  } else {
+                    return {status:'contact_import_restricted'};
                   }
                 }
+                // When a full phone is provided in Telegram's User object,
+                // reject any contradictory number. Never send to a mismatch.
+                const returnedPhone = String(user?.phone || '').replace(/[^0-9]/g,'');
+                if (returnedPhone && returnedPhone !== phone.replace(/[^0-9]/g,''))
+                  return {status:'resolved_contact_phone_mismatch'};
                 const id = Number(user?.id);
                 if (user?._ !== 'user' || !Number.isSafeInteger(id) || id <= 0)
                   return {status:'phone_not_found'};
