@@ -21,7 +21,8 @@ try:
     ("main","https://www.fl.ru/users/olegendorphine/setup/main/"),
     ("about","https://www.fl.ru/users/olegendorphine/setup/portfolio/"),
     ("public","https://www.fl.ru/users/olegendorphine/portfolio/"),
-    ("price","https://www.fl.ru/users/olegendorphine/price-list/")
+    ("price","https://www.fl.ru/users/olegendorphine/price-list/"),
+    ("services","https://www.fl.ru/users/olegendorphine/uslugi-freelancera/")
    ]:
     r=p.goto(url,wait_until="domcontentloaded",timeout=22000)
     p.wait_for_timeout(350)
@@ -46,6 +47,11 @@ try:
          public_mentions_ai_staff:text.includes('персональный ИИ-«Штаб»')||text.includes('действующий персональный ИИ'),
          public_mentions_prices:text.includes('150 000 ₽'),
          shows_payment:text.includes('Сумма к оплате'),
+         price_audit:text.includes('Аудит процесса и карта ИИ-автоматизации'),
+         price_spec:text.includes('ТЗ на персонального ИИ-ассистента'),
+         price_assistant:text.includes('Персональный ИИ-ассистент с памятью и API'),
+         service_audit:text.includes('Аудит одного процесса и карта ИИ-автоматизации'),
+         service_empty:text.includes('Здесь будет список ваших типовых услуг'),
          errors
       };
     }""")
