@@ -45,7 +45,10 @@ try:
    except Exception:
     result["pages"].append({"type":label,"error":"navigate_or_parse_failed","items":[]})
 
-  details=[]
+  details=[
+   ("video_prompt_pipeline","https://www.fl.ru/projects/5527838/nastroit-mozgi-ii-video-konveeru-promt-injeneriya-moushn-dizayner-programmist-phyton-.html"),
+   ("corporate_portraits","https://www.fl.ru/projects/5527732/cozdanie-edinogo-korporativnogo-stilya-portretov-neyrofotosessiya.html"),
+  ]
   for kind,url in details:
    try:
     response=page.goto(url,wait_until="domcontentloaded",timeout=18000)
