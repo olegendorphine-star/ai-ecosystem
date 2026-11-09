@@ -1,14 +1,11 @@
 name: FL - Private one-time upload of six marketing images to owner VPS
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-artwork-private-transfer-once-20261109.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   transfer:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
