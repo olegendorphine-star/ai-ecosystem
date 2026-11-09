@@ -52,8 +52,17 @@ try:
    fileinputs=p.locator('input[type=file]')
    OUT["file_count"]=fileinputs.count()
    if fileinputs.count()>0:
-    fileinputs.first.set_input_files(str(cover_file),timeout=12000)
-    p.wait_for_timeout(800)
+    # First file input belongs to global profile cover; second is portfolio artwork.
+    target=fileinputs.nth(1)
+    if "image/webp" not in (target.get_attribute("accept") or ""):
+     raise RuntimeError("expected_portfolio_cover_input_missing")
+    target.set_input_files(str(cover_file),timeout=12000)
+    p.wait_for_timeout(650)
+    crop=p.get_by_role("button",name="Сохранить обложку",exact=True)
+    OUT["crop_buttons"]=crop.count()
+    if crop.count()==1:
+     crop.click(timeout=8500)
+     p.wait_for_timeout(550)
    nextbtn=p.get_by_role("button",name="Продолжить",exact=True)
    nextbtn.click(timeout=8500);p.wait_for_timeout(500)
    OUT["stages"].append({"step":2,"detail":fields(p)})
