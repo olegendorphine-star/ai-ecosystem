@@ -24,7 +24,7 @@ SESSION = ROOT / "auth" / "owner"
 LEDGER = ROOT / "state" / "outbound.sqlite3"
 ALLOWED = frozenset({"status", "dialogs", "read", "reply",
                      "web_status", "web_dialogs", "web_read", "web_reply",
-                     "web_self_note", "web_phone_message", "web_owner_contact_link"})
+                     "web_self_note", "web_phone_message", "web_username_message", "web_owner_contact_link"})
 MAX_TEXT = 3500
 
 
@@ -72,6 +72,7 @@ def validate(command: dict) -> dict:
         "web_reply": {"peer_id", "reply_to_id", "text", "approved_by_owner"},
         "web_self_note": {"text", "approved_by_owner"},
         "web_phone_message": {"phone", "text", "approved_by_owner"},
+        "web_username_message": {"username", "text", "approved_by_owner"},
         "web_owner_contact_link": set(),
     }[action]
     if not set(params).issubset(allowed_fields):
@@ -100,6 +101,13 @@ def validate(command: dict) -> dict:
             type(msg) is not str or not 1 <= len(msg.strip()) <= 300 or
             params.get("approved_by_owner") is not True):
             raise Rejected("direct phone message requires approved text and E.164 number")
+    if action == "web_username_message":
+        username, msg = params.get("username"), params.get("text")
+        if (type(username) is not str or
+            not __import__("re").fullmatch(r"@?[A-Za-z][A-Za-z0-9_]{4,31}", username)
+            or type(msg) is not str or not 1 <= len(msg.strip()) <= 1200
+            or params.get("approved_by_owner") is not True):
+            raise Rejected("username send requires exact public username and approved text")
     if action == "web_self_note":
         msg = params.get("text")
         if type(msg) is not str or not 1 <= len(msg.strip()) <= 300 or params.get("approved_by_owner") is not True:
