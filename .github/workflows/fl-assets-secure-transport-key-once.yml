@@ -1,0 +1,47 @@
+name: FL - Generate private one-time artwork transport key on VPS
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-assets-secure-transport-key-once.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  key:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Create dedicated RSA transport key in restricted FL VPS folder
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+          port="${PORT:-22}"
+          ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          root="$HOME/.fl-agent"
+          test -d "$root" && test ! -L "$root"
+          private="$root/artwork_transfer_private_20261109.pem"
+          if [ ! -f "$private" ]; then
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$private" 2>/dev/null
+          fi
+          chmod 600 "$private"
+          echo FL_ARTWORK_PUBLIC_KEY_BEGIN
+          openssl pkey -in "$private" -pubout
+          echo FL_ARTWORK_PUBLIC_KEY_END
+          REMOTE
