@@ -101,6 +101,27 @@ class Validation(unittest.TestCase):
                 with self.assertRaises(owner.Rejected):
                     owner.validate(command("web_phone_message", invalid))
 
+    def test_username_send_requires_exact_username_and_one_approved_text(self):
+        base = {"username": "@ExampleUser", "text": "Hello", "approved_by_owner": True}
+        self.assertEqual(owner.validate(command("web_username_message", base))["action"],
+                         "web_username_message")
+        self.assertEqual(owner.validate(command("web_username_message",
+                         {**base, "username": "ExampleUser"}))["action"],
+                         "web_username_message")
+        for bad in (
+            {**base, "approved_by_owner": False},
+            {**base, "username": "https://t.me/ExampleUser"},
+            {**base, "username": "@abc"},
+            {**base, "username": "@a bad"},
+            {**base, "username": "123456"},
+            {**base, "text": ""},
+            {**base, "text": "x" * 1201},
+            {**base, "peer_id": 76543},
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaises(owner.Rejected):
+                    owner.validate(command("web_username_message", bad))
+
     def test_owner_contact_link_requires_no_recipient_or_arguments(self):
         self.assertEqual(owner.validate(command("web_owner_contact_link", {}))["action"],
                          "web_owner_contact_link")
@@ -275,6 +296,57 @@ class ReplyLedger(unittest.TestCase):
             one, two = command("web_phone_message", params), command("web_phone_message", params)
             self.assertEqual(web.claim_reply_once(one, path), "claimed")
             self.assertEqual(web.claim_reply_once(two, path), "already_attempted")
+
+    def test_username_intent_casefolds_and_deduplicates(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.chmod(td, 0o700)
+            path = Path(td) / "reply.sqlite3"
+            params = {"username": "@ExampleUser", "text": "Hello", "approved_by_owner": True}
+            first = command("web_username_message", params)
+            second = command("web_username_message",
+                             {**params, "username": "exampleuser"})
+            self.assertEqual(web.claim_reply_once(first, path), "claimed")
+            self.assertEqual(web.claim_reply_once(second, path), "already_attempted")
+
+    def test_username_unverified_or_paid_never_claims_or_sends(self):
+        request = command("web_username_message", {
+            "username": "ExampleUser", "text": "Hello", "approved_by_owner": True})
+        for status in ("username_not_found", "target_not_personal_user",
+                       "resolved_username_mismatch",
+                       "message_requires_payment_or_premium"):
+            page = mock.Mock()
+            page.evaluate.return_value = {"status": status}
+            with mock.patch.object(web, "claim_reply_once") as claim:
+                self.assertEqual(web.send_approved_username_message(page, request),
+                                 {"status": status})
+                claim.assert_not_called()
+                self.assertEqual(page.evaluate.call_count, 1)
+
+    def test_username_target_must_be_reverified_after_open_before_ledger(self):
+        request = command("web_username_message", {
+            "username": "ExampleUser", "text": "Hello", "approved_by_owner": True})
+        page = mock.Mock()
+        page.evaluate.side_effect = [
+            {"status": "target_resolved_free", "peer_id": 1234},
+            True, True, False]
+        with mock.patch.object(web, "claim_reply_once") as claim:
+            self.assertEqual(
+                web.send_approved_username_message(page, request)["status"],
+                "target_identity_or_free_send_not_verified")
+            claim.assert_not_called()
+
+    def test_username_send_does_not_repeat_uncertain_command(self):
+        request = command("web_username_message", {
+            "username": "ExampleUser", "text": "Hello", "approved_by_owner": True})
+        page = mock.Mock()
+        page.evaluate.side_effect = [
+            {"status": "target_resolved_free", "peer_id": 1234},
+            True, True, True]
+        with mock.patch.object(web, "claim_reply_once", return_value="already_attempted") as claim:
+            self.assertEqual(
+                web.send_approved_username_message(page, request)["status"],
+                "already_attempted_no_resend")
+            claim.assert_called_once()
 
     def test_contact_import_is_preferred_over_phone_resolution(self):
         source = path.read_text()

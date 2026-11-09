@@ -12,6 +12,7 @@ Allowlisted actions:
   web_reply   -- only explicitly approved text in response to verified incoming
   web_self_note -- explicitly approved note to this owner's own Saved Messages only
   web_phone_message -- one approved phone-number-resolved free personal message
+  web_username_message -- one approved public-username-resolved free personal message
 Opening a chat may cause Telegram to mark its messages as read.
 Only a reply to a verified existing inbound message can be sent, with
 explicit owner approval and a fail-closed at-most-once per-command ledger.
@@ -32,7 +33,7 @@ from pathlib import Path
 
 ROOT = Path.home() / ".telegram-agent" / "browser"
 LOCK = ROOT / "rootless_owner.lock"
-ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_reply", "web_self_note", "web_phone_message",
+ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_reply", "web_self_note", "web_phone_message", "web_username_message",
                      "web_owner_contact_link"})
 REPLY_LEDGER = ROOT / "owner_approved_reply_attempts.sqlite3"
 MAX_REPLY_TEXT = 2000
@@ -142,6 +143,8 @@ def claim_reply_once(command: dict, path: Path = REPLY_LEDGER) -> str:
     elif command["action"] == "web_phone_message":
         # Phone number only in owner-approved encrypted request; ledger holds SHA256.
         intent = ["approved_phone_once", p["phone"], p["text"].strip()]
+    elif command["action"] == "web_username_message":
+        intent = ["approved_public_username_once", p["username"].lstrip("@").lower(), p["text"].strip()]
     else:
         intent = ["inbound_reply", p["peer_id"], p["reply_to_id"], p["text"].strip()]
     intent_digest = hashlib.sha256(
@@ -657,6 +660,171 @@ def send_approved_phone_message(page, command: dict) -> dict:
         return {"status": "target_chat_unavailable"}
 
 
+
+def send_approved_username_message(page, command: dict) -> dict:
+    """One owner-approved free message to a *verified public personal username*.
+
+    Resolution is performed by the authenticated Telegram Web K app manager.
+    A channel, bot, mismatched username, paid recipient, or unknown requirement
+    is rejected without attempting to send. Never touch contacts or bypass
+    Telegram privacy restrictions. No plaintext content leaves the VPS.
+    """
+    p = command["params"]
+    username, msg = p["username"], p["text"]
+    if (p.get("approved_by_owner") is not True or
+            type(username) is not str or
+            not re.fullmatch(r"@?[A-Za-z][A-Za-z0-9_]{4,31}", username) or
+            type(msg) is not str or not 1 <= len(msg.strip()) <= 1200):
+        return {"status": "username_message_not_approved"}
+    username = username.lstrip("@").lower()
+    msg = msg.strip()
+    try:
+        resolved = page.evaluate(
+            """async (username) => {
+              const app = window.appImManager;
+              const managers = app?.managers;
+              const users = managers?.appUsersManager;
+              const self = Number(window.rootScope?.myId);
+              if (!Number.isSafeInteger(self) || self <= 0 ||
+                  typeof users?.resolveUsername !== 'function')
+                return {status:'username_lookup_unavailable'};
+              try {
+                const user = await users.resolveUsername(username);
+                if (user?._ !== 'user' || user.pFlags?.deleted || user.pFlags?.bot ||
+                    user.pFlags?.min)
+                  return {status:'target_not_personal_user'};
+                const validNames = [user.username, ...(Array.isArray(user.usernames) ?
+                  user.usernames.filter(x => x?.active !== false)
+                    .map(x => x?.username) : [])]
+                  .filter(x => typeof x === 'string')
+                  .map(x => x.toLowerCase());
+                if (!validNames.includes(username))
+                  return {status:'resolved_username_mismatch'};
+                const id = Number(user.id);
+                if (!Number.isSafeInteger(id) || id <= 0)
+                  return {status:'target_peer_unavailable'};
+                if (id === self) return {status:'target_is_current_account'};
+                if (user.send_paid_messages_stars || user.pFlags?.contact_require_premium)
+                  return {status:'message_requires_payment_or_premium'};
+                if (typeof user.id?.toPeerId !== 'function')
+                  return {status:'target_peer_unavailable'};
+                const peer = Number(user.id.toPeerId(false));
+                if (!Number.isSafeInteger(peer) || peer <= 0)
+                  return {status:'target_peer_unavailable'};
+                const requirement = await users.getRequirementToContact(user.id);
+                const stars = await managers.appPeersManager.getStarsAmount(peer);
+                if (requirement?._ !== 'requirementToContactEmpty' ||
+                    Number(stars) > 0)
+                  return {status:'message_requires_payment_or_premium'};
+                return {status:'target_resolved_free', peer_id:peer};
+              } catch (e) {
+                const code = String(e?.type || '');
+                if (code === 'USERNAME_NOT_OCCUPIED' || code === 'USERNAME_INVALID')
+                  return {status:'username_not_found'};
+                if (code.startsWith('FLOOD_WAIT_'))
+                  return {status:'telegram_rate_limited'};
+                return {status:'username_lookup_restricted'};
+              }
+            }""", username)
+    except Exception:
+        return {"status": "username_lookup_unavailable"}
+    if not isinstance(resolved, dict) or resolved.get("status") != "target_resolved_free":
+        return {"status": resolved.get("status", "username_lookup_unavailable")
+                if isinstance(resolved, dict) else "username_lookup_unavailable"}
+    peer = resolved.get("peer_id")
+    if type(peer) is not int or not 0 < peer < 2**53:
+        return {"status": "target_peer_unavailable"}
+    try:
+        opened = page.evaluate(
+            """(peer) => {
+              const app = window.appImManager;
+              if (typeof app?.setInnerPeer !== 'function') return false;
+              app.setInnerPeer({peerId:peer});
+              return true;
+            }""", peer)
+        if opened is not True:
+            return {"status": "target_chat_unavailable"}
+        ready = False
+        for _ in range(25):
+            ready = page.evaluate(
+                """(peer) => {
+                  const app = window.appImManager;
+                  return Number(app?.chat?.peerId) === peer &&
+                    !app?.chat?.setPeerPromise &&
+                    !!app?.chat?.bubbles?.chatInner?.isConnected;
+                }""", peer)
+            if ready is True:
+                break
+            page.wait_for_timeout(450)
+        if ready is not True:
+            return {"status": "target_chat_not_verified"}
+        # Re-check the peer's *actual username* and payment state after opening.
+        # A resolved peer ID is not permission to send to a different user.
+        verified = page.evaluate(
+            """async ({peer,username}) => {
+              const app = window.appImManager, managers = app?.managers;
+              if (Number(app?.chat?.peerId) !== peer ||
+                  !managers?.appUsersManager || !managers?.appPeersManager)
+                return false;
+              try {
+                const user = managers.appUsersManager.getUser(peer);
+                if (user?._ !== 'user' || user.pFlags?.deleted || user.pFlags?.bot)
+                  return false;
+                const names = [user.username, ...(Array.isArray(user.usernames) ?
+                  user.usernames.filter(x => x?.active !== false)
+                    .map(x => x?.username) : [])]
+                  .filter(x => typeof x === 'string')
+                  .map(x => x.toLowerCase());
+                if (!names.includes(username)) return false;
+                if (user.send_paid_messages_stars || user.pFlags?.contact_require_premium)
+                  return false;
+                const requirement =
+                  await managers.appUsersManager.getRequirementToContact(user.id);
+                const stars = await managers.appPeersManager.getStarsAmount(peer);
+                return requirement?._ === 'requirementToContactEmpty' &&
+                  !(Number(stars) > 0);
+              } catch (_) { return false; }
+            }""", {"peer": peer, "username": username})
+        if verified is not True:
+            return {"status": "target_identity_or_free_send_not_verified"}
+        # Claim BEFORE any Telegram side effect. A timed-out send is not retried.
+        if claim_reply_once(command) != "claimed":
+            return {"status": "already_attempted_no_resend"}
+        try:
+            started = page.evaluate(
+                """({peer,text}) => {
+                  const app = window.appImManager;
+                  const m = app?.managers?.appMessagesManager;
+                  if (Number(app?.chat?.peerId) !== peer ||
+                      typeof m?.sendText !== 'function') return false;
+                  m.sendText({peerId:peer,text});
+                  return true;
+                }""", {"peer": peer, "text": msg})
+            if started is not True:
+                return {"status": "send_not_started_no_retry"}
+            for _ in range(28):
+                confirmed = page.evaluate(
+                    """({peer,text}) => {
+                      if (Number(window.appImManager?.chat?.peerId) !== peer)
+                        return false;
+                      return [...document.querySelectorAll(
+                        '#column-center .bubble.is-out[data-mid]')].some(
+                        b => !b.classList.contains('is-sending') &&
+                          (b.querySelector('.message [data-message-text-source]')?.textContent ||
+                           b.querySelector('.message')?.textContent || '').trim() === text);
+                    }""", {"peer": peer, "text": msg})
+                if confirmed is True:
+                    complete_reply(command["command_id"])
+                    return {"status": "sent_confirmed", "action": "web_username_message",
+                            "destination": "resolved_public_username"}
+                page.wait_for_timeout(450)
+            return {"status": "send_status_uncertain_no_retry"}
+        except Exception:
+            return {"status": "send_status_uncertain_no_retry"}
+    except Exception:
+        return {"status": "target_chat_unavailable"}
+
+
 def normalize_messages(rows, limit: int):
     if not isinstance(rows, list):
         raise ValueError("unexpected_messages")
@@ -725,6 +893,8 @@ def run_command(command: dict) -> dict:
                     return get_owner_contact_link(page)
                 if action == "web_phone_message":
                     return send_approved_phone_message(page, command)
+                if action == "web_username_message":
+                    return send_approved_username_message(page, command)
                 # Opening a chat may mark it read. For web_reply we also
                 # verify an inbound bubble before taking any send action.
                 peer_id = p["peer_id"]
