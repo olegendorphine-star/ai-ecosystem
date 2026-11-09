@@ -1,0 +1,140 @@
+name: FL.ru - Watch owner session and restart graphical Chromium (no writes)
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fl_session_watch.py'
+      - 'tests/test_fl_session_watch.py'
+      - '.github/workflows/fl-session-watch.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: fl-owner-session-watch
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify no FL writes and offline status transitions
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_session_watch.py
+          python3 -m unittest discover -s tests -p 'test_fl_session_watch.py' -v
+
+  monitor_vps:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare existing trusted SSH (no secrets in logs)
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+
+      - name: Run private FL state check, automatically reopen Chromium if needed
+        id: check
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_session_watch.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c '
+          import json,sys,os
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.owner.session.watch.v1"
+          assert d.get("account")=="olegendorphine"
+          for f in ("captcha_interacted","passwords_read",
+                    "cookie_contents_exported","profile_changed",
+                    "bids_sent","payment_performed","external_remote_desktop_opened"):
+              assert d.get(f) is False, f
+          status=d.get("status")
+          kinds=("healthy","auth_required","captcha_required","access_restricted",
+                 "technical_error","state_missing_or_unsafe","already_running")
+          assert status in kinds
+          alert=d.get("alert_kind")
+          assert alert in ("none","failure","recovered")
+          assert d.get("attempts") in (0,1,2)
+          print("FL_OWNER_SESSION_STATUS",status)
+          print("FL_OWNER_BROWSER_ATTEMPTS",d.get("attempts"))
+          print("FL_OWNER_GRAPHICAL_RESTART_ATTEMPTED",d.get("browser_restart_attempted"))
+          print("FL_OWNER_ALERT_KIND",alert)
+          print("FL_OWNER_MARKER_SAVED",d.get("marker_saved"))
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:
+              print("status="+status,file=f)
+              print("alert_kind="+alert,file=f)
+          '
+
+      - name: Publish owner alert to existing FL issue only on state change
+        if: steps.check.outputs.alert_kind == 'failure' || steps.check.outputs.alert_kind == 'recovered'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SESSION_STATUS: ${{ steps.check.outputs.status }}
+          ALERT_KIND: ${{ steps.check.outputs.alert_kind }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          case "$SESSION_STATUS" in
+            healthy|auth_required|captcha_required|access_restricted|technical_error|state_missing_or_unsafe) ;;
+            *) exit 1 ;;
+          esac
+          if [ "$ALERT_KIND" = recovered ]; then
+            description="Восстановлена проверенная авторизация FL.ru через сохранённую сессию."
+          else
+            description="FL.ru: проверка авторизации требует внимания владельца. Статус: $SESSION_STATUS. CAPTCHA и повторный вход не автоматизируются."
+          fi
+          export DESCRIPTION="$description"
+          payload="$(python3 -c '
+          import json,os
+          print(json.dumps({"body":"**FL.ru — контроль подключения**\n\n"+
+              os.environ["DESCRIPTION"]+"\n\n"+
+              "Проверка: "+os.environ["RUN_URL"]+
+              "\nБез публикации паролей, cookies или скриншотов."},
+              ensure_ascii=False))
+          ')" 
+          curl -fSs --connect-timeout 10 --max-time 20 \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$REPO/issues/107/comments" \
+            --data "$payload" >/dev/null
+          echo FL_OWNER_ISSUE_ALERT_POSTED
+      - name: Fail closed on revoked owner auth or broken browser
+        if: steps.check.outputs.status != 'healthy' && steps.check.outputs.status != 'already_running'
+        run: |
+          echo 'FL_OWNER_ATTENTION_REQUIRED — no commercial actions attempted'
+          exit 1
