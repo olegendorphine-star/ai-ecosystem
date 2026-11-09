@@ -1,0 +1,72 @@
+name: Telegram Web - VPS HTTPS read-only egress diagnostics
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/telegram-vps-egress.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: SSH private pinned
+        env:
+          KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KH: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY" && test -n "$KH"
+          install -d -m 700 "$RUNNER_TEMP/tg-net"
+          printf '%s' "$KEY" | base64 -d > "$RUNNER_TEMP/tg-net/key"
+          printf '%s\n' "$KH" > "$RUNNER_TEMP/tg-net/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-net/key" "$RUNNER_TEMP/tg-net/known_hosts"
+      - name: Compare host TLS connectivity without account or cookies
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-net/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/tg-net/key" -p "$port" \
+            "$USER@$HOST" 'python3 -' <<'PY'
+          import json, socket, ssl, urllib.request, urllib.error, time
+          hosts=["web.telegram.org","telegram.org","t.me","www.fl.ru","www.google.com"]
+          output={"schema":"tg.vps.egress.v1","targets":{},"account_access":False,"auth_export":False}
+          context=ssl.create_default_context()
+          for name in hosts:
+              found={"dns":False,"tcp443":False,"tls":False,"https":False}
+              try:
+                  socket.setdefaulttimeout(5.0)
+                  addr=socket.getaddrinfo(name,443,type=socket.SOCK_STREAM)
+                  found["dns"]=bool(addr)
+              except Exception:
+                  pass
+              try:
+                  # DNS may be IPv6-only; use standard endpoint lookup.
+                  with socket.create_connection((name,443),timeout=6.0) as s:
+                      found["tcp443"]=True
+                      with context.wrap_socket(s,server_hostname=name) as t:
+                          found["tls"]=bool(t.version())
+              except Exception:
+                  pass
+              if found["tls"]:
+                  try:
+                      request=urllib.request.Request("https://"+name+"/",method="HEAD",
+                          headers={"User-Agent":"Mozilla/5.0"})
+                      with urllib.request.urlopen(request,timeout=7,context=context) as r:
+                          found["https"]=True
+                          found["status_class"]=int(r.status)//100
+                  except urllib.error.HTTPError as e:
+                      found["https"]=True
+                      found["status_class"]=int(e.code)//100
+                  except Exception:
+                      pass
+              output["targets"][name]=found
+          print(json.dumps(output,sort_keys=True))
+          PY
