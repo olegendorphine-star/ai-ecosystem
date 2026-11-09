@@ -314,6 +314,15 @@ class ReplyLedger(unittest.TestCase):
             self.assertEqual(web.claim_reply_once(one, path), "claimed")
             self.assertEqual(web.claim_reply_once(two, path), "already_attempted")
 
+    def test_revalidation_awaits_web_k_user_manager_proxy(self):
+        source = path.read_text()
+        for marker in ("def send_approved_username_message(",
+                       "def send_approved_existing_chat_message("):
+            start = source.index(marker)
+            block = source[start:source.find("\ndef ", start + 4)]
+            self.assertIn(
+                "const user = await managers.appUsersManager.getUser(peer);", block)
+
     def test_existing_chat_intent_dedup_and_user_verification(self):
         with tempfile.TemporaryDirectory() as td:
             os.chmod(td, 0o700)
