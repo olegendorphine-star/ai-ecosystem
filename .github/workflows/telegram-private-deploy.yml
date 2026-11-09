@@ -56,7 +56,7 @@ jobs:
                     -o IdentitiesOnly=yes -o LogLevel=ERROR \
                     -i "$RUNNER_TEMP/tg-ssh/key" -p "$port")
           # Stop previous owner-private daemon before replacing its code.
-          ssh "\${ssh_args[@]}" "$USER@$HOST" 'bash -s' <<'STOP'
+          ssh "${ssh_args[@]}" "$USER@$HOST" 'bash -s' <<'STOP'
           set -eu
           if systemctl --user is-active --quiet telegram-resident.service 2>/dev/null; then
             systemctl --user stop telegram-resident.service
@@ -80,7 +80,7 @@ jobs:
             'sha256sum "$HOME/.telegram-agent/browser/telegram_web_encrypted_operator.py" | cut -c1-64')"
           test "$observed" = "$expected"
           expected_agent="$(sha256sum tools/telegram_resident_daemon.py | awk '{print $1}')"
-          observed_agent="$(ssh "\${ssh_args[@]}" "$USER@$HOST" \
+          observed_agent="$(ssh "${ssh_args[@]}" "$USER@$HOST" \
             'sha256sum "$HOME/.telegram-agent/browser/telegram_resident_daemon.py" | cut -c1-64')"
           test "$observed_agent" = "$expected_agent"
           echo TG_PRIVATE_BROWSER_ADAPTER_HASH_MATCH
@@ -126,7 +126,7 @@ jobs:
           REMOTE
           # Try user systemd supervision; fall back to detached rootless process.
           # No external listener: this daemon owns only a same-user Unix socket.
-          ssh "\${ssh_args[@]}" "$USER@$HOST" 'bash -s' <<'RESIDENT'
+          ssh "${ssh_args[@]}" "$USER@$HOST" 'bash -s' <<'RESIDENT'
           set -euo pipefail
           umask 077
           base="$HOME/.telegram-agent/browser"
