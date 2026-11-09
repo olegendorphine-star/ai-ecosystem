@@ -29,8 +29,8 @@ LOGIN = "olegendorphine"
 ROOT = Path.home() / ".fl-agent"
 PROFILE = ROOT / "profile"
 STATE = PROFILE / "storage_state.json"
-TOKEN_FILE = ROOT / "handoff_token"
-PORT = int(os.getenv("FL_HANDOFF_PORT", "8990"))
+TOKEN_FILE = ROOT / "rootless_owner_token"
+PORT = int(os.getenv("FL_HANDOFF_PORT", "8991"))
 TTL = min(900, max(180, int(os.getenv("FL_HANDOFF_TTL_SECONDS", "600"))))
 VIEWPORT = {"width": 1280, "height": 850}
 ALLOWED_PAGES = {
@@ -535,7 +535,7 @@ class Browser:
 def main():
     private_dir(ROOT)
     private_dir(PROFILE)
-    lockfd = os.open(ROOT / "handoff.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    lockfd = os.open(ROOT / "rootless_owner.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     browser = Browser()
     with os.fdopen(lockfd, "r+") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
