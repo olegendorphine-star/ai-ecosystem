@@ -11,7 +11,7 @@ permissions:
   contents: read
   issues: write
 concurrency:
-  group: telegram-owner-approved-once-6737856163
+  group: telegram-owner-approved-once-6738031072
   cancel-in-progress: false
 jobs:
   offline:
@@ -25,7 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           file=.github/workflows/telegram-once-encrypted-phone.yml
-          grep -Fq '6737856163' "$file"
+          grep -Fq '6738031072' "$file"
           grep -Fq 'TG_BRIDGE_COMMAND_V1 ' "$file"
           grep -Fq 'StrictHostKeyChecking=yes' "$file"
           grep -Fq 'TG_ENCRYPTED_RESULT_POSTED' "$file"
@@ -62,11 +62,11 @@ jobs:
           comment_json="$(curl --fail --silent --show-error --max-time 20 \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
-            "https://api.github.com/repos/$REPO/issues/comments/6737856163")"
+            "https://api.github.com/repos/$REPO/issues/comments/6738031072")"
           body="$(COMMENT_JSON="$comment_json" python3 - <<'PY'
           import json,os
           comment=json.loads(os.environ["COMMENT_JSON"])
-          assert comment["id"]==6737856163
+          assert comment["id"]==6738031072
           assert comment["user"]["login"]=="olegendorphine-star"
           assert comment["body"].startswith("TG_BRIDGE_COMMAND_V1 ")
           parsed=json.loads(comment["body"].split(" ",1)[1])
