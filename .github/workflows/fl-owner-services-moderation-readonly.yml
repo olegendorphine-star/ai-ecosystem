@@ -1,0 +1,69 @@
+name: FL - owner services moderation read-only audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fl_owner_services_moderation_readonly.py'
+      - '.github/workflows/fl-owner-services-moderation-readonly.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fl-owner-services-moderation-readonly
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Syntax check
+        run: python3 -m py_compile tools/fl_owner_services_moderation_readonly.py
+      - name: Prepare pinned SSH credentials
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Audit only own services and portfolio; never open customer messages
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_owner_services_moderation_readonly.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.owner.services.moderation.readonly.v1"
+          assert d.get("account")=="olegendorphine"
+          assert d.get("write_actions") is False
+          assert d.get("customer_messages_opened") is False
+          assert d.get("payment_actions") is False
+          print("FL_OWNER_SERVICES_CHECK_STATUS", d["status"])
+          print("FL_OWNER_VERIFIED", d["verified_owner"])
+          print("FL_SERVICES_AUDIT_PRESENT", d["service_audit_present"])
+          print("FL_SERVICES_TZ_PRESENT", d["service_tz_present"])
+          print("FL_SERVICES_UNDER_REVIEW_LABELS", d["review_label_count"])
+          print("FL_SERVICES_APPROVED_LABELS", d["approved_label_count"])
+          print("FL_SERVICES_REJECTED_LABELS", d["rejected_label_count"])
+          print("FL_SERVICES_VISIBLE_PRICES", d["buyer_price_6500_visible"], d["buyer_price_15600_visible"])
+          print("FL_PORTFOLIO_WORKS_FOUND", d["portfolio_work_count"])
+          assert d["status"]=="ok" and d["verified_owner"] is True
+          '
