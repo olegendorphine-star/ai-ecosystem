@@ -48,7 +48,7 @@ def run() -> dict:
     d["xvfb_bin_exact_cstring_count"] = data.count(bytes((47,117,115,114,47,98,105,110,0)))
     old = bytes((47,117,115,114,47,98,105,110,0))
     if data.count(old) == 0 and data.count(b"/usr/bin/") == 1:
-    old = bytes((47,117,115,114,47,98,105,110,0))
+        old = b"/usr/bin/"
     if data.count(old) != 1:
         d["failure_categories"].append("xkb_binary_dir_constant_unavailable")
         return d
