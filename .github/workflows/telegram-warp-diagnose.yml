@@ -1,0 +1,52 @@
+name: Telegram - classify private WARP registration failure
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/telegram-warp-diagnose.yml']
+permissions:
+  contents: read
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Pinned SSH setup
+        env:
+          KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KH: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/tg-ssh"
+          printf '%s' "$KEY" | base64 -d > "$RUNNER_TEMP/tg-ssh/key"
+          printf '%s\n' "$KH" > "$RUNNER_TEMP/tg-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-ssh/key" "$RUNNER_TEMP/tg-ssh/known_hosts"
+      - name: Safe classification only; never print vendor logs or WARP keys
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" 'python3 -' <<'PY'
+          import json, re
+          from pathlib import Path
+          base=Path.home()/".telegram-agent/private"
+          p=base/"warp-registration.log"
+          text=p.read_text(errors="replace")[:100000].lower() if p.is_file() else ""
+          out={"schema":"tg.warp.registration.failure.v1","log_exists":p.is_file(),
+               "nonempty":bool(text.strip()),"no_sensitive_output":True,
+               "config_created":(base/"warp-usque-config.json").is_file()}
+          words=("error","failed","registration","device","enroll","invalid","unauthorized",
+                 "forbidden","rate limit","too many","http","timeout","timed out",
+                 "tls","certificate","connection","refused","network","unreachable",
+                 "proxy","dns","json","parse","unexpected","eof","400","401","403",
+                 "404","405","409","429","500","503","open","file","permission",
+                 "panic","no such file","unsupported","internal","bad request")
+          out["error_signals"]=[w.replace(" ","_") for w in words if w in text]
+          # Never emit network addresses, API keys, config, log content, stack.
+          print(json.dumps(out,sort_keys=True))
+          PY
