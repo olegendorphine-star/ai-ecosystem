@@ -164,6 +164,15 @@ class UIHelpers(unittest.TestCase):
 
 
 class OwnContactLink(unittest.TestCase):
+    def test_accepts_short_normalized_telegram_contact_token(self):
+        page = mock.Mock()
+        page.evaluate.return_value = {"status": "ok", "method": "contact_token",
+                                      "url": "https://t.me/contact/abc_def-12",
+                                      "expires": 1899999999}
+        res = web.get_owner_contact_link(page)
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["url"], "https://t.me/contact/abc_def-12")
+
     def test_returns_only_own_safe_username_url(self):
         page = mock.Mock()
         page.evaluate.return_value = {"status":"ok", "method":"username",
