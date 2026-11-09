@@ -62,6 +62,7 @@ try:
      u=urlsplit(p.url)
      if not r or r.status!=200 or u.scheme!="https" or u.hostname not in ("www.fl.ru","fl.ru") or u.path!=urlsplit(URL).path:
       entry["result"]="unexpected_site";break
+     entry["stage"]="list_read"
      if svc["title"] in p.locator("body").inner_text():
       entry["result"]="already_visible";entry["verified"]=True;continue
      if marker.exists() or marker.is_symlink():
@@ -70,6 +71,7 @@ try:
      if btn.count()!=1:
       entry["result"]="missing_add_button";break
      btn.click(timeout=7500);p.wait_for_timeout(270)
+     entry["stage"]="step1_open"
      for css,value in [
        ("#ui-input-example-name-input",svc["title"]),
        ("#ui-textarea-description-input",svc["description"]),
@@ -79,17 +81,24 @@ try:
       if p.locator(css).count()!=1:
        raise RuntimeError("unexpected_step_1")
       p.locator(css).fill(value,timeout=6000)
+     entry["stage"]="step1_filled"
      nxt=p.get_by_role("button",name="Продолжить",exact=True)
      if nxt.count()!=1:raise RuntimeError("ambiguous_step1_continue")
      nxt.click(timeout=10000);p.wait_for_timeout(230)
+     entry["stage"]="step2_open"
      p.locator("#ui-input-price").fill(str(svc["rub"]))
      p.locator("#ui-input-days").fill(str(svc["days"]))
+     entry["stage"]="step2_filled"
      nxt=p.get_by_role("button",name="Продолжить",exact=True)
      nxt.click(timeout=10000);p.wait_for_timeout(230)
+     entry["stage"]="step3_open"
      p.get_by_text("AI — искусственный интеллект",exact=True).last.click(timeout=6000)
+     entry["stage"]="category_open"
      p.get_by_text(svc["subcat"],exact=True).last.click(timeout=6000)
+     entry["stage"]="subcategory_selected"
      nxt=p.get_by_role("button",name="Продолжить",exact=True)
      nxt.click(timeout=10000);p.wait_for_timeout(230)
+     entry["stage"]="step4_open"
      pub=p.get_by_role("button",name="Опубликовать",exact=True)
      if pub.count()!=1 or not pub.is_enabled():
       entry["result"]="cannot_publish_no_extra_actions";break
@@ -101,6 +110,7 @@ try:
      if not state["correctStep"] or state["payment"]:
       entry["result"]="pre_submit_guard";break
      mark(marker,svc)
+     entry["stage"]="intent_saved"
      pub.click(timeout=12000)
      entry["clicked_publish"]=True
      p.wait_for_timeout(1250)
@@ -109,7 +119,8 @@ try:
      entry["verified"]=(bool(r) and r.status==200 and svc["title"] in p.locator("body").inner_text())
      entry["result"]="published_visible" if entry["verified"] else "submitted_unverified_or_cover_required"
      if not entry["verified"]:break
-    except Exception:
+    except Exception as ex:
+     entry["error_class"]=type(ex).__name__
      entry["result"]="error_after_attempt_stop" if marker.exists() else "error_before_attempt"
      break
 finally:b.close()
