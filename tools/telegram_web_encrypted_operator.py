@@ -928,12 +928,131 @@ def normalize_messages(rows, limit: int):
     return result
 
 
+def execute_on_page(page, command: dict) -> dict:
+    """Execute a validated owner command on an already authenticated page.
+
+    The resident loop calls this without opening a second Chromium. The
+    original one-shot caller uses the identical operation paths.
+    """
+    action = command["action"]
+    p = command["params"]
+    if action == "web_status":
+        return {"status": "authorized", "action": action,
+                "persistent_profile": True}
+    if action == "web_dialogs":
+        items = page.evaluate(DIALOGS_JS, p.get("limit", 10))
+        return {"status": "ok", "action": action,
+                "dialogs": normalize_dialogs(items, p.get("limit", 10))}
+    if action == "web_self_note":
+        return send_owner_self_note(page, command)
+    if action == "web_owner_contact_link":
+        return get_owner_contact_link(page)
+    if action == "web_phone_message":
+        return send_approved_phone_message(page, command)
+    if action == "web_username_message":
+        return send_approved_username_message(page, command)
+    # Opening a chat may mark it read. For web_reply we also
+    # verify an inbound bubble before taking any send action.
+    peer_id = p["peer_id"]
+    selector = f'#column-left a.chatlist-chat[data-peer-id="{peer_id}"]'
+    row = page.locator(selector).first
+    if row.count() != 1 or not row.is_visible():
+        return {"status": "chat_not_in_visible_list", "action": action}
+    row.focus()
+    page.keyboard.press("Enter")
+    # A forum row or hidden overlay can swallow Enter. The
+    # signed-in client's supported internal chat opening method is
+    # used only for the exact already-verified visible peer.
+    selected = False
+    for attempt in range(20):
+        selected = bool(page.evaluate(
+            "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)",
+            peer_id))
+        if selected:
+            break
+        if attempt == 8:
+            try:
+                page.evaluate(
+                    "(peer) => { const m = window.appImManager;"
+                    "if (!m || typeof m.setInnerPeer !== 'function') return false;"
+                    "m.setInnerPeer({peerId: peer}); return true; }",
+                    peer_id)
+            except Exception:
+                pass
+        page.wait_for_timeout(550)
+    if not selected:
+        checks = page.evaluate(
+            "(peer) => { const r = [...document.querySelectorAll("
+            "'#column-left .chatlist-chat')].find(x =>"
+            "x.getAttribute('data-peer-id') === String(peer));"
+            "return {chat_present:!!window.appImManager?.chat,"
+            "row_active:!!r?.classList.contains('active'),"
+            "center_visible:!!document.querySelector('#column-center .bubble')}; }",
+            peer_id)
+        # Diagnostic booleans only, encrypted result: never reveal
+        # internal peer ID or chat content if selection is uncertain.
+        return {"status": "requested_chat_not_opened", "action": action,
+                "selection_checks": checks}
+    page.wait_for_timeout(900)
+    if action == "web_reply":
+        return send_approved_reply(page, peer_id, p, command)
+    if action == "web_chat_message":
+        return send_approved_existing_chat_message(page, command)
+    messages = normalize_messages(
+        page.evaluate(MESSAGES_JS, p.get("limit", 10)),
+        p.get("limit", 10))
+    return {"status": "ok", "action": action, "peer_id": peer_id,
+            "messages": messages, "may_mark_read": True}
+
+
+def _resident_call(command: dict) -> dict | None:
+    """Prefer the same-user Unix socket; never fall back if one is present."""
+    import socket
+    path = ROOT / "resident" / "operator.sock"
+    if path.is_symlink():
+        return {"status": "resident_socket_unsafe"}
+    if not path.exists():
+        return None
+    info = path.stat()
+    if (not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_mode & 0o077):
+        return {"status": "resident_socket_unsafe"}
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(130)
+            client.connect(str(path))
+            payload = json.dumps(command, ensure_ascii=False,
+                                 separators=(",", ":")).encode("utf-8")
+            if len(payload) > 16000:
+                return {"status": "resident_command_too_large"}
+            client.sendall(payload)
+            client.shutdown(socket.SHUT_WR)
+            out = bytearray()
+            while True:
+                block = client.recv(4096)
+                if not block:
+                    break
+                out.extend(block)
+                if len(out) > 65536:
+                    return {"status": "resident_result_too_large"}
+        response = json.loads(out)
+        if (not isinstance(response, dict) or
+                not isinstance(response.get("status"), str)):
+            return {"status": "resident_result_invalid"}
+        return response
+    except Exception:
+        return {"status": "resident_temporarily_unavailable"}
+
+
 def run_command(command: dict) -> dict:
     """Start one private headed Chromium process and close it deterministically."""
     action = command["action"]
     p = command["params"]
     if action not in ALLOWED:
         return {"status": "unsupported_action"}
+    resident = _resident_call(command)
+    if resident is not None:
+        return resident
     if ROOT.is_symlink() or not ROOT.is_dir() or LOCK.is_symlink():
         return {"status": "profile_unavailable"}
     fd = os.open(LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -963,73 +1082,7 @@ def run_command(command: dict) -> dict:
                 if state != "authorized":
                     return {"status": "auth_required" if state == "auth_required"
                             else "login_state_unverified"}
-                if action == "web_status":
-                    return {"status": "authorized", "action": action,
-                            "persistent_profile": True}
-                if action == "web_dialogs":
-                    items = page.evaluate(DIALOGS_JS, p.get("limit", 10))
-                    return {"status": "ok", "action": action,
-                            "dialogs": normalize_dialogs(items, p.get("limit", 10))}
-                if action == "web_self_note":
-                    return send_owner_self_note(page, command)
-                if action == "web_owner_contact_link":
-                    return get_owner_contact_link(page)
-                if action == "web_phone_message":
-                    return send_approved_phone_message(page, command)
-                if action == "web_username_message":
-                    return send_approved_username_message(page, command)
-                # Opening a chat may mark it read. For web_reply we also
-                # verify an inbound bubble before taking any send action.
-                peer_id = p["peer_id"]
-                selector = f'#column-left a.chatlist-chat[data-peer-id="{peer_id}"]'
-                row = page.locator(selector).first
-                if row.count() != 1 or not row.is_visible():
-                    return {"status": "chat_not_in_visible_list", "action": action}
-                row.focus()
-                page.keyboard.press("Enter")
-                # A forum row or hidden overlay can swallow Enter. The
-                # signed-in client's supported internal chat opening method is
-                # used only for the exact already-verified visible peer.
-                selected = False
-                for attempt in range(20):
-                    selected = bool(page.evaluate(
-                        "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)",
-                        peer_id))
-                    if selected:
-                        break
-                    if attempt == 8:
-                        try:
-                            page.evaluate(
-                                "(peer) => { const m = window.appImManager;"
-                                "if (!m || typeof m.setInnerPeer !== 'function') return false;"
-                                "m.setInnerPeer({peerId: peer}); return true; }",
-                                peer_id)
-                        except Exception:
-                            pass
-                    page.wait_for_timeout(550)
-                if not selected:
-                    checks = page.evaluate(
-                        "(peer) => { const r = [...document.querySelectorAll("
-                        "'#column-left .chatlist-chat')].find(x =>"
-                        "x.getAttribute('data-peer-id') === String(peer));"
-                        "return {chat_present:!!window.appImManager?.chat,"
-                        "row_active:!!r?.classList.contains('active'),"
-                        "center_visible:!!document.querySelector('#column-center .bubble')}; }",
-                        peer_id)
-                    # Diagnostic booleans only, encrypted result: never reveal
-                    # internal peer ID or chat content if selection is uncertain.
-                    return {"status": "requested_chat_not_opened", "action": action,
-                            "selection_checks": checks}
-                page.wait_for_timeout(900)
-                if action == "web_reply":
-                    return send_approved_reply(page, peer_id, p, command)
-                if action == "web_chat_message":
-                    return send_approved_existing_chat_message(page, command)
-                messages = normalize_messages(
-                    page.evaluate(MESSAGES_JS, p.get("limit", 10)),
-                    p.get("limit", 10))
-                return {"status": "ok", "action": action, "peer_id": peer_id,
-                        "messages": messages, "may_mark_read": True}
+                return execute_on_page(page, command)
         finally:
             browser.close()
 
