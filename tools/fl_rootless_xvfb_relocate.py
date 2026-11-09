@@ -42,7 +42,9 @@ def run() -> dict:
         "xvfb_alive_after_browser_launch": False,
         "failure_stage": "none",
         "failure_categories": [],
-        "network_requests": 0,
+        "scripted_fl_navigation_attempts": 0,
+        "screenshot_failure_reason": "none",
+        "public_page_screenshot": False,
         "owner_session_used": False,
         "captcha_interacted": False,
         "write_account_actions": False,
@@ -137,7 +139,7 @@ def run() -> dict:
                         browser = pw.chromium.launch(
                             executable_path=str(chrome_candidates[-1]),
                             headless=False, env=env,
-                            args=["--no-sandbox", "--disable-dev-shm-usage"],
+                            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
                             timeout=12000,
                         )
                         d["headed_chrome_started"] = True
@@ -152,17 +154,34 @@ def run() -> dict:
                             screenshot = pg.screenshot(type="png", timeout=7000)
                             d["about_blank_screenshot"] = screenshot[:4] == bytes((137,80,78,71))
                         except Exception as exc:
-                            d["failure_categories"].append(
-                                "screenshot_timeout" if "timeout" in str(exc).lower()
-                                else "screenshot_failed")
+                            low = str(exc).lower()
+                            reasons = {
+                                "timeout": ("timeout",),
+                                "capture_not_supported": ("failed to capture", "unable to capture"),
+                                "target_closed": ("target closed", "page has been closed"),
+                                "protocol_error": ("protocol error",),
+                                "gpu_error": ("gpu", "glx", "egl"),
+                                "display_error": ("display", "x11"),
+                                "page_not_visible": ("not visible", "not attached"),
+                            }
+                            d["screenshot_failure_reason"] = next(
+                                (key for key, words in reasons.items()
+                                 if any(w in low for w in words)), "other")
+                            d["failure_categories"].append("screenshot_failed")
                         d["failure_stage"] = "public_login_navigation"
                         try:
+                            d["scripted_fl_navigation_attempts"] = 1
                             response = pg.goto("https://www.fl.ru/account/login/",
                                 wait_until="commit", timeout=14000)
                             code = response.status if response else None
                             d["fl_login_http_status"] = (
                                 code if type(code) is int and 100 <= code <= 599 else None)
                             d["public_login_checked"] = True
+                            try:
+                                image = pg.screenshot(type="png", timeout=6000)
+                                d["public_page_screenshot"] = image[:4] == bytes((137,80,78,71))
+                            except Exception:
+                                d["failure_categories"].append("public_screenshot_failed")
                         except Exception as exc:
                             d["failure_categories"].append(
                                 "public_login_timeout" if "timeout" in str(exc).lower()
