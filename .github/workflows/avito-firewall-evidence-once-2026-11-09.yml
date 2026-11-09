@@ -58,18 +58,18 @@ jobs:
           set -euo pipefail
           install -d -m 700 "$RUNNER_TEMP/firewall-private/encrypted"
           cat > "$RUNNER_TEMP/firewall-private/pub.pem" <<'PUB'
------BEGIN PUBLIC KEY-----
-MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAvViW26Q6y/DSHuVhlEUH
-FWin495Qt9QWMZaaDY9a+NlGT9QCNqU5p25Au0YqY7tim/d4L6/FYj2xWzj8pRHv
-aOCrW4WOElJrNbJ3EcKJcqZNOC436uFX8oqDC/VO5MWx3OEyPvunhPYrXlzvF36A
-KsRSAAXLpRMxcUe53wkEreQuMspZDQ8ecWFAji3BY7VmezG+J3zpfBwz+4T5x4vg
-z0FuFsblSbt2sM2M4AdVrYnW3/fNdIMWSVLfd9ceeP/6KdJeqTsHxYRXwHPCi+WA
-T/nXTjYSmb+wM7d2h466WUyB/ptNc6z5MA+nbjYB//NAcqjCVdugLm3dtdoQ/EoZ
-VOJgu3i14w5ksxM9di7zI1MBZ6PWsymR0mnhd1v5apnlGgB/tq931RhPAy/pdJmZ
-Y/tIMT01t2De5Sk+a4SfGkJzW4/fBJw+hK6rK4VW4ROXpNkntZ88uujzbG/hGbLI
-j1/Dt9JOyWi0X372qRxGocblv+7z2dNq6JTPjevU1DG9AgMBAAE=
------END PUBLIC KEY-----
-PUB
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAvViW26Q6y/DSHuVhlEUH
+          FWin495Qt9QWMZaaDY9a+NlGT9QCNqU5p25Au0YqY7tim/d4L6/FYj2xWzj8pRHv
+          aOCrW4WOElJrNbJ3EcKJcqZNOC436uFX8oqDC/VO5MWx3OEyPvunhPYrXlzvF36A
+          KsRSAAXLpRMxcUe53wkEreQuMspZDQ8ecWFAji3BY7VmezG+J3zpfBwz+4T5x4vg
+          z0FuFsblSbt2sM2M4AdVrYnW3/fNdIMWSVLfd9ceeP/6KdJeqTsHxYRXwHPCi+WA
+          T/nXTjYSmb+wM7d2h466WUyB/ptNc6z5MA+nbjYB//NAcqjCVdugLm3dtdoQ/EoZ
+          VOJgu3i14w5ksxM9di7zI1MBZ6PWsymR0mnhd1v5apnlGgB/tq931RhPAy/pdJmZ
+          Y/tIMT01t2De5Sk+a4SfGkJzW4/fBJw+hK6rK4VW4ROXpNkntZ88uujzbG/hGbLI
+          j1/Dt9JOyWi0X372qRxGocblv+7z2dNq6JTPjevU1DG9AgMBAAE=
+          -----END PUBLIC KEY-----
+          PUB
           openssl rand -hex 32 > "$RUNNER_TEMP/firewall-private/key.secret"
           chmod 600 "$RUNNER_TEMP/firewall-private/key.secret"
           openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
