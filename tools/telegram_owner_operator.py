@@ -23,7 +23,7 @@ ROOT = Path.home() / ".telegram-agent"
 SESSION = ROOT / "auth" / "owner"
 LEDGER = ROOT / "state" / "outbound.sqlite3"
 ALLOWED = frozenset({"status", "dialogs", "read", "reply",
-                     "web_status", "web_dialogs", "web_read"})
+                     "web_status", "web_dialogs", "web_read", "web_reply"})
 MAX_TEXT = 3500
 
 
@@ -68,6 +68,7 @@ def validate(command: dict) -> dict:
         "reply": {"chat_id", "reply_to_id", "text", "approved_by_owner"},
         "web_status": set(), "web_dialogs": {"limit"},
         "web_read": {"peer_id", "limit"},
+        "web_reply": {"peer_id", "reply_to_id", "text", "approved_by_owner"},
     }[action]
     if not set(params).issubset(allowed_fields):
         raise Rejected("unexpected params")
@@ -84,10 +85,17 @@ def validate(command: dict) -> dict:
         cap = 20 if action == "read" else 12
         if type(params.get("limit", 10)) is not int or not 1 <= params.get("limit", 10) <= cap:
             raise Rejected("invalid message limit")
-    if action == "web_read":
+    if action in {"web_read", "web_reply"}:
         peer_id = params.get("peer_id")
         if type(peer_id) is not int or not -(2**53) < peer_id < 2**53 or peer_id == 0:
             raise Rejected("invalid web peer id")
+    if action == "web_reply":
+        mid = params.get("reply_to_id")
+        text = params.get("text")
+        if (type(mid) is not int or not 0 < mid < 2**53
+            or type(text) is not str or not 1 <= len(text.strip()) <= 2000
+            or params.get("approved_by_owner") is not True):
+            raise Rejected("web reply requires exact inbound message and explicit owner approval")
     if action == "reply":
         if (type(params.get("reply_to_id")) is not int or params["reply_to_id"] <= 0 or
             not isinstance(params.get("text"), str) or
