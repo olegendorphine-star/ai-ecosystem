@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/fl-verify-public-profile-after-20261109.yml'
+      - 'tools/fl_verify_profile_public_after_update_20261109.py'
 permissions:
   contents: read
 jobs:
