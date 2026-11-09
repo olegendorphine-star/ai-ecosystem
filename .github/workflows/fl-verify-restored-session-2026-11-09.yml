@@ -1,0 +1,111 @@
+name: FL - independent private session restoration smoke (read only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-verify-restored-session-2026-11-09.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare existing pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Reopen isolated browser with owner-only stored state and verify FL settings (no writes)
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' <<'PY'
+          import json,os,stat,sys,tempfile
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          root=Path.home()/".fl-agent"
+          profile=root/"profile"
+          state=profile/"storage_state.json"
+          result={
+              "schema":"fl.owner.restored.session.v1",
+              "file_present":False,
+              "file_private":False,
+              "browser_reopened":False,
+              "restored_fl_domain":False,
+              "settings_visible":False,
+              "expected_owner_identity":False,
+              "still_on_login_page":True,
+              "result":"not_checked",
+              "credentials_output":False,
+              "cookie_contents_read":False,
+              "captcha_interacted":False,
+              "write_actions":False,
+              "payments":False
+          }
+          if not profile.is_symlink() and state.is_file() and not state.is_symlink():
+              meta=state.stat()
+              result["file_present"]=stat.S_ISREG(meta.st_mode) and meta.st_uid==os.getuid() and 2<=meta.st_size<2097152
+              result["file_private"]=result["file_present"] and (meta.st_mode&0o077)==0
+          if result["file_private"]:
+              from fl_rootless_owner_desktop import Browser,ALLOWED_PAGES,ROOT,is_fl_url
+              b=Browser()
+              try:
+                  with tempfile.TemporaryDirectory(prefix="fl-restore-verification-",dir=ROOT) as tmp:
+                      b.open(Path(tmp))
+                      result["browser_reopened"]=b.browser.is_connected()
+                      page=b.page
+                      page.goto(ALLOWED_PAGES["settings"],wait_until="domcontentloaded",timeout=20000)
+                      page.wait_for_timeout(1000)
+                      result["restored_fl_domain"]=is_fl_url(page.url)
+                      parsed=urlsplit(page.url)
+                      result["still_on_login_page"]=(parsed.path.startswith(("/account/login","/account/registration")))
+                      signs=page.evaluate("""() => ({
+                          settings:(document.body?.innerText||'').includes('Основные настройки'),
+                          owner:Array.from(document.querySelectorAll('input')).some(
+                              e=>(e.value||'').trim().toLowerCase()==='olegendorphine@gmail.com')
+                      })""")
+                      result["settings_visible"]=bool(signs.get("settings"))
+                      result["expected_owner_identity"]=bool(signs.get("owner"))
+              except Exception:
+                  result["result"]="browser_or_site_verification_failed"
+              finally:
+                  b.close()
+          if result["result"]=="not_checked":
+              result["result"]=("verified_restored"
+                  if result["browser_reopened"] and result["restored_fl_domain"]
+                      and result["settings_visible"] and result["expected_owner_identity"]
+                      and not result["still_on_login_page"]
+                  else "restore_not_verified")
+          print(json.dumps(result,sort_keys=True))
+          PY
+          )"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.owner.restored.session.v1"
+          assert d.get("credentials_output") is False
+          assert d.get("cookie_contents_read") is False
+          assert d.get("captcha_interacted") is False
+          assert d.get("write_actions") is False and d.get("payments") is False
+          print(json.dumps(d,sort_keys=True))
+          '
