@@ -74,5 +74,14 @@ try:
     p.get_by_role("button",name="Продолжить",exact=True).click(timeout=8500)
     p.wait_for_timeout(450)
     OUT["stages"].append({"step":3,"detail":fields(p)})
+    search=p.get_by_placeholder("Специализация",exact=True)
+    OUT["section_search_count"]=search.count()
+    if search.count()==1:
+     search.click(timeout=5500)
+     p.wait_for_timeout(450)
+     OUT["section_options"]=p.evaluate("""()=>({
+      tail:(document.body?.innerText||'').slice(-2100),
+      possible:Array.from(document.querySelectorAll('[role=option], [class*=dropdown] li, [class*=multiselect] li')).filter(e=>e.getBoundingClientRect().width>0).map(e=>(e.innerText||'').trim().slice(0,100)).filter(Boolean).slice(-35)
+     })""")
 finally:b.close()
 print(json.dumps(OUT,ensure_ascii=False,sort_keys=True))
