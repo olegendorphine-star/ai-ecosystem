@@ -67,6 +67,7 @@ jobs:
               result["file_present"]=stat.S_ISREG(meta.st_mode) and meta.st_uid==os.getuid() and 2<=meta.st_size<2097152
               result["file_private"]=result["file_present"] and (meta.st_mode&0o077)==0
           if result["file_private"]:
+              sys.path.insert(0,str(root))
               from fl_rootless_owner_desktop import Browser,ALLOWED_PAGES,ROOT,is_fl_url
               b=Browser()
               try:
