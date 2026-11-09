@@ -67,6 +67,23 @@ class Validation(unittest.TestCase):
         self.assertEqual(owner.validate(command(
             "web_reply", {**data, "approved_by_owner": True}))["action"], "web_reply")
 
+    def test_self_note_owner_approval_and_no_recipient(self):
+        with self.assertRaises(owner.Rejected):
+            owner.validate(command("web_self_note", {"text":"Hi"}))
+        with self.assertRaises(owner.Rejected):
+            owner.validate(command("web_self_note", {"text":"Hi",
+                                                     "approved_by_owner":False}))
+        with self.assertRaises(owner.Rejected):
+            owner.validate(command("web_self_note", {"text":"Hi",
+                                                     "approved_by_owner":True,
+                                                     "peer_id":12345}))
+        with self.assertRaises(owner.Rejected):
+            owner.validate(command("web_self_note", {"text":"a"*301,
+                                                     "approved_by_owner":True}))
+        c = command("web_self_note", {"text":"Test",
+                                     "approved_by_owner":True})
+        self.assertEqual(owner.validate(c)["action"], "web_self_note")
+
     def test_arbitrary_actions_forbidden(self):
         for action in ("web_send", "web_delete", "web_navigate",
                        "web_js", "web_screenshot", "web_export_cookies"):
@@ -144,6 +161,38 @@ class ReplyLedger(unittest.TestCase):
             self.assertNotEqual(one["command_id"], two["command_id"])
             self.assertEqual(web.claim_reply_once(one, path), "claimed")
             self.assertEqual(web.claim_reply_once(two, path), "already_attempted")
+
+    def test_same_self_note_different_uuid_does_not_resend(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.chmod(td, 0o700)
+            path = Path(td) / "reply.sqlite3"
+            params = {"text": "single note", "approved_by_owner": True}
+            one = command("web_self_note", params)
+            two = command("web_self_note", params)
+            self.assertEqual(web.claim_reply_once(one, path), "claimed")
+            self.assertEqual(web.claim_reply_once(two, path), "already_attempted")
+            web.complete_reply(one["command_id"], path)
+            self.assertEqual(web.claim_reply_once(two, path), "already_attempted")
+
+    def test_self_note_refuses_if_self_not_verified(self):
+        page = mock.Mock()
+        page.evaluate.return_value = False
+        c = command("web_self_note", {"text":"hello",
+                                       "approved_by_owner":True})
+        with mock.patch.object(web, "claim_reply_once") as claim:
+            result = web.send_owner_self_note(page, c)
+            self.assertEqual(result["status"], "self_chat_unavailable")
+            claim.assert_not_called()
+
+    def test_self_note_does_not_send_if_already_attempted(self):
+        page = mock.Mock()
+        page.evaluate.return_value = True
+        c = command("web_self_note", {"text":"hello",
+                                       "approved_by_owner":True})
+        with mock.patch.object(web, "claim_reply_once", return_value="already_attempted"):
+            result = web.send_owner_self_note(page, c)
+            self.assertEqual(result["status"], "already_attempted_no_resend")
+            self.assertEqual(page.evaluate.call_count, 2)
 
     def test_conflicting_reuse_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:
