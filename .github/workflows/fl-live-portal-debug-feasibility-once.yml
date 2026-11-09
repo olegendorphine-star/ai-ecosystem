@@ -1,0 +1,91 @@
+name: FL - read-only live portal process debugging feasibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-live-portal-debug-feasibility-once.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Prepare pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Inspect attach permissions and Chrome devtools transports, without credential contents
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -' <<'PY'
+          import json, os, shutil,stat
+          from pathlib import Path
+          root=Path.home()/".fl-agent"
+          p=root/"rootless_owner.pid"
+          d={"schema":"fl.live.debug.feasibility.v1",
+              "portal_process_alive":False,"ptrace_scope":None,
+              "gdb_exists":bool(shutil.which("gdb")),
+              "python_pid_owned":False,"chrome_debugging_port":False,
+              "chrome_debugging_pipe":False,
+              "state_present":(root/"profile/storage_state.json").is_file(),
+              "cookies_read":False,"passwords_read":False,"mutations":False}
+          try:
+              wrapper_pid=int(p.read_text().strip())
+              descendants=[]
+              for item in Path("/proc").iterdir():
+                  if not item.name.isdigit():continue
+                  procstat=item/"status"
+                  try:
+                      if procstat.stat().st_uid!=os.getuid():continue
+                      status=procstat.read_text(errors="replace")
+                      if "PPid:\t"+str(wrapper_pid)+"\n" in status:descendants.append(int(item.name))
+                  except OSError:pass
+              d["portal_process_alive"]=Path(f"/proc/{wrapper_pid}").exists()
+              for pid in descendants:
+                  try:
+                      cmd=(Path(f"/proc/{pid}/cmdline").read_bytes()).split(b"\x00")
+                      if any(b"fl_rootless_owner_desktop.py" in x for x in cmd):
+                          d["python_pid_owned"]=True
+                  except OSError:pass
+              for item in Path("/proc").iterdir():
+                  if not item.name.isdigit():continue
+                  try:
+                      if (item/"status").stat().st_uid!=os.getuid():continue
+                      cmd=(item/"cmdline").read_bytes().split(b"\x00")
+                      if any(b"--remote-debugging-port=" in x for x in cmd):
+                          if any(b"chrome" in x.lower() for x in cmd[:2]):
+                              d["chrome_debugging_port"]=True
+                      if b"--remote-debugging-pipe" in cmd:
+                          d["chrome_debugging_pipe"]=True
+                  except OSError:pass
+          except (OSError,ValueError):pass
+          try:
+              value=Path("/proc/sys/kernel/yama/ptrace_scope").read_text().strip()
+              d["ptrace_scope"]=int(value)
+          except (OSError,ValueError):pass
+          print(json.dumps(d,sort_keys=True))
+          PY
+          )"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.live.debug.feasibility.v1" and d.get("cookies_read") is False and d.get("mutations") is False
+          print(json.dumps(d,sort_keys=True))
+          '
