@@ -1,0 +1,202 @@
+name: FL - one-time rootless owner desktop encrypted access (manual only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-rootless-owner-launch-2026-11-09.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fl-rootless-owner-launch-2026-11-09
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify manual-only portal, key format, no surrogate password field
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_rootless_owner_desktop.py
+          python3 -m unittest discover -s tests -p 'test_fl_rootless_owner_desktop.py' -v
+          openssl pkey -pubin -in tools/fl_rootless_owner_one_time_public_2026-11-09.pem -noout
+
+  server:
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH key
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+
+      - name: Deploy one-time rootless owner manual portal to VPS private folder
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          cat tools/fl_rootless_owner_desktop.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'umask 077; test -d "$HOME/.fl-agent" && test ! -L "$HOME/.fl-agent" && cat > "$HOME/.fl-agent/fl_rootless_owner_desktop.py" && chmod 600 "$HOME/.fl-agent/fl_rootless_owner_desktop.py"'
+          echo FL_ROOTLESS_OWNER_PORTAL_CODE_READY
+
+      - name: Start 10-minute single-owner desktop bound only to 127.0.0.1
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          cd "$HOME/.fl-agent"
+          if [ -s rootless_owner.pid ]; then
+            pid="$(cat rootless_owner.pid)"
+            if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+              echo FL_ROOTLESS_OWNER_SESSION_ALREADY_RUNNING
+              exit 1
+            fi
+          fi
+          test -x "$HOME/.avito-agent/venv/bin/python"
+          test -x "$HOME/.local/bin/cloudflared"
+          rm -f rootless_owner_token rootless_owner_cloudflared.log
+          : > rootless_owner.log
+          chmod 600 rootless_owner.log
+          setsid nohup timeout -s TERM -k 5s 640s env \
+            LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            FL_HANDOFF_PORT=8991 FL_HANDOFF_TTL_SECONDS=600 \
+            "$HOME/.avito-agent/venv/bin/python" \
+            "$HOME/.fl-agent/fl_rootless_owner_desktop.py" \
+            > rootless_owner.log 2>&1 < /dev/null &
+          echo $! > rootless_owner.pid
+          chmod 600 rootless_owner.pid
+          ready=0
+          for _ in $(seq 1 35); do
+            result="$(curl --noproxy '*' -fsS --max-time 7 http://127.0.0.1:8991/ready 2>/dev/null || true)"
+            if [ -n "$result" ] && printf '%s' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ready") is True and d.get("screenshot_ready") is True and d.get("chrome_alive") is True else 1)' 2>/dev/null; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$(cat rootless_owner.pid)" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" != 1 ]; then
+            echo FL_ROOTLESS_OWNER_NOT_READY
+            exit 1
+          fi
+          # The screenshot endpoint must be inaccessible without the owner cookie.
+          unauthorized="$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \
+            --max-time 6 http://127.0.0.1:8991/shot || true)"
+          test "$unauthorized" = 403
+          test -s rootless_owner_token
+          echo FL_ROOTLESS_OWNER_LOCAL_SCREEN_READY
+          REMOTE
+
+      - name: Expose only expiring HTTPS owner console via existing cloudflared
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          cd "$HOME/.fl-agent"
+          : > rootless_owner_cloudflared.log
+          chmod 600 rootless_owner_cloudflared.log
+          setsid nohup timeout -s TERM -k 5s 610s \
+            "$HOME/.local/bin/cloudflared" \
+            tunnel --no-autoupdate --url http://127.0.0.1:8991 \
+            > rootless_owner_cloudflared.log 2>&1 < /dev/null &
+          echo $! > rootless_owner_cloudflared.pid
+          chmod 600 rootless_owner_cloudflared.pid
+          ready=0
+          for _ in $(seq 1 30); do
+            if grep -Eq 'https://[a-z0-9-]+\.trycloudflare\.com' rootless_owner_cloudflared.log; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != 1 ]; then
+            echo FL_ROOTLESS_OWNER_HTTPS_TUNNEL_UNAVAILABLE
+            exit 1
+          fi
+          echo FL_ROOTLESS_OWNER_HTTPS_TUNNEL_RUNNING
+          REMOTE
+
+      - name: Print encrypted owner link ONLY (never plaintext link, key or token)
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          encrypted="$(ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'python3 -' <<'PY' | \
+              openssl pkeyutl -encrypt -pubin \
+                -inkey tools/fl_rootless_owner_one_time_public_2026-11-09.pem \
+                -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | \
+              base64 -w0
+          import json,re,sys,time
+          from pathlib import Path
+          root=Path.home()/".fl-agent"
+          token=(root/"rootless_owner_token").read_text().strip()
+          log=(root/"rootless_owner_cloudflared.log").read_text(errors="replace")
+          links=re.findall(r"https://[a-z0-9-]+\.trycloudflare\.com",log)
+          if not links or not 32 <= len(token) <= 100:
+              raise SystemExit("LINK_NOT_READY")
+          # Fragment never reaches Cloudflare's HTTP request target or access log.
+          data=json.dumps({"link":links[-1]+"/#"+token,
+                           "valid_for_seconds":540},separators=(",",":")).encode()
+          if len(data)>220:
+              raise SystemExit("LINK_TOO_LARGE")
+          sys.stdout.buffer.write(data)
+          PY
+          )"
+          test -n "$encrypted"
+          printf 'FL_ROOTLESS_OWNER_CIPHERTEXT_BASE64=%s\n' "$encrypted"
+          echo FL_ROOTLESS_OWNER_ENCRYPTED_LINK_READY
