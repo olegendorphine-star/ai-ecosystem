@@ -130,7 +130,7 @@ def result() -> dict:
                 out["headed_chromium_started"] = True
                 page = browser.new_page(viewport={"width": 1024, "height": 768})
                 png = page.screenshot(type="png", timeout=6000)
-                out["about_blank_screenshot"] = png.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+                out["about_blank_screenshot"] = png[:4] == bytes((137, 80, 78, 71))
                 out["browser_still_connected"] = browser.is_connected()
         except Exception as exc:
             msg = str(exc).lower()
