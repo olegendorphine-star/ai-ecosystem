@@ -1,0 +1,160 @@
+name: FL.ru — existing VPS system graphics setup and public smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-system-graphics-setup-2026-11-09.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  configure_system_graphics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH identity
+        env:
+          SERVER_KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          SERVER_KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_KEY_B64"
+          test -n "$SERVER_KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$SERVER_KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$SERVER_KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Check administrative permission and install only system XKB and Xvfb
+        id: install
+        env:
+          SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${SERVER_PORT:-22}"
+          result="$(cat <<'PY' | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$SERVER_USER@$SERVER_HOST" 'python3 -'
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          def command(argv, timeout=12):
+              try:
+                  proc = subprocess.run(
+                      argv, check=False, stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL, timeout=timeout
+                  )
+                  return proc.returncode == 0
+              except (OSError, subprocess.TimeoutExpired):
+                  return False
+
+          package_names = ("x11-xkb-utils", "xkb-data", "xvfb")
+          system_compiler = Path("/usr/bin/xkbcomp")
+          system_xvfb = Path("/usr/bin/Xvfb")
+          xkb_rules = Path("/usr/share/X11/xkb/rules/evdev")
+          before_ready = all(x.is_file() for x in (system_compiler, system_xvfb, xkb_rules))
+          root = os.geteuid() == 0
+          sudo_present = shutil.which("sudo") is not None
+          sudo_noninteractive = False if root or not sudo_present else command(["sudo", "-n", "true"])
+          can_install = root or sudo_noninteractive
+          apt_available = shutil.which("apt-get") is not None
+          install_result = "already_installed" if before_ready else "no_admin"
+          if not before_ready and can_install and apt_available:
+              prefix = [] if root else ["sudo", "-n"]
+              env = os.environ.copy()
+              env["DEBIAN_FRONTEND"] = "noninteractive"
+              try:
+                  proc = subprocess.run(
+                      prefix + ["apt-get", "install", "-y", "--no-install-recommends",
+                                "-o", "DPkg::Lock::Timeout=15", *package_names],
+                      check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                      timeout=180, env=env
+                  )
+                  install_result = "installed" if proc.returncode == 0 else "apt_install_failed"
+              except (OSError, subprocess.TimeoutExpired):
+                  install_result = "apt_install_unavailable"
+          elif not before_ready and can_install and not apt_available:
+              install_result = "apt_unavailable"
+          result = {
+              "schema": "fl.vps.system.graphics.setup.v1",
+              "root": root,
+              "sudo_present": sudo_present,
+              "sudo_noninteractive": sudo_noninteractive,
+              "can_install": can_install,
+              "apt_available": apt_available,
+              "install_result": install_result,
+              "system_compiler_present": system_compiler.is_file(),
+              "system_xvfb_present": system_xvfb.is_file(),
+              "system_xkb_data_present": xkb_rules.is_file(),
+              "owner_session_used": False,
+              "fl_requests": 0,
+              "write_account_actions": False,
+              "captcha_interacted": False,
+          }
+          print(json.dumps(result, sort_keys=True))
+          PY
+          )"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.vps.system.graphics.setup.v1"
+          assert d.get("owner_session_used") is False
+          assert d.get("write_account_actions") is False
+          assert d.get("captcha_interacted") is False
+          assert d.get("fl_requests")==0
+          ready=all(d.get(k) is True for k in (
+              "system_compiler_present","system_xvfb_present","system_xkb_data_present"))
+          print("VPS_ROOT",d.get("root"))
+          print("VPS_SUDO_PRESENT",d.get("sudo_present"))
+          print("VPS_SUDO_NONINTERACTIVE",d.get("sudo_noninteractive"))
+          print("VPS_CAN_INSTALL",d.get("can_install"))
+          print("VPS_INSTALL_RESULT",d.get("install_result"))
+          print("SYSTEM_XKBCOMP",d.get("system_compiler_present"))
+          print("SYSTEM_XVFB",d.get("system_xvfb_present"))
+          print("SYSTEM_XKB_DATA",d.get("system_xkb_data_present"))
+          with open(__import__("os").environ["GITHUB_OUTPUT"],"a") as f:
+              print("graphics_ready=" + ("true" if ready else "false"),file=f)
+          '
+      - name: Test GUI Chromium on FL public login page without authentication
+        if: steps.install.outputs.graphics_ready == 'true'
+        env:
+          SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${SERVER_PORT:-22}"
+          result="$(cat tools/fl_graphical_browser_probe.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$SERVER_USER@$SERVER_HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.graphical.browser.probe.v1"
+          assert d.get("credentials_used") is False
+          assert d.get("captcha_interacted") is False
+          assert d.get("write_actions") is False
+          keep=("xvfb_present","desktop_chrome_present","fontconfig_isolated_ready",
+                "graphical_browser_started","fl_http_status","fl_public_navigation",
+                "fl_public_screenshot","browser_alive_after","result",
+                "xvfb_log_categories","xvfb_exit_code")
+          print(json.dumps({k:d.get(k) for k in keep},sort_keys=True))
+          '
