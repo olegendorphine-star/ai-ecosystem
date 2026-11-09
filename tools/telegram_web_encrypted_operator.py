@@ -365,7 +365,25 @@ def send_approved_phone_message(page, command: dict) -> dict:
                   typeof managers?.appUsersManager?.resolvePhone !== 'function')
                 return {status:'phone_lookup_unavailable'};
               try {
-                const user = await managers.appUsersManager.resolvePhone(phone);
+                let user;
+                try {
+                  user = await managers.appUsersManager.resolvePhone(phone);
+                } catch (lookupError) {
+                  // Telegram may restrict direct phone resolution while
+                  // permitting normal address-book contact resolution.
+                  if (lookupError?.type !== 'PHONE_NOT_OCCUPIED' ||
+                      typeof managers.appUsersManager.importContact !== 'function')
+                    throw lookupError;
+                  try {
+                    const importedId = await managers.appUsersManager.importContact(
+                      'Личный', 'Telegram', phone);
+                    user = managers.appUsersManager.getUser(importedId);
+                  } catch (importError) {
+                    if (importError?.type === 'NO_USER')
+                      return {status:'phone_not_found_after_contact_lookup'};
+                    throw importError;
+                  }
+                }
                 const id = Number(user?.id);
                 if (user?._ !== 'user' || !Number.isSafeInteger(id) || id <= 0)
                   return {status:'phone_not_found'};
