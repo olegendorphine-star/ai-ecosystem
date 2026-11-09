@@ -1,0 +1,159 @@
+name: FL - Salvage already logged-in Chrome if dedicated CDP is available
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-live-chrome-cdp-salvage-once.yml'
+permissions:
+  contents: read
+jobs:
+  salvage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Prepare pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Attach read-only inspection, save session only when same portal Chrome CDP is available
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          result="$(ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
+            "$USER@$HOST" 'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' <<'PY'
+          import json,os,re,stat,tempfile,urllib.parse
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          root=Path.home()/".fl-agent"
+          profile=root/"profile"
+          savepath=profile/"storage_state.json"
+          out={
+             "schema":"fl.live.portal.cdp.salvage.v1",
+             "portal_pid_found":False,
+             "portal_chrome_count":0,
+             "portal_cdp_port_available":False,
+             "portal_devtools_pipe":False,
+             "verified_private_fl_owner_page":False,
+             "session_saved":False,
+             "failure":"none",
+             "passwords_read":False,
+             "cookies_output":False,
+             "profile_changed":False,
+             "captcha_interacted":False,
+          }
+          def own_processes():
+              found={}
+              for p in Path("/proc").iterdir():
+                  if not p.name.isdigit():continue
+                  try:
+                      if (p/"status").stat().st_uid!=os.getuid():continue
+                      meta=(p/"status").read_text(errors="replace")
+                      m=re.search(r"^PPid:\s*(\d+)",meta,re.M)
+                      args=(p/"cmdline").read_bytes().split(b"\x00")
+                      found[int(p.name)]={"parent":int(m.group(1)) if m else -1,"cmd":args}
+                  except (OSError,ValueError):pass
+              return found
+          proc=own_processes()
+          owner_pids=[
+              pid for pid,info in proc.items()
+              if any(b"/.fl-agent/fl_rootless_owner_desktop.py" in a for a in info["cmd"])
+          ]
+          out["portal_pid_found"]=len(owner_pids)==1
+          def ancestor_of_portal(pid):
+              for _ in range(15):
+                  if pid in owner_pids:return True
+                  info=proc.get(pid)
+                  if not info: return False
+                  pid=info["parent"]
+              return False
+          portal_chrome=[]
+          if len(owner_pids)==1:
+              for pid,info in proc.items():
+                  cmd=info["cmd"]
+                  executable=cmd[0].rsplit(b"/",1)[-1] if cmd else b""
+                  if b"chrome" not in executable.lower(): continue
+                  if not ancestor_of_portal(pid):continue
+                  portal_chrome.append((pid,cmd))
+          out["portal_chrome_count"]=len(portal_chrome)
+          candidates=[]
+          for pid,cmd in portal_chrome:
+              if b"--remote-debugging-pipe" in cmd:
+                  out["portal_devtools_pipe"]=True
+              for arg in cmd:
+                  if arg.startswith(b"--remote-debugging-port="):
+                      m=re.fullmatch(rb"--remote-debugging-port=(\d{1,5})",arg)
+                      if m:
+                          port=int(m.group(1))
+                          if 1024 <= port <= 65535:
+                              candidates.append(port)
+          out["portal_cdp_port_available"]=len(set(candidates))==1
+          if len(set(candidates))!=1:
+              out["failure"]="no_dedicated_portal_cdp_port"
+          elif savepath.exists():
+              out["failure"]="file_already_exists"
+          else:
+              try:
+                  from playwright.sync_api import sync_playwright
+                  with sync_playwright() as pw:
+                      b=pw.chromium.connect_over_cdp(
+                          "http://127.0.0.1:"+str(candidates[0]),timeout=5000)
+                      chosen=None
+                      for context in b.contexts:
+                          for page in context.pages:
+                              parsed=urlsplit(page.url)
+                              if (parsed.scheme=="https"
+                                  and parsed.hostname in ("www.fl.ru","fl.ru")
+                                  and parsed.path.startswith(("/profile/", "/users/"))):
+                                  chosen=context
+                                  break
+                          if chosen is not None:break
+                      if chosen is None:
+                          out["failure"]="no_owner_page_in_dedicated_context"
+                      else:
+                          out["verified_private_fl_owner_page"]=True
+                          if profile.is_symlink() or savepath.is_symlink():
+                              out["failure"]="unsafe_session_storage"
+                          else:
+                              profile.mkdir(mode=0o700,exist_ok=True)
+                              fd,name=tempfile.mkstemp(prefix=".fl-cdp-",dir=profile)
+                              try:
+                                  os.fchmod(fd,0o600)
+                                  os.close(fd)
+                                  chosen.storage_state(path=name)
+                                  if Path(name).stat().st_size < 2:
+                                      out["failure"]="empty_storage_state"
+                                  else:
+                                      os.replace(name,savepath)
+                                      os.chmod(savepath,0o600)
+                                      out["session_saved"]=True
+                              finally:
+                                  if os.path.exists(name):os.unlink(name)
+                      # No b.close(): avoid impacting running owner portal.
+              except Exception:
+                  out["failure"]="cdp_attach_failed"
+          print(json.dumps(out,sort_keys=True))
+          PY
+          )"
+          printf '%s\n' "$result" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fl.live.portal.cdp.salvage.v1"
+          assert d.get("cookies_output") is False
+          assert d.get("passwords_read") is False
+          assert d.get("profile_changed") is False
+          assert d.get("captcha_interacted") is False
+          print(json.dumps(d,sort_keys=True))
+          '
