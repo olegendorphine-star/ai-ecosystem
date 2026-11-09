@@ -51,6 +51,11 @@ try:
          price_spec:text.includes('ТЗ на персонального ИИ-ассистента'),
          price_assistant:text.includes('Персональный ИИ-ассистент с памятью и API'),
          service_audit:text.includes('Аудит одного процесса и карта ИИ-автоматизации'),
+         service_spec:text.includes('Разработаю ТЗ на персонального ИИ-ассистента'),
+         service_moderation:/на модерации|ожидает модерации|проверяется модератором/i.test(text),
+         portfolio_staff:text.includes('Персональный ИИ-Штаб: память, документы и контроль'),
+         portfolio_vps:text.includes('Автономный браузер на VPS и контроль сессий'),
+         portfolio_docs:text.includes('ИИ-документооборот: связи, анализ и полезные сигналы'),
          service_empty:text.includes('Здесь будет список ваших типовых услуг'),
          errors
       };
