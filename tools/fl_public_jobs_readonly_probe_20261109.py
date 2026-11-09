@@ -6,9 +6,12 @@ ROOT=Path.home()/".fl-agent"
 sys.path.insert(0,str(ROOT))
 from fl_rootless_owner_desktop import Browser
 urls=[
-("ai","https://www.fl.ru/projects/category/ai-iskusstvenniy-intellekt/"),
-("python","https://www.fl.ru/projects/category/programmirovanie/python/"),
-("automation","https://www.fl.ru/projects/category/avtomatizaciya-biznesa/"),
+("texts","https://www.fl.ru/projects/category/teksty/"),
+("copywriting","https://www.fl.ru/projects/category/saity/kopirayting/"),
+("ai_text","https://www.fl.ru/projects/category/ai-iskusstvenniy-intellekt/ai-generaciya-tekstov/"),
+("ai_prompts","https://www.fl.ru/projects/category/ai-iskusstvenniy-intellekt/prompt-inzhiniring/"),
+("design","https://www.fl.ru/projects/category/dizayn/"),
+("programming","https://www.fl.ru/projects/category/programmirovanie/"),
 ]
 result={"schema":"fl.public.work.discovery.v1","details":[],"pages":[],"error":"none","account_writes":False,"passwords_read":False,"cookie_contents_read":False,"paid_actions":False,"captcha_interacted":False}
 b=Browser()
@@ -35,7 +38,7 @@ try:
           free_badge_explicit:/для всех/i.test(summary),
           visible_apply:/Откликнуться/i.test(summary),
           stated_price:((summary.match(/(?:\\d[\\s\\u00a0]*)+\\s*₽/i)||[])[0]||null)});
-        if(out.length>=18)break;
+        if(out.length>=28)break;
       }
       return out;
     }""")
@@ -43,10 +46,7 @@ try:
    except Exception:
     result["pages"].append({"type":label,"error":"navigate_or_parse_failed","items":[]})
 
-  details=[
-   ("senior_assistant","https://www.fl.ru/projects/5528431/senior-ai-injener-personalnyiy-assistent-s-brauzerom-i-telegram-na-vps.html"),
-   ("dental_automation","https://www.fl.ru/projects/5528498/avtomatizatsiya-zakaz-naryadov-n8n--ocr--ii--google-sheets.html"),
-  ]
+  details=[]
   for kind,url in details:
    try:
     response=page.goto(url,wait_until="domcontentloaded",timeout=18000)
