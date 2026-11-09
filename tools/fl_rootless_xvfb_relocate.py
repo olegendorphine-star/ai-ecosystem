@@ -35,6 +35,12 @@ def run() -> dict:
         "xvfb_started": False,
         "headed_chrome_started": False,
         "about_blank_screenshot": False,
+        "blank_tab_created": False,
+        "blank_page_js_ok": False,
+        "public_login_checked": False,
+        "fl_login_http_status": None,
+        "xvfb_alive_after_browser_launch": False,
+        "failure_stage": "none",
         "failure_categories": [],
         "network_requests": 0,
         "owner_session_used": False,
@@ -135,9 +141,33 @@ def run() -> dict:
                             timeout=12000,
                         )
                         d["headed_chrome_started"] = True
+                        d["xvfb_alive_after_browser_launch"] = proc.poll() is None
+                        d["failure_stage"] = "create_blank_tab"
                         pg = browser.new_page(viewport={"width": 960, "height": 680})
-                        screenshot = pg.screenshot(type="png", timeout=7000)
-                        d["about_blank_screenshot"] = screenshot[:4] == bytes((137,80,78,71))
+                        d["blank_tab_created"] = True
+                        d["failure_stage"] = "evaluate_blank_tab"
+                        d["blank_page_js_ok"] = (pg.evaluate("2+2") == 4)
+                        d["failure_stage"] = "blank_screenshot"
+                        try:
+                            screenshot = pg.screenshot(type="png", timeout=7000)
+                            d["about_blank_screenshot"] = screenshot[:4] == bytes((137,80,78,71))
+                        except Exception as exc:
+                            d["failure_categories"].append(
+                                "screenshot_timeout" if "timeout" in str(exc).lower()
+                                else "screenshot_failed")
+                        d["failure_stage"] = "public_login_navigation"
+                        try:
+                            response = pg.goto("https://www.fl.ru/account/login/",
+                                wait_until="commit", timeout=14000)
+                            code = response.status if response else None
+                            d["fl_login_http_status"] = (
+                                code if type(code) is int and 100 <= code <= 599 else None)
+                            d["public_login_checked"] = True
+                        except Exception as exc:
+                            d["failure_categories"].append(
+                                "public_login_timeout" if "timeout" in str(exc).lower()
+                                else "public_login_navigation_error")
+                        d["failure_stage"] = "finished"
             except Exception as exc:
                 low = str(exc).lower()
                 cat = "timeout" if "timeout" in low else (
