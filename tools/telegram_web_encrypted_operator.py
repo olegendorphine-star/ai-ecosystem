@@ -770,7 +770,7 @@ def send_approved_username_message(page, command: dict) -> dict:
                   !managers?.appUsersManager || !managers?.appPeersManager)
                 return false;
               try {
-                const user = managers.appUsersManager.getUser(peer);
+                const user = await managers.appUsersManager.getUser(peer);
                 if (user?._ !== 'user' || user.pFlags?.deleted || user.pFlags?.bot)
                   return false;
                 const names = [user.username, ...(Array.isArray(user.usernames) ?
@@ -854,7 +854,7 @@ def send_approved_existing_chat_message(page, command: dict) -> dict:
                   !managers?.appUsersManager || !managers?.appPeersManager)
                 return false;
               try {
-                const user = managers.appUsersManager.getUser(peer);
+                const user = await managers.appUsersManager.getUser(peer);
                 if (user?._ !== 'user' || user.pFlags?.deleted ||
                     user.pFlags?.bot || user.pFlags?.self ||
                     Number(user.id) !== peer || peer === self)
