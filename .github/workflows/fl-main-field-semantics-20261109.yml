@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/fl-main-field-semantics-20261109.yml'
+      - 'tools/fl_main_field_semantics_readonly_20261109.py'
 permissions:
   contents: read
 jobs:
