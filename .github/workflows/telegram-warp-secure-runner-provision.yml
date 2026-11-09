@@ -1,0 +1,173 @@
+name: Telegram - secure WARP registration fallback, isolated VPS
+on:
+  pull_request:
+    paths: ['.github/workflows/telegram-warp-secure-runner-provision.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/telegram-warp-secure-runner-provision.yml']
+permissions:
+  contents: read
+concurrency:
+  group: tg-private-warp-provision
+  cancel-in-progress: false
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Offline consent, transport and no-leak checks
+        run: |
+          set -euo pipefail
+          file=.github/workflows/telegram-warp-secure-runner-provision.yml
+          grep -Fq 'register --accept-tos' "$file"
+          grep -Fq 'sha256sum -c' "$file"
+          grep -Fq 'StrictHostKeyChecking=yes' "$file"
+          grep -Fq 'l4-socks -b 127.0.0.1 -p 1085' "$file"
+          grep -Fq 'test ! -s "$dest"' "$file"
+          grep -Fq 'chmod 600 "$dest"' "$file"
+          grep -Fq 'browser_proxy.json' "$file"
+          ! grep -Eq '(^|[[:space:]])(sudo|apt|iptables|wg-quick)([[:space:]]|$)' "$file"
+          echo TG_RUNNER_BOOTSTRAP_PRIVACY_CHECK_OK
+  provision:
+    needs: safety
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Pinned official release digest of isolated userspace implementation
+        run: |
+          set -euo pipefail
+          url='https://github.com/Diniboy1123/usque/releases/download/v4.2.1/usque_4.2.1_linux_amd64.zip'
+          curl --fail --location --silent --show-error --retry 2 --connect-timeout 15 --max-time 120 "$url" -o "$RUNNER_TEMP/usque.zip"
+          printf '4117e20695078af9c11edecd1a826c009bbc7ea0b7f64458612b4198910bc313  %s\n' "$RUNNER_TEMP/usque.zip" | sha256sum -c -
+          unzip -Z -1 "$RUNNER_TEMP/usque.zip" | grep -Fxq usque
+          unzip -p "$RUNNER_TEMP/usque.zip" usque > "$RUNNER_TEMP/usque"
+          chmod 700 "$RUNNER_TEMP/usque"
+          "$RUNNER_TEMP/usque" -c "$RUNNER_TEMP/warp.json" version >/dev/null 2>&1
+          echo TG_PINNED_WARP_CLIENT_VERIFIED
+      - name: Register temporary device securely on CI egress after owner-approved TOS
+        run: |
+          set -euo pipefail
+          umask 077
+          config="$RUNNER_TEMP/warp.json"
+          if timeout 95 "$RUNNER_TEMP/usque" -c "$config" register --accept-tos > "$RUNNER_TEMP/registration.log" 2>&1; then
+            test -s "$config"
+            chmod 600 "$config"
+            python3 - "$config" <<'PY'
+          import json,os,sys
+          p=sys.argv[1]
+          data=json.load(open(p))
+          assert all(isinstance(data.get(key),str) and data[key] for key in ("private_key","endpoint_v4","access_token","id"))
+          assert os.stat(p).st_mode&0o077==0
+          print("TG_RUNNER_WARP_DEVICE_REGISTERED_PRIVATE")
+          PY
+          else
+            python3 - <<'PY'
+          from pathlib import Path
+          p=Path.home()
+          import os
+          text=Path(os.environ["RUNNER_TEMP"]+"/registration.log").read_text(errors="replace").lower()[:100000]
+          out={"remote_api_timed_out":any(s in text for s in ("timeout","context deadline","handshake")),
+               "api_json_response_error":"failed to parse error response" in text,
+               "api_forbidden":"403" in text,
+               "registration_prompt":"failed to read user input" in text}
+          print("TG_RUNNER_WARP_REGISTER_FAILED "+str(out))
+          PY
+            exit 1
+          fi
+      - name: Configure pinned SSH, no session export
+        env:
+          KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KH: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY" && test -n "$KH"
+          install -d -m 700 "$RUNNER_TEMP/tg-ssh"
+          printf '%s' "$KEY" | base64 --decode > "$RUNNER_TEMP/tg-ssh/key"
+          printf '%s\n' "$KH" > "$RUNNER_TEMP/tg-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-ssh/key" "$RUNNER_TEMP/tg-ssh/known_hosts"
+      - name: Transfer private WARP configuration directly over pinned SSH; never log or upload
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER"
+          ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts"
+            -o IdentitiesOnly=yes -o LogLevel=ERROR
+            -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}")
+          ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'set -eu; umask 077; mkdir -p "$HOME/.telegram-agent/private"; test -x "$HOME/.telegram-agent/bin/usque-v4.2.1"; dest="$HOME/.telegram-agent/private/warp-usque-config.json"; test ! -s "$dest" && test ! -L "$dest" && echo TG_WARP_NO_EXISTING_DEVICE'
+          # The device credentials flow only through SSH stdin, never into a GitHub
+          # issue, log, repo, artifact, environment variable or output parameter.
+          ssh "${ssh_args[@]}" "$USER@$HOST" \
+            'set -eu; umask 077; dest="$HOME/.telegram-agent/private/warp-usque-config.json"; test ! -s "$dest" && test ! -L "$dest"; cat > "$dest"; chmod 600 "$dest"; python3 -c '"'"'import json,os,pathlib; p=pathlib.Path.home()/".telegram-agent/private/warp-usque-config.json"; d=json.loads(p.read_text()); assert d.get("access_token") and d.get("private_key") and not p.stat().st_mode&0o077'"'"'; echo TG_WARP_PRIVATE_DEVICE_INSTALLED' \
+            < "$RUNNER_TEMP/warp.json"
+      - name: Start localhost-only SOCKS5 and verify Telegram access
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          root="$HOME/.telegram-agent"
+          mkdir -p "$HOME/.config/systemd/user"
+          cat > "$HOME/.config/systemd/user/telegram-warp-egress.service" <<'UNIT'
+          [Unit]
+          Description=Private Telegram-only free WARP SOCKS5 outgoing traffic
+          After=network-online.target
+          [Service]
+          Type=simple
+          UMask=0077
+          ExecStart=%h/.telegram-agent/bin/usque-v4.2.1 -c %h/.telegram-agent/private/warp-usque-config.json l4-socks -b 127.0.0.1 -p 1085
+          Restart=on-failure
+          RestartSec=8
+          NoNewPrivileges=true
+          [Install]
+          WantedBy=default.target
+          UNIT
+          systemctl --user daemon-reload
+          systemctl --user enable --now telegram-warp-egress.service >/dev/null
+          probe=0
+          for i in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 9 --output /dev/null \
+               --write-out '%{http_code}' --socks5-hostname 127.0.0.1:1085 \
+               https://web.telegram.org/k/ 2>/dev/null || true)"
+            case "$code" in
+              200|301|302|303|307|308) probe=1; break ;;
+            esac
+            sleep 3
+          done
+          if [ "$probe" -ne 1 ]; then
+            echo TG_VPS_WARP_PROXY_CANNOT_REACH_TELEGRAM
+            systemctl --user disable --now telegram-warp-egress.service >/dev/null || true
+            exit 1
+          fi
+          echo TG_VPS_TELEGRAM_WEB_VIA_WARP_SUCCESS
+          printf '{"server":"socks5://127.0.0.1:1085"}\n' > "$root/private/browser_proxy.json"
+          chmod 600 "$root/private/browser_proxy.json"
+          echo TG_PRIVATE_BROWSER_PROXY_READY
+          REMOTE
+      - name: Read-only independent SSH check after disconnected provision
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" 'set -eu; test -s "$HOME/.telegram-agent/private/browser_proxy.json"; systemctl --user is-active --quiet telegram-warp-egress.service; curl -fsS --max-time 20 --socks5-hostname 127.0.0.1:1085 --output /dev/null https://web.telegram.org/k/ && echo TG_WARP_PERSISTS_AFTER_SSH'
