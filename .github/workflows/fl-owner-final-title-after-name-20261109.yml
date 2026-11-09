@@ -1,10 +1,7 @@
 name: FL - owner final title after name fields
 # One-time owner public title after display names confirmed saved.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-owner-final-title-after-name-20261109.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
