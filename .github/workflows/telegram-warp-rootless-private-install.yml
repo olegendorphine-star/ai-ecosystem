@@ -26,6 +26,7 @@ jobs:
           grep -Fq 'l4-socks -b 127.0.0.1 -p 1085' "$script"
           grep -Fq 'warp=on' "$script"
           grep -Fq 'browser_proxy.json' "$script"
+          grep -Fq 'register --accept-tos' "$script"
           ! grep -Eq '(^|[[:space:]])(sudo|apt|docker run|iptables|ip route|wg-quick)([[:space:]]|$)' "$script"
           echo TG_WARP_BOOTSTRAP_STATIC_REVIEW_OK
   bootstrap:
@@ -79,7 +80,7 @@ jobs:
           config="$root/private/warp-usque-config.json"
           test -x "$bin" && "$bin" version >/dev/null
           if [ ! -s "$config" ]; then
-            if timeout 120 "$bin" -c "$config" register > "$root/private/warp-registration.log" 2>&1; then
+            if timeout 120 "$bin" -c "$config" register --accept-tos > "$root/private/warp-registration.log" 2>&1; then
               test -s "$config" || { echo TG_WARP_CONFIG_MISSING; exit 1; }
               chmod 600 "$config"
               echo TG_WARP_FREE_DEVICE_REGISTERED
