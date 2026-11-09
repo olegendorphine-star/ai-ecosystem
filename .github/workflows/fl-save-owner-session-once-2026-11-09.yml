@@ -25,7 +25,7 @@ jobs:
           printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
           printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
-      - name: Invoke only existing private owner portal save, verifying exact FL settings route
+      - name: Navigate current logged-in portal to settings, then save owner session
         env:
           HOST: ${{ secrets.AVITO_SERVER_HOST }}
           USER: ${{ secrets.AVITO_SERVER_USER }}
@@ -83,6 +83,23 @@ jobs:
                   else:
                       headers={**base_headers,"X-FL-CSRF":csrf.group(1),
                                "Content-Type":"application/json"}
+                      # Owner's screenshot shows a valid logged-in FL menu,
+                      # but the current tab is the public FL home page.
+                      # Navigate to the operator's allowlisted settings route
+                      # before invoking the fail-closed owner-specific save.
+                      navigate=urllib.request.Request(
+                          url+"api/go",data=b'{"route":"settings"}',
+                          headers=headers,method="POST")
+                      try:
+                          with client.open(navigate,timeout=28) as response:
+                              navigated=json.load(response)
+                          if navigated.get("ok") is not True:
+                              raise RuntimeError("settings_navigation_failed")
+                          import time
+                          time.sleep(2)
+                      except Exception:
+                          d["save_status"]="settings_navigation_failed"
+                          raise
                       request=urllib.request.Request(
                           url+"api/save",data=b"{}",headers=headers,method="POST")
                       try:
