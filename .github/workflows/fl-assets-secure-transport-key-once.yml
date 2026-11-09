@@ -1,14 +1,11 @@
 name: FL - Generate private one-time artwork transport key on VPS
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-assets-secure-transport-key-once.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   key:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
