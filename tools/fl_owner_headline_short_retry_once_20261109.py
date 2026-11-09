@@ -19,7 +19,7 @@ def checked_goto(page,url):
  except Exception:
   resp=page.goto(url,wait_until="commit",timeout=18000)
   page.wait_for_timeout(1500)
- if not resp or resp.status!=200 or not is_fl_url(page.url) or urlsplit(page.url).path!=urlsplit(url).path:
+ if not resp or resp.status!=200 or not is_fl_url(page.url) or urlsplit(page.url).path not in (urlsplit(url).path,"/users/olegendorphine/setup/main/"):
   raise RuntimeError("wrong_page")
  return resp
 def mark():
