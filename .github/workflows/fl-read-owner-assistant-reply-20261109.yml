@@ -1,13 +1,13 @@
 name: FL - one-time private read of owner AI-assistant dialogue
+# ARCHIVED / DISABLED: no automatic or manual account/customer actions.
+# Re-enable only after explicit owner request and current platform policy review.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-read-owner-assistant-reply-20261109.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   read_dialogue:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
