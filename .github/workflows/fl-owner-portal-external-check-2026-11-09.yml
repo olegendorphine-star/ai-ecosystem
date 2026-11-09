@@ -1,0 +1,32 @@
+name: FL - external owner portal reachability one-time
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-owner-portal-external-check-2026-11-09.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  public_transport_only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify TLS access and unauthenticated endpoint denial
+        run: |
+          set -euo pipefail
+          url="https://commissioners-discs-model-estates.trycloudflare.com"
+          out="$(curl -fsS --retry 3 --retry-delay 2 --retry-connrefused \
+            --connect-timeout 7 --max-time 20 "$url/ready")"
+          printf '%s\n' "$out" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          print("PORTAL_READY",d.get("ready"))
+          print("SCREENSHOT_READY",d.get("screenshot_ready"))
+          assert d.get("ready") is True and d.get("screenshot_ready") is True
+          '
+          code="$(curl -sS --max-time 12 -o /dev/null -w '%{http_code}' "$url/shot")"
+          printf 'ANONYMOUS_SCREEN_HTTP=%s\n' "$code"
+          test "$code" = 403
