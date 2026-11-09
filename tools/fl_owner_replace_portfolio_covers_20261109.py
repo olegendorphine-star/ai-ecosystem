@@ -54,10 +54,14 @@ try:
       info["status"]="prior_intent_no_retry";break
      edit=c.get_by_text("Редактировать",exact=True)
      if edit.count()!=1:info["status"]="no_unique_editor";break
-     edit.click(timeout=8000);p.wait_for_timeout(450)
+     edit.click(timeout=8000)
      title=p.locator("#ui-input-example-name-input")
+     try: title.wait_for(state="visible",timeout=9000)
+     except Exception: info["status"]="editor_load_timeout";break
      modal=p.locator('[role=dialog]').last
-     if title.count()!=1 or title.input_value()!=work["title"] or "Удалить работу" not in modal.inner_text():
+     info["editor_title_matches"]=bool(title.count()==1 and title.input_value()==work["title"])
+     info["editor_has_delete"]=bool(modal.count()>0 and "Удалить работу" in modal.inner_text())
+     if not (info["editor_title_matches"] and info["editor_has_delete"]):
       info["status"]="wrong_editor";break
      files=p.locator('input[type=file]')
      if files.count()<2 or "image/jpeg" not in (files.nth(1).get_attribute("accept") or ""):
