@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/fl-public-work-readonly-20261109.yml'
+      - 'tools/fl_public_jobs_readonly_probe_20261109.py'
 permissions:
   contents: read
 jobs:
@@ -50,6 +51,8 @@ jobs:
           assert d.get("schema")=="fl.public.work.discovery.v1"
           for k in ("account_writes","passwords_read","cookie_contents_read","paid_actions","captcha_interacted"):
               assert d.get(k) is False
+          for item in d.get("details",[]):
+              print("DETAIL",json.dumps(item,ensure_ascii=False))
           for p in d.get("pages",[]):
               print("CATEGORY",p.get("type"),"HTTP",p.get("http"),"COUNT",len(p.get("items",[])))
               for card in p.get("items",[]):
