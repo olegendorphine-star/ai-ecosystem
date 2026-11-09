@@ -93,9 +93,9 @@ jobs:
           rm -f rootless_owner_token rootless_owner_cloudflared.log
           : > rootless_owner.log
           chmod 600 rootless_owner.log
-          setsid nohup timeout -s TERM -k 5s 640s env \
+          setsid nohup timeout -s TERM -k 5s 940s env \
             LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            FL_HANDOFF_PORT=8991 FL_HANDOFF_TTL_SECONDS=600 \
+            FL_HANDOFF_PORT=8991 FL_HANDOFF_TTL_SECONDS=900 \
             "$HOME/.avito-agent/venv/bin/python" \
             "$HOME/.fl-agent/fl_rootless_owner_desktop.py" \
             > rootless_owner.log 2>&1 < /dev/null &
@@ -142,7 +142,7 @@ jobs:
           cd "$HOME/.fl-agent"
           : > rootless_owner_cloudflared.log
           chmod 600 rootless_owner_cloudflared.log
-          setsid nohup timeout -s TERM -k 5s 610s \
+          setsid nohup timeout -s TERM -k 5s 930s \
             "$HOME/.local/bin/cloudflared" \
             tunnel --no-autoupdate --url http://127.0.0.1:8991 \
             > rootless_owner_cloudflared.log 2>&1 < /dev/null &
@@ -191,7 +191,7 @@ jobs:
               raise SystemExit("LINK_NOT_READY")
           # Fragment never reaches Cloudflare's HTTP request target or access log.
           data=json.dumps({"link":links[-1]+"/#"+token,
-                           "valid_for_seconds":540},separators=(",",":")).encode()
+                           "valid_for_seconds":840},separators=(",",":")).encode()
           if len(data)>220:
               raise SystemExit("LINK_TOO_LARGE")
           sys.stdout.buffer.write(data)
