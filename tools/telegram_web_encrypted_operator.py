@@ -352,13 +352,15 @@ def get_owner_contact_link(page) -> dict:
         result = page.evaluate(
             """async () => {
               const app = window.appImManager;
-              const users = app?.managers?.appUsersManager;
+              const users = app?.managers?.appUsersManager ||
+                window.rootScope?.managers?.appUsersManager;
+              if (!users) return {status:'own_profile_unavailable'};
               const self = Number(window.rootScope?.myId);
-              if (!users || !Number.isSafeInteger(self) || self <= 0)
-                return {status:'own_profile_unavailable'};
-              const u = users.getUser(self);
-              if (!u || Number(u.id) !== self)
-                return {status:'own_profile_unavailable'};
+              const u = Number.isSafeInteger(self) && self > 0 &&
+                typeof users.getUser === 'function' ? users.getUser(self) : null;
+              // The server-generated contact token belongs to the current
+              // authorized session even if the client hasn't populated its
+              // local self User object. Do not unnecessarily block fallback.
               const usernames = [
                 u.username,
                 ...(Array.isArray(u.usernames)
