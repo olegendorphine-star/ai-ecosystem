@@ -6,12 +6,11 @@ ROOT=Path.home()/".fl-agent"
 sys.path.insert(0,str(ROOT))
 from fl_rootless_owner_desktop import Browser
 urls=[
-("texts","https://www.fl.ru/projects/category/teksty/"),
-("copywriting","https://www.fl.ru/projects/category/saity/kopirayting/"),
-("ai_text","https://www.fl.ru/projects/category/ai-iskusstvenniy-intellekt/ai-generaciya-tekstov/"),
-("ai_prompts","https://www.fl.ru/projects/category/ai-iskusstvenniy-intellekt/prompt-inzhiniring/"),
-("design","https://www.fl.ru/projects/category/dizayn/"),
-("programming","https://www.fl.ru/projects/category/programmirovanie/"),
+("design","https://www.fl.ru/projects/category/dizajn/"),
+("marketplace","https://www.fl.ru/projects/category/marketplace-management/"),
+("texts_more","https://www.fl.ru/projects/category/teksty/page-1/"),
+("ai","https://www.fl.ru/projects/category/ai-iskusstvenniy-intellekt/"),
+("sites","https://www.fl.ru/projects/category/saity/"),
 ]
 result={"schema":"fl.public.work.discovery.v1","details":[],"pages":[],"error":"none","account_writes":False,"passwords_read":False,"cookie_contents_read":False,"paid_actions":False,"captcha_interacted":False}
 b=Browser()
@@ -46,11 +45,7 @@ try:
    except Exception:
     result["pages"].append({"type":label,"error":"navigate_or_parse_failed","items":[]})
 
-  details=[
-   ("b2b_articles","https://www.fl.ru/projects/5528096/redaktor-b2b-statey-o-programmah-dlya-biznesa-35-tekstov-v-nedelyu.html"),
-   ("jewelry_ai_workflow","https://www.fl.ru/projects/5528403/trebuetsya-rabochiy-stsenariy-dlya-ii-dlya-kartochek-tovara-v-gruppe-yuvelirnyie-sergi.html"),
-   ("text_rewriting","https://www.fl.ru/projects/5528141/spetsialist-po-reraytingu-tekstov.html"),
-  ]
+  details=[]
   for kind,url in details:
    try:
     response=page.goto(url,wait_until="domcontentloaded",timeout=18000)
