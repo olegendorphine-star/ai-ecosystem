@@ -24,7 +24,7 @@ SESSION = ROOT / "auth" / "owner"
 LEDGER = ROOT / "state" / "outbound.sqlite3"
 ALLOWED = frozenset({"status", "dialogs", "read", "reply",
                      "web_status", "web_dialogs", "web_read", "web_reply",
-                     "web_self_note"})
+                     "web_self_note", "web_phone_message"})
 MAX_TEXT = 3500
 
 
@@ -71,6 +71,7 @@ def validate(command: dict) -> dict:
         "web_read": {"peer_id", "limit"},
         "web_reply": {"peer_id", "reply_to_id", "text", "approved_by_owner"},
         "web_self_note": {"text", "approved_by_owner"},
+        "web_phone_message": {"phone", "text", "approved_by_owner"},
     }[action]
     if not set(params).issubset(allowed_fields):
         raise Rejected("unexpected params")
@@ -91,6 +92,13 @@ def validate(command: dict) -> dict:
         peer_id = params.get("peer_id")
         if type(peer_id) is not int or not -(2**53) < peer_id < 2**53 or peer_id == 0:
             raise Rejected("invalid web peer id")
+    if action == "web_phone_message":
+        phone, msg = params.get("phone"), params.get("text")
+        if (type(phone) is not str or
+            not __import__("re").fullmatch(r"\+[1-9][0-9]{7,14}", phone) or
+            type(msg) is not str or not 1 <= len(msg.strip()) <= 300 or
+            params.get("approved_by_owner") is not True):
+            raise Rejected("direct phone message requires approved text and E.164 number")
     if action == "web_self_note":
         msg = params.get("text")
         if type(msg) is not str or not 1 <= len(msg.strip()) <= 300 or params.get("approved_by_owner") is not True:
