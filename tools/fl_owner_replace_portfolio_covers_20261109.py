@@ -67,7 +67,7 @@ try:
      crop=p.get_by_role("button",name="Сохранить обложку",exact=True)
      if crop.count()!=1:info["status"]="crop_missing";break
      crop.click(timeout=12000);p.wait_for_timeout(1400)
-     if crop.is_visible():info["status"]="crop_not_saved";break
+     # FL crop control remains in the wizard DOM after acceptance; verify using next stage instead.
      nxt=p.get_by_role("button",name="Продолжить",exact=True)
      if nxt.count()!=1:info["status"]="continue1_missing";break
      nxt.click(timeout=9500);p.wait_for_timeout(400)
