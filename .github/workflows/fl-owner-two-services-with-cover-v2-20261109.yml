@@ -1,11 +1,7 @@
 name: FL - owner-approved 2 fixed services with cover v2
 # Read-only discovery of free profile editing fields and gated account capabilities.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fl-owner-two-services-with-cover-v2-20261109.yml'
-      - 'tools/fl_owner_publish_two_services_cover_v2_20261109.py'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
