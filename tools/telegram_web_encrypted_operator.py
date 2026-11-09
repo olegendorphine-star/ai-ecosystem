@@ -133,13 +133,19 @@ def claim_reply_once(command: dict, path: Path = REPLY_LEDGER) -> str:
     digest = hashlib.sha256(
         json.dumps(command, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
+    p = command["params"]
+    intent_digest = hashlib.sha256(
+        json.dumps([p["peer_id"], p["reply_to_id"], p["text"].strip()],
+                   ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
     conn = sqlite3.connect(path, timeout=10)
     try:
         os.chmod(path, 0o600)
         conn.execute("PRAGMA busy_timeout=10000")
         conn.execute(
             "CREATE TABLE IF NOT EXISTS reply_attempts ("
-            "command_id TEXT PRIMARY KEY, digest TEXT NOT NULL, state TEXT NOT NULL)"
+            "command_id TEXT PRIMARY KEY, digest TEXT NOT NULL, " 
+            "intent_digest TEXT UNIQUE NOT NULL, state TEXT NOT NULL)"
         )
         conn.execute("BEGIN IMMEDIATE")
         try:
