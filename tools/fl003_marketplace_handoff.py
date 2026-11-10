@@ -37,8 +37,8 @@ async function req(path,obj){try{let r=await fetch('/api/'+path,{method:'POST',c
 async function claim(){const hash=location.hash.slice(1);history.replaceState(null,'','/');if(hash.length>24){const d=await req('claim',{token:hash});if(d.ok)csrf=d.csrf;}await refresh()}
 async function refresh(){let x=await fetch('/api/status',{credentials:'same-origin'}),d=await x.json();ready=!!(x.ok&&d.ok);if(ready&&d.csrf)csrf=d.csrf;document.getElementById('status').textContent=ready?'VPS работает · '+(d.page||'начальная страница')+' · осталось '+d.minutes+' мин':'Доступ закрыт или истёк';if(ready)document.getElementById('screen').src='/shot?t='+Date.now();}
 async function go(which){await req('act',{op:'go',which});await refresh()}
-async function clickScreen(e){if(!ready)return;let r=e.target.getBoundingClientRect(),x=Math.round((e.clientX-r.left)/r.width*1200),y=Math.round((e.clientY-r.top)/r.height*820);await req('act',{op:'click',x,y});setTimeout(refresh,400)}
-async function key(k){await req('act',{op:'key',key:k});await refresh()}
+async function clickScreen(e){if(!ready)return;let r=e.target.getBoundingClientRect(),x=Math.round((e.clientX-r.left)/r.width*1200),y=Math.round((e.clientY-r.top)/r.height*820);const v=await req('act',{op:'click',x,y});if(v.evidence)document.getElementById('evidence').textContent=JSON.stringify(v.evidence);setTimeout(refresh,400)}
+async function key(k){const v=await req('act',{op:'key',key:k});if(v.evidence)document.getElementById('evidence').textContent=JSON.stringify(v.evidence);await refresh()}
 async function read(){const r=await req('act',{op:'inspect'});if(r.ok)document.getElementById('evidence').textContent='Проверка: '+JSON.stringify(r.evidence);await refresh()}
 claim();
 </script></html>'''
@@ -60,15 +60,20 @@ class State:
         self.claimed=False
         self.deadline=time.monotonic()+TTL_SECONDS
         self.pw=sync_playwright().start()
-        self.browser=self.pw.chromium.launch(headless=True,args=['--no-sandbox'])
-        self.ctx=self.browser.new_context(viewport=VIEW,locale='ru-RU',timezone_id='Europe/Moscow')
-        self.page=self.ctx.new_page()
+        profile=ROOT/'marketplace-profile'
+        if profile.is_symlink():raise RuntimeError('unsafe_profile')
+        profile.mkdir(mode=0o700,exist_ok=True)
+        profile.chmod(0o700)
+        self.ctx=self.pw.chromium.launch_persistent_context(str(profile),headless=True,args=['--no-sandbox'],viewport=VIEW,locale='ru-RU',timezone_id='Europe/Moscow')
+        self.page=self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()
+        if not self.url_ok():self.page.goto('about:blank')
         self.last={}
+        self.verified={}
         path=ROOT/'handoff_token'
         fd=os.open(path,os.O_CREAT|os.O_WRONLY|os.O_TRUNC,0o600)
         with os.fdopen(fd,'w') as f:f.write(self.secret)
     def close(self):
-        try:self.browser.close()
+        try:self.ctx.close()
         finally:self.pw.stop()
         try:(ROOT/'handoff_token').unlink()
         except FileNotFoundError:pass
@@ -86,12 +91,62 @@ class State:
         try:
             title=self.page.title()[:120]
             body=self.page.locator('body').inner_text(timeout=3500)[:5000].lower()
-            gate=any(s in body for s in ('капча','captcha','проверьте, что вы человек','нужна небольшая проверка браузера','страница не загрузилась'))
-            out={'status':'manual_gate' if gate else 'visible_page_not_price_verified','title':title,'url':self.page.url}
-            # Only visible page identity; no price claim without separate evidence.
-            self.last=out
-            return out
-        except Exception:return {'status':'page_read_failed'}
+            gate=any(s in body for s in ('капча','captcha','проверьте, что вы человек','нужна небольшая проверка браузера','страница не загрузилась','пройти проверку','access denied'))
+            if gate:
+                self.last={'status':'manual_gate','title':title,'url':self.page.url}
+                return self.last
+            domain=urlsplit(self.page.url).hostname or ''
+            marketplace='Ozon' if 'ozon.ru' in domain else 'Avito'
+            verified=None
+            for script in self.page.locator('script[type="application/ld+json"]').all()[:12]:
+                try:
+                    root=json.loads(script.inner_text(timeout=1500))
+                except Exception:
+                    continue
+                pending=root if isinstance(root,list) else [root]
+                while pending:
+                    item=pending.pop()
+                    if isinstance(item,list):pending.extend(item)
+                    if not isinstance(item,dict):continue
+                    if '@graph' in item:pending.append(item['@graph'])
+                    t=item.get('@type')
+                    if t!='Product' and not (isinstance(t,list) and 'Product' in t):continue
+                    name=str(item.get('name') or '')[:150]
+                    if 'm185' not in name.lower():continue
+                    offers=item.get('offers') or []
+                    if isinstance(offers,dict):offers=[offers]
+                    for offer in offers[:8]:
+                        if not isinstance(offer,dict):continue
+                        if offer.get('priceCurrency') not in ('RUB','RUR'):continue
+                        price=offer.get('price') or offer.get('lowPrice')
+                        try:value=float(str(price).replace(' ','').replace(',','.'))
+                        except (TypeError,ValueError):continue
+                        if not 1<=value<=200000:continue
+                        seller=offer.get('seller')
+                        seller_name=str(seller.get('name') or '')[:100] if isinstance(seller,dict) else None
+                        verified={'status':'verified_product_price','marketplace':marketplace,'title':name,
+                                  'price_rub':value,'seller':seller_name,'url':self.page.url,
+                                  'price_evidence':'product_jsonld_rub',
+                                  'checked_utc':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
+                        break
+                    if verified:break
+                if verified:break
+            if verified:
+                self.verified[marketplace]=verified
+                payload={'schema':'fl003.marketplace.manual.evidence.v2','products':self.verified,
+                         'both_prices_verified':len(self.verified)==2}
+                target=ROOT/'verified_evidence.json'
+                flags=os.O_CREAT|os.O_TRUNC|os.O_WRONLY
+                if hasattr(os,'O_NOFOLLOW'):flags|=os.O_NOFOLLOW
+                fd=os.open(target,flags,0o600)
+                with os.fdopen(fd,'w',encoding='utf-8') as stream:
+                    json.dump(payload,stream,ensure_ascii=False,indent=2)
+                self.last={**verified,'both_prices_verified':len(self.verified)==2}
+                return self.last
+            self.last={'status':'visible_page_price_not_verified','title':title,'url':self.page.url}
+            return self.last
+        except Exception:
+            return {'status':'page_read_failed'}
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,format,*args):pass
@@ -147,7 +202,8 @@ class Handler(BaseHTTPRequestHandler):
             elif op=='key' and obj.get('key') in KEYS:
                 s.page.keyboard.press(obj['key'],timeout=4500)
             else:raise ValueError()
-            return self.reply(200,{'ok':True})
+            ev=s.inspect()
+            return self.reply(200,{'ok':True,'evidence':ev})
         except Exception:return self.reply(400,{'error':'action_failed_or_not_allowed'})
 
 def main():
