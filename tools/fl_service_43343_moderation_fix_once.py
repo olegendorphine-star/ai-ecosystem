@@ -80,6 +80,29 @@ def click_continue(page, expected_stage):
         page.wait_for_timeout(750)
         return True
     except Exception as e:
+        try:
+            if expected_stage=="description_to_price" and page.locator("#ui-input-price").count()==1:
+                OUT["click_late_navigation"]=True
+                return True
+            OUT["click_debug"]=page.evaluate("""() => {
+                const b=[...document.querySelectorAll('button')].find(e=>(e.innerText||'').trim()==='Продолжить');
+                if(!b)return {reason:'button_not_in_dom'};
+                const r=b.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+                const top=document.elementFromPoint(x,y);
+                const t=(top?.innerText||'').trim();
+                return {rect:{x:Math.round(x),y:Math.round(y),w:Math.round(r.width),h:Math.round(r.height)},
+                  disabled:b.disabled,hitSelf:b===top||b.contains(top),
+                  topTag:top?.tagName||'',topClass:String(top?.className||'').slice(0,110),
+                  topText:t.slice(0,50),pointerEvents:getComputedStyle(b).pointerEvents,
+                  priceFieldCount:document.querySelectorAll('#ui-input-price').length,
+                  pageFormCount:document.querySelectorAll('#ui-textarea-description-input').length};
+            }""")
+        except Exception:
+            OUT["click_debug"]={"reason":"diagnostic_unavailable"}
+        lowered=str(e).lower()
+        OUT["click_failure_codes"]=[word for word in
+            ("intercepts pointer events","not stable","not visible","outside of the viewport",
+             "element is detached","waiting for scheduled navigations") if word in lowered]
         return fail("wizard_navigation_blocked",stage=expected_stage,
                     error_class=type(e).__name__)
 def write_intent_once():
