@@ -55,6 +55,21 @@ class Validation(unittest.TestCase):
         with self.assertRaises(owner.Rejected):
             owner.validate(command("web_read", {"peer_id": 123, "limit": 13}))
 
+    def test_username_read_is_bounded_and_does_not_accept_arbitrary_inputs(self):
+        self.assertEqual(owner.validate(command(
+            "web_username_read", {"username": "@ExampleUser", "limit": 12}
+        ))["action"], "web_username_read")
+        for invalid in (
+            {"username": "https://t.me/ExampleUser"},
+            {"username": "@"},
+            {"username": "@ExampleUser", "limit": 13},
+            {"username": "@ExampleUser", "limit": True},
+            {"username": "@ExampleUser", "peer_id": 123},
+            {"username": "@ExampleUser", "text": "send this"},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(owner.Rejected):
+                owner.validate(command("web_username_read", invalid))
+
     def test_owner_approval_mandatory_for_reply(self):
         data = {"peer_id": 123, "reply_to_id": 99, "text": "Approved reply"}
         with self.assertRaises(owner.Rejected):
@@ -199,6 +214,157 @@ class UIHelpers(unittest.TestCase):
         self.assertIn("inbound_message_not_verified", source)
         self.assertIn("LOCK_EX | fcntl.LOCK_NB", source)
         self.assertIn("browser.close()", source)
+
+
+class WebReadTransitionSafety(unittest.TestCase):
+    def test_message_selection_is_bound_to_active_chat_inner(self):
+        self.assertIn("Number(app?.chat?.peerId) !== peer", web.MESSAGES_JS)
+        self.assertIn("active.querySelectorAll('.bubble[data-mid]')", web.MESSAGES_JS)
+        self.assertNotIn("document.querySelectorAll('#column-center .bubble[data-mid]')",
+                         web.MESSAGES_JS)
+        source = path.read_text()
+        self.assertIn("!inner.contains(node)", source)
+        self.assertIn('{"peer": peer, "limit": limit}', source)
+        self.assertIn('{"peer": peer_id, "limit": p.get("limit", 10)}', source)
+
+    def test_previous_chat_bubbles_must_detach(self):
+        page = mock.Mock()
+        page.evaluate.return_value = True
+        handle = mock.Mock()
+        handle.evaluate.side_effect = [False, False, True, True]
+        self.assertTrue(web.wait_for_chat_dom_transition(page, 22, 11, handle))
+        self.assertGreaterEqual(page.wait_for_timeout.call_count, 3)
+
+    def test_transition_timeout_fails_closed(self):
+        page = mock.Mock()
+        page.evaluate.return_value = True
+        handle = mock.Mock()
+        handle.evaluate.return_value = False
+        self.assertFalse(web.wait_for_chat_dom_transition(page, 22, 11, handle))
+        self.assertEqual(handle.evaluate.call_count, 24)
+
+    def test_same_chat_without_switch_is_allowed(self):
+        page = mock.Mock()
+        page.evaluate.return_value = True
+        handle = mock.Mock()
+        self.assertTrue(web.wait_for_chat_dom_transition(page, 22, 22, handle))
+        handle.evaluate.assert_not_called()
+
+    def test_no_web_read_when_old_bubbles_remain(self):
+        page = mock.Mock()
+        row = page.locator.return_value.first
+        row.count.return_value = 1
+        row.is_visible.return_value = True
+        def evaluate(script, peer=None):
+            if "?? null" in script:
+                return 111
+            if script == web.MESSAGES_JS:
+                raise AssertionError("stale chat contents were read")
+            return True
+        page.evaluate.side_effect = evaluate
+        handle = page.evaluate_handle.return_value
+        handle.evaluate.return_value = False
+        result = web.execute_on_page(
+            page, command("web_read", {"peer_id": 222, "limit": 5}))
+        self.assertEqual(result["status"], "chat_transition_not_confirmed")
+        handle.dispose.assert_called_once()
+
+    def test_empty_dom_is_not_a_confirmed_empty_history(self):
+        page = mock.Mock()
+        row = page.locator.return_value.first
+        row.count.return_value = 1
+        row.is_visible.return_value = True
+        page.evaluate.side_effect = lambda script, peer=None: (
+            None if "?? null" in script else
+            [] if script == web.MESSAGES_JS else True)
+        handle = page.evaluate_handle.return_value
+        handle.evaluate.return_value = True
+        result = web.execute_on_page(
+            page, command("web_read", {"peer_id": 222, "limit": 5}))
+        self.assertEqual(result["status"], "chat_history_not_visible")
+        handle.dispose.assert_called_once()
+
+
+class UsernameReadIsolation(unittest.TestCase):
+    def test_invalid_public_handle_does_not_access_browser(self):
+        page = mock.Mock()
+        result = web.read_verified_username_chat(
+            page, command("web_username_read", {"username": "@bad"}))
+        self.assertEqual(result["status"], "invalid_username_read")
+        page.evaluate.assert_not_called()
+
+    def test_resolved_username_mismatch_fails_closed(self):
+        page = mock.Mock()
+        page.evaluate.return_value = {"status": "username_identity_mismatch"}
+        result = web.read_verified_username_chat(
+            page, command("web_username_read",
+                          {"username": "@ExampleUser", "limit": 5}))
+        self.assertEqual(result["status"], "username_identity_mismatch")
+        page.evaluate_handle.assert_not_called()
+
+    def test_stale_previous_dom_never_reaches_message_extraction(self):
+        page = mock.Mock()
+        def evaluate(script, arg=None):
+            if "resolveUsername" in script:
+                return {"status": "ok", "peer_id": 222}
+            if "?? null" in script:
+                return 111
+            if script == web.MESSAGES_JS:
+                raise AssertionError("should never read stale contents")
+            return True
+        page.evaluate.side_effect = evaluate
+        with mock.patch.object(web, "wait_for_chat_dom_transition", return_value=False):
+            result = web.read_verified_username_chat(
+                page, command("web_username_read",
+                              {"username": "@ExampleUser", "limit": 5}))
+        self.assertEqual(result["status"], "chat_transition_not_confirmed")
+        page.evaluate_handle.return_value.dispose.assert_called_once()
+
+    def test_delayed_history_appears_after_first_empty_render(self):
+        page = mock.Mock()
+        reads = [[], [{"message_id": 76, "incoming": True,
+                        "text": "Reply after load", "has_media": False}]]
+        def evaluate(script, arg=None):
+            if "resolveUsername" in script:
+                return {"status": "ok", "peer_id": 222}
+            if "?? null" in script:
+                return 111
+            if "getUser(peer)" in script:
+                return True
+            if script == web.MESSAGES_JS:
+                return reads.pop(0)
+            return True
+        page.evaluate.side_effect = evaluate
+        with mock.patch.object(web, "wait_for_chat_dom_transition", return_value=True):
+            result = web.read_verified_username_chat(
+                page, command("web_username_read",
+                              {"username": "@ExampleUser", "limit": 5}))
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["messages"][0]["incoming"])
+        self.assertEqual(result["messages"][0]["text"], "Reply after load")
+        page.evaluate_handle.return_value.dispose.assert_called_once()
+
+    def test_valid_username_reads_only_after_verified_transition(self):
+        page = mock.Mock()
+        def evaluate(script, arg=None):
+            if "resolveUsername" in script:
+                return {"status": "ok", "peer_id": 222}
+            if "?? null" in script:
+                return 111
+            if "getUser(peer)" in script:
+                return True
+            if script == web.MESSAGES_JS:
+                return [{"message_id": 34, "incoming": True,
+                         "text": "Interested", "has_media": False}]
+            return True
+        page.evaluate.side_effect = evaluate
+        with mock.patch.object(web, "wait_for_chat_dom_transition", return_value=True):
+            result = web.read_verified_username_chat(
+                page, command("web_username_read",
+                              {"username": "@ExampleUser", "limit": 5}))
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["messages"][0]["text"], "Interested")
+        page.evaluate_handle.return_value.dispose.assert_called_once()
 
 
 class OwnContactLink(unittest.TestCase):
