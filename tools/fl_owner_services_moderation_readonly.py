@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only FL.ru owner service moderation check. No account or message writes.
 
-Runs only through the owner's existing isolated VPS Chromium. Only booleans
+Runs only through the owner's existing isolated VPS Chromium. Only booleans /* 2026-11-10 post-correction readback */
 and counts are printed. Never print cookies, page text, email or browser state.
 """
 from __future__ import annotations
