@@ -1,6 +1,11 @@
 name: FL service 43343 — one-time owner moderation correction
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/fl_service_43343_moderation_fix_once.py"
+      - ".github/workflows/fl-service-43343-moderation-fix-once.yml"
   pull_request:
     paths:
       - "tools/fl_service_43343_moderation_fix_once.py"
@@ -15,7 +20,7 @@ concurrency:
 
 jobs:
   edit_existing:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 7
     steps:
