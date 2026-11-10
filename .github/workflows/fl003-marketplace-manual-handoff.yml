@@ -21,6 +21,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile tools/fl003_marketplace_handoff.py
+          python3 -m py_compile tools/fl003_portal_notify.py
+          python3 tools/fl003_portal_notify.py --selftest
           python3 tools/fl003_marketplace_handoff.py --selftest
           openssl pkey -pubin -in tools/fl003_handoff_owner_public.pem -noout
 
@@ -147,3 +149,23 @@ jobs:
           test -n "$ciphertext"
           printf 'FL003_HANDOFF_CIPHER=%s\n' "$ciphertext"
           echo FL003_HANDOFF_LINK_ENCRYPTED_ONLY
+
+      - name: Send secure one-time portal URL only to owner's private Telegram Saved Messages
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          tar -C tools -czf - fl003_portal_notify.py fl003_task_engine.py fl003_client_demo.py | \
+            ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" \
+              -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" \
+              -p "${PORT:-22}" "$USER@$HOST" \
+              'install -d -m 700 "$HOME/.fl003-handoff"; umask 077; tar -xzf - -C "$HOME/.fl003-handoff"'
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" \
+            -p "${PORT:-22}" "$USER@$HOST" \
+            'cd "$HOME/.fl003-handoff" && "$HOME/.avito-agent/venv/bin/python" fl003_portal_notify.py'
+
