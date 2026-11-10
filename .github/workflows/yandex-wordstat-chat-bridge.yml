@@ -3,6 +3,11 @@ name: Wordstat — owner-only API bridge
 on:
   issue_comment:
     types: [created]
+  pull_request:
+    paths:
+      - 'tools/yandex_wordstat_bridge.py'
+      - 'tests/test_yandex_wordstat_bridge.py'
+      - '.github/workflows/yandex-wordstat-chat-bridge.yml'
 
 permissions:
   contents: read
@@ -13,6 +18,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  offline_tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate Python and tests without network calls
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_yandex_wordstat_bridge.py' -v
+          python3 -m py_compile tools/yandex_wordstat_bridge.py
+
   wordstat:
     if: >-
       github.event.issue.number == 162 &&
