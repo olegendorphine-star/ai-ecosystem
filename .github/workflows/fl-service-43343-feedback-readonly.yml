@@ -62,4 +62,5 @@ jobs:
           print("WIZARD_FIELDS",d.get("wizard_fields",{}))
           print("WIZARD_PREFLIGHT_STEPS",d.get("wizard_preflight_steps",[]))
           print("WIZARD_PREFLIGHT_ERROR",d.get("wizard_preflight_error",""))
+          print("WIZARD_ERROR_PAGE",d.get("wizard_error_page",{}))
           PY
