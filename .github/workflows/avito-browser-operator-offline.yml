@@ -1,0 +1,48 @@
+name: Avito browser operator — offline guardrail tests
+
+on:
+  pull_request:
+    paths:
+      - 'tools/avito_browser_operator.py'
+      - 'tools/avito_owner_profile_policy.py'
+      - 'tests/test_avito_owner_profile_policy.py'
+      - 'tests/test_avito_browser_operator.py'
+      - 'tools/avito_trusted_ui_handoff.py'
+      - 'tools/avito_trusted_ui_worker.py'
+      - 'tests/test_avito_trusted_ui_worker.py'
+      - 'tests/test_avito_trusted_ui_handoff.py'
+      - '.github/workflows/avito-browser-operator-offline.yml'
+  push:
+    branches: ["main"]
+    paths:
+      - 'tools/avito_browser_operator.py'
+      - 'tools/avito_owner_profile_policy.py'
+      - 'tests/test_avito_owner_profile_policy.py'
+      - 'tests/test_avito_browser_operator.py'
+      - 'tools/avito_trusted_ui_handoff.py'
+      - 'tools/avito_trusted_ui_worker.py'
+      - 'tests/test_avito_trusted_ui_worker.py'
+      - 'tests/test_avito_trusted_ui_handoff.py'
+      - '.github/workflows/avito-browser-operator-offline.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Offline unit tests only — no network or browser login
+        run: |
+          python3 -m py_compile tools/avito_browser_operator.py
+          python3 -m unittest discover -s tests -p 'test_avito_browser_operator.py' -v
+          python3 -m py_compile tools/avito_trusted_ui_handoff.py
+          python3 -m unittest discover -s tests -p 'test_avito_trusted_ui_handoff.py' -v
+          python3 -m py_compile tools/avito_trusted_ui_worker.py
+          python3 -m unittest discover -s tests -p 'test_avito_trusted_ui_worker.py' -v
+          python3 -m py_compile tools/avito_owner_profile_policy.py
+          python3 -m unittest discover -s tests -p 'test_avito_owner_profile_policy.py' -v
