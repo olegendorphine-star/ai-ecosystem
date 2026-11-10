@@ -6,6 +6,7 @@ MIME CSV+DOCX parsing of an explicitly synthetic email. No external writes.
 Never substitutes indexed prices or fixtures for verified product facts.
 """
 import argparse
+import base64
 import html
 import json
 import os
@@ -18,18 +19,27 @@ from fl003_client_demo import (
 )
 from fl003_yandex_marketplace_search import is_product_card
 
+def embedded_font_style():
+    font = Path.home() / ".fl003-screencast" / "fonts" / "DejaVuSans.ttf"
+    if not font.is_file() or font.is_symlink() or not (10000 < font.stat().st_size < 1_000_000):
+        raise RuntimeError("demo_cyrillic_font_missing_on_vps")
+    raw = base64.b64encode(font.read_bytes()).decode("ascii")
+    return ("@font-face{font-family:FLDemo;src:url(data:font/ttf;base64,"+
+            raw+");font-weight:normal;font-style:normal;}")
+
 def render(title, content, accent="#74b6ff"):
     return ("""<!doctype html><html lang="ru"><meta charset="utf-8">
-    <style>
-      body{background:#101b2a;color:#eff5ff;font:23px/1.6 Arial, sans-serif;
+    <style>%s
+
+      body{background:#101b2a;color:#eff5ff;font:23px/1.6 FLDemo,Arial,sans-serif;
       padding:48px;margin:0} h1{color:%s;font-size:35px;margin:0 0 18px}
       h2{font-size:25px;margin:20px 0 8px}
       .panel{background:#1d3047;padding:22px;border-radius:16px}
       .small{font-size:17px;color:#bacbdd} .bad{color:#ffd28b}
-      code{color:#99dafa} pre{white-space:pre-wrap;font:17px/1.55 monospace}
+      code{color:#99dafa} pre{white-space:pre-wrap;font:17px/1.55 FLDemo,Arial,sans-serif}
       .tag{display:inline-block;padding:4px 14px;border:1px solid #7590a6;border-radius:20px;font-size:16px}
     </style><h1>%s</h1><div class="panel">%s</div></html>"""
-    % (accent,html.escape(title),content))
+    % (embedded_font_style(),accent,html.escape(title),content))
 
 def text(s):
     return html.escape(str(s))
@@ -93,6 +103,10 @@ def main():
             "<p>Поручение: выбрать Logitech M185 на Ozon и Авито.</p>"
             "<p class='small'>Каждый сайт открывается непосредственно из браузера сервера. "
             "Цены не подставляются из примеров. Если сайт ограничит доступ — это будет видно на записи.</p>"))
+        # Verify the embedded Cyrillic-capable font loaded before accepting the recording.
+        page.evaluate("() => document.fonts.ready")
+        if page.evaluate("() => !document.fonts.check('24px FLDemo')"):
+            raise RuntimeError("demo_font_failed_to_load")
         page.wait_for_timeout(3000)
         if search_evidence:
             names=search_evidence["filtered_candidate_counts"]
