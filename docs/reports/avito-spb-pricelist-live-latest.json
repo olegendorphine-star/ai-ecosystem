@@ -13,16 +13,20 @@
   },
   "autoload_posts": 0,
   "charges_rub": 0,
-  "checked_at_utc": "2026-11-10T09:13:03+00:00",
+  "checked_at_utc": "2026-11-10T13:24:56+00:00",
   "chita_confirmed_active": true,
   "current_items_check": "read",
   "current_upload": {
     "chita_avito_id": 8414224003,
     "chita_in_current_items": true,
     "chita_section": "success_published",
+    "four_items_success_published": true,
+    "import_started_after_seo": false,
+    "seo_import_four_items_verified": false,
     "spb_in_current_items": true,
     "spb_section": "success_published",
-    "upload_id": 631115630,
+    "upload_id": 631723180,
+    "upload_started_at_utc": "2026-11-10T09:50:03+00:00",
     "upload_status": "success"
   },
   "http": {
@@ -35,11 +39,13 @@
   "oauth_ok": true,
   "public_feed": {
     "all_original_images": true,
+    "expected_ids_cities": true,
+    "four_ads": true,
+    "four_price_lists": true,
     "free_package": true,
     "ids_stable": true,
-    "moscow_has_no_price_list": true,
-    "spb_three_prices": true,
-    "two_ads": true
+    "seo_titles_ready": true,
+    "unique_titles": true
   },
   "public_feed_http": 200,
   "schema": "avito.spb.pricelist.live-read.v2"
