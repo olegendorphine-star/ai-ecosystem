@@ -115,31 +115,26 @@ def _telegram_socket_call(command:dict)->dict:
     return json.loads(data)
 
 def read_saved_message_tests(store:Store)->dict:
-    """Fail closed; do not process arbitrary chats or copy their messages."""
-    status={"saved_dialog_verified":False,"new_test_commands":0,"read_only":True,"telegram_sent":False}
+    """Read only model-exact FL003 markers from self-peer verified by Telegram Web."""
+    state={"saved_dialog_verified":False,"new_test_commands":0,
+           "read_only":True,"telegram_sent":False}
     try:
-        listing=_telegram_socket_call({"action":"web_dialogs","params":{"limit":20}})
-        if listing.get("status")!="ok":return {**status,"status":"dialogs_unavailable"}
-        matches=[i for i in listing.get("dialogs",[]) if
-                 i.get("title","").casefold().strip() in ("избранное","saved messages","сохранённые сообщения")]
-        if len(matches)!=1:return {**status,"status":"saved_dialog_not_unique_or_hidden"}
-        peer=matches[0].get("peer_id")
-        if type(peer) is not int or peer<=0:return {**status,"status":"invalid_saved_peer"}
-        status["saved_dialog_verified"]=True
-        data=_telegram_socket_call({"action":"web_read","params":{"peer_id":peer,"limit":12}})
-        if data.get("status")!="ok":return {**status,"status":"saved_read_not_verified"}
+        data=_telegram_socket_call({"action":"web_self_read","params":{"limit":12}})
+        if data.get("status")!="ok" or data.get("saved_messages_only") is not True:
+            return {**state,"status":"self_read_unavailable"}
+        state["saved_dialog_verified"]=True
         for msg in data.get("messages",[]):
-            body=msg.get("text","").strip().upper()
-            kind=TEST_MARKERS.get(body)
+            marker=msg.get("text","").strip().upper()
+            kind=TEST_MARKERS.get(marker)
             mid=msg.get("message_id")
             if kind and type(mid) is int and mid>0:
-                digest=hashlib.sha256((str(peer)+":"+str(mid)+":"+kind).encode()).hexdigest()[:40]
+                digest=hashlib.sha256(("own_saved_message:"+str(mid)+":"+kind).encode()).hexdigest()[:40]
                 if store.enqueue("tg_"+digest,kind):
-                    status["new_test_commands"]+=1
-        status["status"]="saved_commands_checked"
-        return status
+                    state["new_test_commands"]+=1
+        state["status"]="saved_commands_checked"
+        return state
     except Exception:
-        return {**status,"status":"telegram_read_failed"}
+        return {**state,"status":"telegram_read_failed"}
 
 def read_verified_products(evidence=EVIDENCE,max_age_minutes=35):
     """Accept only recent evidence produced by the owner-only same-browser handoff."""
