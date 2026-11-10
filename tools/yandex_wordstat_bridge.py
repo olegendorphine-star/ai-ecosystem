@@ -264,18 +264,23 @@ def main() -> int:
     folder_id = os.environ.get("YANDEX_WORDSTAT_FOLDER_ID", "")
     allow_paid = os.environ.get("WORDSTAT_ALLOW_BILLABLE", "false").lower() == "true"
     try:
-        history = read_bot_results(gh_token)
+        history = read_bot_results(gh_token, now)
         if any(item.get("command_id") == command["command_id"] for item in history):
             print("Command already handled")
             return 0
         if command["action"] == "top" and allow_paid and key:
-            # Fixed spending limit: 10 GetTop requests per UTC day (10 x 0.02 RUB).
-            # Fail closed if a reservation cannot be posted to the trusted issue.
-            # Reservations prevent a crashed run from silently retrying a paid call.
-            if count_daily_paid_reservations(history, now) >= 10:
+            # Cache hits are free; a fresh=True command explicitly skips cache.
+            cached = find_cached_top(history, command, now)
+            if cached is not None:
+                response = cached
+            elif count_daily_paid_reservations(history, now) >= MAX_DAILY_PAID:
                 response = {"status": "daily_paid_limit_reached",
-                            "daily_limit": 10, "method": "GetTop"}
+                            "daily_limit": MAX_DAILY_PAID, "method": "GetTop"}
+            elif count_hourly_paid_reservations(history, now) >= MAX_ROLLING_HOURLY_PAID:
+                response = {"status": "hourly_paid_limit_reached",
+                            "hourly_limit": MAX_ROLLING_HOURLY_PAID, "method": "GetTop"}
             else:
+                # Reserve before billing. No automatic retry after failure.
                 post_result(gh_token, {
                     "status": "started", "method": "GetTop", "billable": True,
                     "command_id": command["command_id"],
@@ -285,7 +290,8 @@ def main() -> int:
         else:
             response = call_wordstat(command, key, folder_id, allow_paid)
     except HTTPError as exc:
-        response = {"status": "upstream_http_error", "code": exc.code}
+        response = {"status": "provider_rate_limit" if exc.code == 429
+                    else "upstream_http_error", "code": exc.code}
     except (URLError, TimeoutError, ValueError, TypeError, KeyError):
         response = {"status": "upstream_unavailable"}
     response["command_id"] = command["command_id"]
