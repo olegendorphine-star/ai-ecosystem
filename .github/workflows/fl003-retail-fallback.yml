@@ -1,0 +1,88 @@
+name: FL-003 autonomous retailer fallback browser (no messages)
+on:
+  pull_request:
+    paths:
+      - 'tools/fl003_retail_fallback.py'
+      - 'tests/test_fl003_retail_fallback.py'
+      - '.github/workflows/fl003-retail-fallback.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Validate safe extraction without external requests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl003_retail_fallback.py
+          python3 tools/fl003_retail_fallback.py --selftest
+          python3 -m unittest discover -s tests -p 'test_fl003_retail_fallback.py' -v
+  vps:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Prepare pinned VPS SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl003-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl003-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl003-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl003-ssh/key" "$RUNNER_TEMP/fl003-ssh/known_hosts"
+      - name: Read two public retailer pages through actual VPS Chromium
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          opts=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}")
+          cat tools/fl003_retail_fallback.py | ssh "${opts[@]}" "$USER@$HOST" \
+            'install -d -m 700 "$HOME/.fl003-retail"; umask 077; cat > "$HOME/.fl003-retail/app.py"'
+          ssh "${opts[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-retail-summary.json"
+          set -euo pipefail
+          root="$HOME/.fl003-retail/$FL003_RUN_ID"
+          umask 077
+          env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$HOME/.avito-agent/venv/bin/python" "$HOME/.fl003-retail/app.py" --output-dir "$root"
+          REMOTE
+          python3 - "$RUNNER_TEMP/fl003-retail-summary.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding="utf8"))
+          assert d['schema']=='fl003.retail.fallback.v1'
+          assert d['external_messages_sent']==0
+          assert d['primary_marketplace_current_prices_verified']==0
+          print("RETAIL_VPS_FALLBACK",d['retailer_statuses'])
+          PY
+          ssh "${opts[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-retail.tgz"
+          set -euo pipefail
+          cd "$HOME/.fl003-retail/$FL003_RUN_ID"
+          tar -czf - report.json retail-fallback-browser.webm *.png 2>/dev/null || tar -czf - report.json retail-fallback-browser.webm
+          REMOTE
+          mkdir -p "$RUNNER_TEMP/fl003-retail-artifact"
+          tar -xzf "$RUNNER_TEMP/fl003-retail.tgz" -C "$RUNNER_TEMP/fl003-retail-artifact"
+          python3 - "$RUNNER_TEMP/fl003-retail-artifact/report.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding="utf8"))
+          assert d['external_messages_sent']==0
+          assert d['region_checkout_terms_verified'] is False
+          assert d['fulfills_original_customer_marketplace_scope'] is False
+          print("RETAIL_PUBLIC_SOURCE_COUNT",len(d['retailer_sources']))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fl003-RETAIL-FALLBACK-internal-real-vps-browser
+          path: ${{ runner.temp }}/fl003-retail-artifact
+          retention-days: 7
+          if-no-files-found: error

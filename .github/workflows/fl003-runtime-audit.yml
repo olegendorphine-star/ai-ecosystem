@@ -1,0 +1,39 @@
+name: FL-003 runtime capability audit (read-only)
+on:
+  pull_request:
+    paths:
+      - 'tools/fl003_runtime_audit.py'
+      - '.github/workflows/fl003-runtime-audit.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - run: python3 -m py_compile tools/fl003_runtime_audit.py
+  server:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Pinned private SSH read-only audit
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl003-audit-ssh"
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl003-audit-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl003-audit-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl003-audit-ssh/key" "$RUNNER_TEMP/fl003-audit-ssh/known_hosts"
+          cat tools/fl003_runtime_audit.py | ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-audit-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-audit-ssh/key" -p "${PORT:-22}" "$USER@$HOST" 'python3 -'

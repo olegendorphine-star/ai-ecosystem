@@ -1,0 +1,259 @@
+name: FL-003 integrated task engine — private VPS acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'tools/fl003_task_engine.py'
+      - 'tests/test_fl003_task_engine.py'
+      - '.github/workflows/fl003-integrated-task-engine.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fl003-integrated-vps-acceptance
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Test engine, mail DOCX, marketplace gates
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl003_client_demo.py tools/fl003_task_engine.py tools/fl003_telegram_selftest.py
+          python3 tools/fl003_telegram_selftest.py
+          python3 -m unittest discover -s tests -p 'test_fl003_client_demo.py' -v
+          python3 -m unittest discover -s tests -p 'test_fl003_task_engine.py' -v
+          python3 -m pip install --disable-pip-version-check -q 'cryptography>=44,<48'
+          python3 -m py_compile tools/telegram_owner_operator.py tools/telegram_web_encrypted_operator.py
+          python3 -m unittest discover -s tests -p 'test_telegram_owner_operator.py' -v
+          python3 -m unittest discover -s tests -p 'test_telegram_web_encrypted_operator.py' -v
+          python3 -m unittest discover -s tests -p 'test_telegram_resident_daemon.py' -v
+
+  server_acceptance:
+    # User explicitly forbids outbound messages and resident changes in FL-003.
+    # Leave offline unit tests active; server writes require a separate opt-in.
+    if: ${{ false }}
+    needs: [offline, telegram_selfread_canary]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Prepare pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl003-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl003-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl003-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl003-ssh/key" "$RUNNER_TEMP/fl003-ssh/known_hosts"
+      - name: Upload independent engine files to owner-only VPS directory
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          for script in fl003_client_demo.py fl003_task_engine.py fl003_telegram_selftest.py; do
+            test -f "tools/$script"
+            cat "tools/$script" | ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+              "install -d -m 700 ~/.fl003-demo/app && umask 077 && cat > ~/.fl003-demo/app/$script && chmod 600 ~/.fl003-demo/app/$script"
+          done
+          echo SERVER_TASK_ENGINE_DEPLOYED
+      - name: Send exactly two at-most-once test markers to owner's own Saved Messages
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+             '"$HOME/.avito-agent/venv/bin/python" "$HOME/.fl003-demo/app/fl003_telegram_selftest.py" --run-once' > "$RUNNER_TEMP/fl003-self-test.json"
+          python3 - "$RUNNER_TEMP/fl003-self-test.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding='utf8'))
+          assert d['schema']=='fl003.telegram.selftest.v1'
+          print("FL003_SAVED_MESSAGES_SELFTEST_STATUS",d['status'])
+          for i in d.get('results',[]):
+            print("FL003_SAVED_MESSAGES_MARKER",i['kind'],i['status'])
+          PY
+      - name: Run integrated real server test with only own Saved Messages intake
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+             'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" "$HOME/.fl003-demo/app/fl003_task_engine.py" --fixture --telegram-read --resume --notify-self' \
+              > "$RUNNER_TEMP/fl003-results.json"
+          python3 - "$RUNNER_TEMP/fl003-results.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding='utf-8'))
+          assert d['schema']=='fl003.task.engine.v1'
+          assert d['external_messages_sent']==0 and d['mail_sent'] is False and d['purchase_performed'] is False
+          assert any(x['kind']=='mail_test' and x['state']=='draft_ready' for x in d['executed']) or any(x['kind']=='mail_test' and x['state']=='draft_ready' for x in d['summary'])
+          print('FL003_VPS_ENGINE_STATUS',d['summary'])
+          print('FL003_TELEGRAM_INTAKE_STATUS',d['telegram']['status'])
+          print('FL003_TELEGRAM_READ_REASON',d['telegram'].get('safe_reason'))
+          print('FL003_TELEGRAM_NEW_TEST_COMMANDS',d['telegram'].get('new_test_commands',0))
+          print('FL003_EXTERNAL_MESSAGES_SENT',d['external_messages_sent'])
+          print('FL003_OWNER_SELF_NOTIFICATIONS',d['self_notifications'])
+          PY
+
+  telegram_selfread_canary:
+    # User explicitly forbids outbound messages and resident changes in FL-003.
+    # Leave offline unit tests active; server writes require a separate opt-in.
+    if: ${{ false }}
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Prepare pinned private SSH context
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl003-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl003-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl003-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl003-ssh/key" "$RUNNER_TEMP/fl003-ssh/known_hosts"
+      - name: Transfer additive canary source without private Telegram profiles
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          tar -C tools -cf - telegram_owner_operator.py telegram_web_encrypted_operator.py fl003_task_engine.py fl003_client_demo.py | \
+            ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+              'umask 077; install -d -m 700 ~/.fl003-demo/telegram-canary; tar -xf - -C ~/.fl003-demo/telegram-canary'
+          echo FL003_CANARY_SOURCE_STAGED
+      - name: Deploy additive read-only operation with rollback and restart Telegram resident
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          root="$HOME/.telegram-agent"
+          stage="$HOME/.fl003-demo/telegram-canary"
+          backup="$HOME/.fl003-demo/telegram-backup"
+          app="$HOME/.fl003-demo/app"
+          install -d -m 700 "$backup" "$app"
+          test -x "$root/bin/telegram-python"
+          test -f "$root/browser/telegram_resident_daemon.py"
+          tgt1="$root/app/tools/telegram_owner_operator.py"
+          tgt2="$root/browser/telegram_web_encrypted_operator.py"
+          tgt3="$root/app/tools/telegram_web_encrypted_operator.py"
+          src1="$stage/telegram_owner_operator.py"
+          src2="$stage/telegram_web_encrypted_operator.py"
+          test -f "$tgt1" && test -f "$tgt2" && test -f "$tgt3" && test -f "$src1" && test -f "$src2"
+          "$root/bin/telegram-python" -m py_compile "$src1" "$src2" "$stage/fl003_task_engine.py"
+          install -m 600 "$stage/fl003_task_engine.py" "$app/fl003_task_engine.py"
+          install -m 600 "$stage/fl003_client_demo.py" "$app/fl003_client_demo.py"
+          if ! cmp -s "$src1" "$tgt1" || ! cmp -s "$src2" "$tgt2" || ! cmp -s "$src2" "$tgt3"; then
+            if ! command -v git >/dev/null 2>&1; then
+              echo TG_FL003_BLOCKED_NO_GIT_HASH_VALIDATION
+              exit 1
+            fi
+            current1="$(git hash-object "$tgt1")"
+            current2="$(git hash-object "$tgt2")"
+            current3="$(git hash-object "$tgt3")"
+            case "$current1" in
+              95144e7324f9e873915a673783e78808306baa8f|837d931c7d74438dbcad1ad84ee200661211c3e0) ;;
+              *) echo TG_FL003_BLOCKED_UNEXPECTED_OWNER_OPERATOR; exit 1 ;;
+            esac
+            case "$current2" in
+              e6eeca2888ae23258bb0aed0e55a37d398012e3e|e2ccf4bf1d903fc7b9d3d7d28e1a895a77ba99a9|584be8dff00007bbfd8abc8af06a7477d6a3631c) ;;
+              *) echo TG_FL003_BLOCKED_UNEXPECTED_WEB_OPERATOR; exit 1 ;;
+            esac
+            case "$current3" in
+              e6eeca2888ae23258bb0aed0e55a37d398012e3e|e2ccf4bf1d903fc7b9d3d7d28e1a895a77ba99a9|584be8dff00007bbfd8abc8af06a7477d6a3631c) ;;
+              *) echo TG_FL003_BLOCKED_UNEXPECTED_APP_WEB_OPERATOR; exit 1 ;;
+            esac
+          fi
+          if cmp -s "$src1" "$tgt1" && cmp -s "$src2" "$tgt2" && cmp -s "$src2" "$tgt3"; then
+            echo TG_FL003_CANARY_ALREADY_INSTALLED
+          else
+            cp -p "$tgt1" "$backup/telegram_owner_operator.pre-fl003.py"
+            cp -p "$tgt2" "$backup/telegram_web_encrypted_operator.pre-fl003.py"
+            cp -p "$tgt3" "$backup/telegram_app_web_encrypted_operator.pre-fl003.py"
+            is_systemd=0
+            if systemctl --user is-active --quiet telegram-resident.service 2>/dev/null; then
+              is_systemd=1
+              systemctl --user stop telegram-resident.service
+            else
+              "$root/bin/telegram-python" "$root/browser/telegram_resident_daemon.py" stop >/dev/null 2>&1 || true
+            fi
+            install -m 600 "$src1" "$tgt1.new"
+            install -m 600 "$src2" "$tgt2.new"
+            install -m 600 "$src2" "$tgt3.new"
+            mv -f "$tgt1.new" "$tgt1"
+            mv -f "$tgt2.new" "$tgt2"
+            mv -f "$tgt3.new" "$tgt3"
+            start_resident() {
+              if [ "$is_systemd" -eq 1 ]; then
+                systemctl --user start telegram-resident.service
+              else
+                nohup "$root/bin/telegram-python" "$root/browser/telegram_resident_daemon.py" serve >/dev/null 2>&1 </dev/null &
+                disown || true
+              fi
+            }
+            start_resident
+            ready=0
+            for i in $(seq 1 35); do
+              status="$("$root/bin/telegram-python" "$root/browser/telegram_resident_daemon.py" status 2>/dev/null || true)"
+              if printf '%s' "$status" | grep -Fq '"authorized":true' && printf '%s' "$status" | grep -Fq '"browser_alive":true'; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" != 1 ]; then
+              echo TG_FL003_CANARY_ROLLBACK
+              if [ "$is_systemd" -eq 1 ]; then systemctl --user stop telegram-resident.service || true; fi
+              "$root/bin/telegram-python" "$root/browser/telegram_resident_daemon.py" stop >/dev/null 2>&1 || true
+              cp -p "$backup/telegram_owner_operator.pre-fl003.py" "$tgt1"
+              cp -p "$backup/telegram_web_encrypted_operator.pre-fl003.py" "$tgt2"
+              cp -p "$backup/telegram_app_web_encrypted_operator.pre-fl003.py" "$tgt3"
+              start_resident
+              exit 1
+            fi
+            echo TG_FL003_CANARY_RESIDENT_VERIFIED
+          fi
+          REMOTE
+      - name: Verify own Saved Messages intake; never print message text or peer IDs
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" "$HOME/.fl003-demo/app/fl003_task_engine.py" --telegram-read' > "$RUNNER_TEMP/fl003-intake.json"
+          python3 - "$RUNNER_TEMP/fl003-intake.json" <<'PY'
+          import json,sys
+          r=json.load(open(sys.argv[1],encoding='utf8'))
+          assert r["external_messages_sent"]==0
+          print("FL003_TELEGRAM_INTAKE_STATUS",r["telegram"]["status"])
+          print("FL003_TELEGRAM_READ_REASON",r["telegram"].get("safe_reason"))
+          print("FL003_TELEGRAM_SAVED_ONLY",r["telegram"].get("saved_dialog_verified"))
+          print("FL003_TELEGRAM_NEW_COMMANDS",r["telegram"].get("new_test_commands"))
+          print("FL003_ENGINE",r["summary"])
+          PY

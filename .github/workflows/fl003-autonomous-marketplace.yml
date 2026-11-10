@@ -1,0 +1,155 @@
+name: FL-003 autonomous report (no human CAPTCHA)
+on:
+  pull_request:
+    paths: ['tools/fl003_autonomous_index_report.py', 'tools/fl003_avito_apish.py', '.github/workflows/fl003-autonomous-marketplace.yml']
+permissions:
+  contents: read
+concurrency:
+  group: fl003-autonomous-report
+  cancel-in-progress: false
+jobs:
+  run:
+    if: github.event_name == 'pull_request' && vars.FL003_ALLOW_PAID_SEARCH == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Offline test automated report, ZIP/DOCX and URL validation
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl003_avito_apish.py tools/fl003_autonomous_index_report.py tools/fl003_yandex_marketplace_search.py tools/fl003_client_demo.py tools/fl003_task_engine.py
+          python3 tools/fl003_avito_apish.py --selftest
+          python3 tools/fl003_autonomous_index_report.py --selftest
+          PYTHONPATH=tools python3 - <<'PY'
+          from fl003_autonomous_index_report import build_report,owner_note
+          sample={'schema':'fl003.yandex.search.index.v1',
+            'checked_utc':'2026-11-11T00:00:00+00:00',
+            'marketplaces':[
+              {'marketplace':'Ozon','status':'found','candidates':[{
+                'source_type':'yandex_search_index',
+                'url':'https://www.ozon.ru/product/logitech-m185-7231898/',
+                'title':'Logitech M185','snippet':'Цена 799 ₽','live_price_verified':False}]},
+              {'marketplace':'Avito','status':'found','candidates':[{
+                'source_type':'yandex_search_index',
+                'url':'https://www.avito.ru/ufa/tovary_dlya_kompyutera/mysh_logitech_m185_7203258990',
+                'title':'Logitech M185','snippet':'Новая мышь','live_price_verified':False}]}]}
+          r=build_report(sample)
+          assert r['candidate_counts']=={'Ozon':1,'Avito':1}
+          assert r['indexed_price_examples'][0]['price_rub']==799
+          assert r['verified_current_prices']==0
+          apish={'schema':'fl003.avito.provider.search.v1','status':'completed',
+                 'provider_recent_uncached':True,'fetched_at_utc':'2026-11-11T00:00:00Z',
+                 'listings':[{'title':'Logitech M185','url':'https://www.avito.ru/ufa/tovary_dlya_kompyutera/mysh_logitech_m185_7203258990',
+                              'price_rub':690,'seller_name':'тест','seller_rating':4.9,
+                              'seller_reviews':12}]}
+          enriched=build_report(sample,apish)
+          assert enriched['provider_recent_avito_prices']==1
+          assert enriched['avito_provider_offers'][0]['price_rub']==690
+          assert enriched['verified_current_prices']==0
+          assert r['requires_owner_captcha'] is False
+          assert 'ручное участие владельца' not in r['draft_reply']['text']
+          assert 'Ручная капча не требуется' in r['draft_reply']['text']
+          assert len(r['mail']['attachments'])==2
+          from pathlib import Path
+          raw=(Path('tests/fixtures')/'fl003_gmail_real_message_sanitized.eml').read_bytes()
+          real=build_report(sample,apish,raw)
+          assert real['mail']['source']=='gmail_received_privacy_sanitized_relay'
+          assert real['mail']['requirements'][0]['delivery_days']==7
+          assert {a['status'] for a in real['mail']['attachments']}=={'parsed','parsed_docx'}
+          assert real['mailbox_connected'] is False
+          assert len(owner_note(r))<=300
+          print('FL003_AUTONOMOUS_OFFLINE_TESTS_OK')
+          PY
+      - name: Fetch fresh Yandex results once, 2 bounded API calls
+        env:
+          YANDEX_FL003_API_KEY: ${{ secrets.YANDEX_FL003_WEBSEARCH_API_KEY || secrets.yandex_api }}
+          YANDEX_FL003_FOLDER_ID: b1ga59a6ib54m2km5cgd
+        run: |
+          set -euo pipefail
+          python3 tools/fl003_yandex_marketplace_search.py --out "$RUNNER_TEMP/fl003-source.json"
+          python3 - "$RUNNER_TEMP/fl003-source.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding='utf8'))
+          assert d['requests_sent']==2 and len(d['marketplaces'])==2
+          assert d['schema']=='fl003.yandex.search.index.v1'
+          print('YANDEX_COUNTS',[(m['marketplace'],m['status'],len(m['candidates'])) for m in d['marketplaces']])
+          PY
+      - name: Optional Avito provider (disabled until approved free credits/key)
+        env:
+          FL003_APISH_KEY: ${{ secrets.FL003_APISH_KEY }}
+          FL003_APISH_ENABLED: ${{ vars.FL003_APISH_ENABLED }}
+        run: |
+          set -euo pipefail
+          python3 tools/fl003_avito_apish.py --out "$RUNNER_TEMP/fl003-avito-provider.json"
+          python3 - "$RUNNER_TEMP/fl003-avito-provider.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding="utf8"))
+          assert d["schema"]=="fl003.avito.provider.search.v1"
+          assert d.get("outbound_requests",0)<=1
+          print("AVITO_PROVIDER_STATUS",d["status"])
+          PY
+      - name: Prepare pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl003-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl003-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl003-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl003-ssh/key" "$RUNNER_TEMP/fl003-ssh/known_hosts"
+      - name: Execute read-only autonomous report on VPS (no outbound messages)
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}")
+          tar -czf - tools/fl003_autonomous_index_report.py tools/fl003_yandex_marketplace_search.py tools/fl003_client_demo.py tools/fl003_task_engine.py tests/fixtures/fl003_gmail_real_message_sanitized.eml -C "$RUNNER_TEMP" fl003-source.json fl003-avito-provider.json | \
+            ssh "${ssh_opts[@]}" "$USER@$HOST" 'install -d -m 700 "$HOME/.fl003-autonomous"; umask 077; tar -xzf - -C "$HOME/.fl003-autonomous"'
+          ssh "${ssh_opts[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-summary.json"
+          set -euo pipefail
+          base="$HOME/.fl003-autonomous"
+          install -d -m 700 "$base/reports"
+          "$HOME/.avito-agent/venv/bin/python" "$base/tools/fl003_autonomous_index_report.py" \
+            --search-json "$base/fl003-source.json" \
+            --apish-json "$base/fl003-avito-provider.json" \
+            --mail-eml "$base/tests/fixtures/fl003_gmail_real_message_sanitized.eml" \
+            --out "$base/reports/$FL003_RUN_ID.json"
+          REMOTE
+          python3 - "$RUNNER_TEMP/fl003-summary.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding='utf8'))
+          assert d['schema']=='fl003.autonomous.marketplace.report.v1'
+          assert d['no_human_step_requested'] is True
+          assert d['client_demo_accepted'] is False
+          print('VPS_AUTONOMOUS_STATUS',d['status'])
+          print('VPS_AUTONOMOUS_COUNTS',d['counts'])
+          assert d['telegram_delivery']=='not_requested'
+          print('VPS_OUTBOUND_MESSAGE_COUNT',0)
+          PY
+          ssh "${ssh_opts[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-report.json"
+          set -euo pipefail
+          cat "$HOME/.fl003-autonomous/reports/$FL003_RUN_ID.json"
+          REMOTE
+          python3 - "$RUNNER_TEMP/fl003-report.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding='utf8'))
+          assert d['external_messages_sent']==0 and d['purchases']==0
+          assert d['mailbox_connected'] is False and d['kimi_api_called'] is False
+          assert d['mail']['draft_status']=='created_not_sent'
+          assert d['mail']['source']=='gmail_received_privacy_sanitized_relay'
+          assert {a['status'] for a in d['mail']['attachments']}=={'parsed','parsed_docx'}
+          print('AUTONOMOUS_REPORT_EVIDENCE_OK')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fl003-autonomous-live-Yandex-VPS-report
+          path: ${{ runner.temp }}/fl003-report.json
+          retention-days: 7
+          if-no-files-found: error
