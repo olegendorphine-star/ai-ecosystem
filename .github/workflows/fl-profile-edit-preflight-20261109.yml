@@ -41,3 +41,5 @@ jobs:
             -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" \
             "$USER@$HOST" \
             'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -'
+
+# Owner-requested current edit-form preflight after 2026-11-10 About publication.
