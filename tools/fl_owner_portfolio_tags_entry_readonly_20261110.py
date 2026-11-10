@@ -56,7 +56,9 @@ try:
        const anc=keys?.closest('form')||keys?.parentElement?.parentElement?.parentElement?.parentElement;
        const relevant=Array.from(anc?.querySelectorAll('button,a,input[type=submit],input[type=button]')||[]).map(x=>({tag:x.tagName,txt:(x.innerText||x.value||'').trim().slice(0,65),type:x.type||'',id:x.id||'',class:String(x.className||'').slice(0,75)})).slice(-25);
        const ownerSection=keys?.closest('.b-shadow,.b-popup,.modal,[role=dialog]');
-       return {keyContainerTag:anc?.tagName,keyContainerClass:String(anc?.className||'').slice(0,90),keyControls:relevant,sectionText:(ownerSection?.innerText||'').replace(/\\s+/g,' ').slice(0,350),fields,controls,forms,dialogText:Array.from(document.querySelectorAll('[role=dialog],.modal,.b-shadow,.b-popup')).filter(visible).map(x=>(x.innerText||'').replace(/\\s+/g,' ').slice(0,330)).slice(-3)};
+       const keywordFields=Array.from(document.querySelectorAll('textarea[name="user_keys"]')).map((x,i)=>({i,visible:visible(x),len:String(x.value||'').length,part:(x.closest('.b-shadow,.b-popup,.modal,[role=dialog]')?.innerText||'').replace(/\\s+/g,' ').slice(0,100)}));
+       const dialogControls=Array.from(document.querySelectorAll('a,button,input[type=submit],input[type=button]')).filter(x=>/сохран|отмен|закры|примен/i.test((x.innerText||x.value||'').trim())).map(x=>({tag:x.tagName,text:(x.innerText||x.value||'').trim().slice(0,60),class:String(x.className||'').slice(0,80),id:x.id||'',visible:visible(x)})).slice(-25);
+       return {keywordFields,dialogControls,keyContainerTag:anc?.tagName,keyContainerClass:String(anc?.className||'').slice(0,90),keyControls:relevant,sectionText:(ownerSection?.innerText||'').replace(/\\s+/g,' ').slice(0,350),fields,controls,forms,dialogText:Array.from(document.querySelectorAll('[role=dialog],.modal,.b-shadow,.b-popup')).filter(visible).map(x=>(x.innerText||'').replace(/\\s+/g,' ').slice(0,330)).slice(-3)};
      }""")
 finally:
  b.close()
