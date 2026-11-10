@@ -90,6 +90,18 @@ try:
                               .filter(e=>/редактир|изменить|отклон|управлен|доработ/i.test(e.text)||/edit/i.test(e.href))
                               .slice(0,20)""")
                             out["management_controls"]=controls
+                            out["management_ui"]=page.evaluate("""() => {
+                                const els=[...document.querySelectorAll('*')]
+                                  .filter(e=>e.childElementCount<2&&(e.innerText||'').trim()==='Управление услугой').slice(0,3);
+                                const near=els.map(e=>({tag:e.tagName,html:(e.parentElement?.outerHTML||'').slice(0,1100)}));
+                                const controls=[...document.querySelectorAll('button,[role=button],a[href]')].filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0)
+                                  .map(e=>({t:(e.innerText||e.title||'').trim().slice(0,70),id:e.id||'',data:e.getAttribute('data-id')||'',
+                                   href:e.getAttribute('href')||'',cls:String(e.className||'').slice(0,60)}))
+                                  .filter(e=>/управ|редак|сервис|отклон|доработ|услуг/i.test(e.t+' '+e.id+' '+e.data+' '+e.href)).slice(0,20);
+                                const body=(document.body?.innerText||'');
+                                return {near,controls,tail:body.slice(-1800)};
+                            }""")
+
                             edits=[e for e in controls if "редактир" in e["text"].lower() and
                                    e.get("href","").startswith("https://www.fl.ru/")]
                             if len(edits)==1:
