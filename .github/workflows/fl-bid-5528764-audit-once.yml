@@ -1,0 +1,68 @@
+name: FL 5528764 owner-approved one-time FREE audit proposal
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/fl_bid_5528764_audit_once_20261110.py"
+      - ".github/workflows/fl-bid-5528764-audit-once.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fl-owner-bid-5528764-once
+  cancel-in-progress: false
+jobs:
+  one_bid:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Compile exactly targeted one-time offer
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_bid_5528764_audit_once_20261110.py
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path("tools/fl_bid_5528764_audit_once_20261110.py").read_text(encoding="utf8")
+          assert 'JOB_ID="5528764"' in s and 'PRICE=85000' in s and 'DAYS=10' in s
+          assert 'submitted_confirmed' in s and 'os.O_EXCL' in s
+          assert "в моём портфолио нет" in s
+          print("FL5528764_OFFLINE_SCOPE_GUARDS_OK")
+          PY
+      - name: Owner authorized single free bid through verified private VPS
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-audit-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-audit-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-audit-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-audit-ssh/key" "$RUNNER_TEMP/fl-audit-ssh/known_hosts"
+          cat tools/fl_bid_5528764_audit_once_20261110.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-audit-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl-audit-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' \
+            > "$RUNNER_TEMP/offer.json"
+          python3 - "$RUNNER_TEMP/offer.json" <<'PY'
+          import json,sys
+          r=json.load(open(sys.argv[1],encoding="utf8"))
+          assert r["schema"]=="fl.owner.bid.5528764.once.v1"
+          assert r["payment_actions"]==r["captchas"]==r["other_messages"]==0
+          print("FL5528764_BID_STATUS",r["status"])
+          print("FL5528764_OWNER_VERIFIED",r["owner_verified"])
+          print("FL5528764_FREE_VERIFIED",r["free_verified"])
+          print("FL5528764_ALREADY_APPLIED",r["already_applied"])
+          print("FL5528764_ONE_TIME_ATTEMPT",r["attempted"])
+          print("FL5528764_CONFIRMED",r["submitted_confirmed"])
+          print("FL5528764_PRICE",r["price_rub"])
+          print("FL5528764_DAYS",r["duration_days"])
+          print("FL5528764_ERROR_CLASS",r.get("error_class",""))
+          PY
