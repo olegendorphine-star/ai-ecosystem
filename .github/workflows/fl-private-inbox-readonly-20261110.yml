@@ -17,7 +17,7 @@ jobs:
       - name: Validate read-only source and one-time public certificate
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/fl_inbox_readonly_private_20261110.py
+          python3 -m py_compile tools/fl_marketing_customer_reply_private_20261110.py
           openssl x509 -in tools/fl_private_inbox_one_time_pub_20261110.pem -noout
       - name: Create pinned SSH context
         env:
@@ -36,7 +36,7 @@ jobs:
           PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
         run: |
           set -euo pipefail
-          data="$(cat tools/fl_inbox_readonly_private_20261110.py | ssh -F /dev/null -4 -T \
+          data="$(cat tools/fl_marketing_customer_reply_private_20261110.py | ssh -F /dev/null -4 -T \
             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
