@@ -24,7 +24,7 @@ jobs:
       - name: Test synthetic email, attachment and fail-closed shopping
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/fl003_client_demo.py
+          python3 -m py_compile tools/fl003_client_demo.py tools/fl003_screencast.py tools/fl003_yandex_marketplace_search.py
           python3 -m unittest discover -s tests -p 'test_fl003_client_demo.py' -v
           python3 tools/fl003_client_demo.py --offline
 
