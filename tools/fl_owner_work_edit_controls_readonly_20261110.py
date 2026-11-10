@@ -31,7 +31,15 @@ try:
            label:(x.innerText||'').trim().slice(0,35),tag:x.tagName,cls:String(x.className||'').slice(0,85),
            safeHref:(x.getAttribute('href')||'').split('?')[0].slice(0,100),dataId:(x.getAttribute('data-id')||'').slice(0,60),
            dataKeys:Object.keys(x.dataset||{}).slice(0,9)}));
-         return {id,found:true,container:container?.tagName||'',class:String(container?.className||'').slice(0,80),controls};
+         const ancestry=Array.from({length:7},(_,k)=>{let el=a;for(let n=0;n<k;n++)el=el?.parentElement;
+            const items=Array.from(el?.querySelectorAll('a,button,[role=button]')||[])
+              .filter(y=>/редакт|удал/i.test((y.innerText||y.title||'')+' '+y.className)).slice(0,8)
+              .map(y=>({tag:y.tagName,label:(y.innerText||y.title||'').trim().slice(0,55),
+                cls:String(y.className||'').slice(0,75),dataKeys:Object.keys(y.dataset||{}).slice(0,8)}));
+            return {k,tag:el?.tagName||'',cls:String(el?.className||'').slice(0,90),
+              text:(el?.innerText||'').replace(/\\s+/g,' ').slice(0,140),items};
+          });
+         return {id,found:true,container:container?.tagName||'',class:String(container?.className||'').slice(0,80),controls,ancestry};
        });
     }""",list(IDS))
 finally:
