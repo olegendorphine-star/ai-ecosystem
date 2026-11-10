@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """FL-003 isolated task engine: Telegram Saved Messages -> VPS -> safe evidence.
 
-No Telegram sending, purchasing, email sending or private account token export.
+No third-party Telegram sending, purchasing, email sending or private account token export.
+Optional once-only replies go exclusively to the owner's Saved Messages.
 Only explicit FL003 test commands in the owner's personal Saved Messages can
 create tasks. All task input/output stays in owner-only storage on the VPS.
 """
@@ -52,6 +53,7 @@ class Store:
         os.chmod(self.db,0o600)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("CREATE TABLE IF NOT EXISTS tasks (source_key TEXT PRIMARY KEY, kind TEXT NOT NULL, state TEXT NOT NULL, created_utc TEXT NOT NULL, result_json TEXT)")
+        self.conn.execute("CREATE TABLE IF NOT EXISTS self_notifications (source_key TEXT, state TEXT, sent_status TEXT, PRIMARY KEY (source_key,state))")
         self.conn.commit()
 
     def enqueue(self,source_key:str,kind:str)->bool:
@@ -71,6 +73,26 @@ class Store:
         with self.conn:
             self.conn.execute("UPDATE tasks SET state=?,result_json=? WHERE source_key=? AND state='queued'",
                 (state,json.dumps(result,ensure_ascii=False),key))
+
+    def unsent_self_notifications(self):
+        return self.conn.execute(
+            "SELECT t.source_key,t.kind,t.state,t.result_json FROM tasks t "
+            "LEFT JOIN self_notifications n ON n.source_key=t.source_key AND n.state=t.state "
+            "WHERE t.source_key LIKE 'tg_%' AND t.state IN ('waiting_human','draft_ready') "
+            "AND n.source_key IS NULL ORDER BY t.created_utc LIMIT 6").fetchall()
+
+    def claim_notification(self,source_key,state):
+        with self.conn:
+            cur=self.conn.execute(
+                "INSERT OR IGNORE INTO self_notifications (source_key,state,sent_status) VALUES (?,?,?)",
+                (source_key,state,"attempted"))
+        return cur.rowcount==1
+
+    def notification_status(self,source_key,state,status):
+        with self.conn:
+            self.conn.execute(
+                "UPDATE self_notifications SET sent_status=? WHERE source_key=? AND state=?",
+                (status,source_key,state))
 
     def requeue_waiting_shopping(self):
         """Resume only after a fresh independently captured owner-browser comparison."""
@@ -204,12 +226,46 @@ def execute_tasks(store:Store,offline=False):
             result.append({"kind":kind,"state":"failed"})
     return result
 
+def notify_own_saved_messages(store:Store)->dict:
+    """Two predefined state updates, only to SELF chat, at-most-once."""
+    messages=[]
+    for key,kind,state,raw in store.unsent_self_notifications():
+        if kind=="mail_test" and state=="draft_ready":
+            text="FL003: Тестовое письмо с CSV/DOCX разобрано на VPS, черновик ответа подготовлен. Ничего не отправлено. Данные синтетические."
+        elif kind=="shop_m185" and state=="waiting_human":
+            text="FL003: Подбор M185 ожидает проверку карточек Ozon/Авито в приватном браузере VPS. Цены пока не подтверждены."
+        elif kind=="shop_m185" and state=="draft_ready":
+            try:
+                data=json.loads(raw or "{}")
+                products=data.get("shopping",{}).get("products",[])
+                costs={p["marketplace"]:p["price_rub"] for p in products
+                       if p.get("status")=="verified_price_and_card"}
+                if set(costs)!={"Ozon","Avito"}:continue
+                text=("FL003: Подбор M185 завершён на VPS: Ozon "
+                      +str(costs["Ozon"])+" ₽, Авито "+str(costs["Avito"])
+                      +" ₽. Детали и ссылки в закрытом отчёте. Покупка не выполнялась.")
+            except (ValueError,KeyError,TypeError):continue
+        else:continue
+        if not store.claim_notification(key,state):continue
+        try:
+            result=_telegram_socket_call({"action":"web_self_note","params":
+                                          {"text":text[:300],"approved_by_owner":True}})
+            status=str(result.get("status") or "invalid_result")[:60]
+        except Exception:
+            status="uncertain_no_retry"
+        store.notification_status(key,state,status)
+        messages.append({"kind":kind,"state":state,"send_status":status,
+                         "destination":"owner_saved_messages"})
+    return {"attempted":len(messages),"results":messages,"external_recipient_messages_sent":0}
+
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--fixture",action="store_true",help="Two test commands; never reads Telegram")
     p.add_argument("--telegram-read",action="store_true",help="Read ONLY explicit markers in Saved Messages")
     p.add_argument("--offline",action="store_true",help="No browser network")
     p.add_argument("--resume",action="store_true",help="Resume gated shopping after owner-solved site challenge")
+    p.add_argument("--notify-self",action="store_true",help="Optional once-only own Saved Messages status")
     args=p.parse_args()
     prepare_storage()
     store=Store()
@@ -223,8 +279,9 @@ def main():
             telegram=read_saved_message_tests(store)
         resumed=store.requeue_waiting_shopping() if args.resume and not args.offline else 0
         completed=execute_tasks(store,offline=args.offline)
+        notify=notify_own_saved_messages(store) if args.notify_self and not args.offline else {'attempted':0,'results':[]}
         print(json.dumps({"schema":DOC_VERSION,"transport":"VPS","telegram":telegram,
-                          "resumed_after_human":resumed,"executed":completed,"summary":store.summary(),
+                          "resumed_after_human":resumed,"executed":completed,"self_notifications":notify,"summary":store.summary(),
                           "external_messages_sent":0,"mail_sent":False,
                           "purchase_performed":False},ensure_ascii=False,sort_keys=True))
     finally:
