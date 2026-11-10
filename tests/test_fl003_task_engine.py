@@ -36,6 +36,23 @@ class TaskEngineTests(unittest.TestCase):
         p.write_text('{"schema":"fl003.marketplace.manual.evidence.v2","products":{"Ozon":{"price_rub":100}}}')
         os.chmod(p,0o600)
         self.assertIsNone(engine.read_verified_products(p))
+    def test_private_saved_messages_intake_ignores_unrelated_content(self):
+        orig=engine._telegram_socket_call
+        try:
+            engine._telegram_socket_call=lambda command:{
+                "status":"ok","saved_messages_only":True,
+                "messages":[
+                    {"message_id":9911,"text":"FL003: ПИСЬМО ТЕСТ"},
+                    {"message_id":9912,"text":"личная запись не для агента"},
+                    {"message_id":9913,"text":"FL003: ТОВАР M185"}]}
+            result=engine.read_saved_message_tests(self.store)
+            self.assertEqual(result["status"],"saved_commands_checked")
+            self.assertEqual(result["new_test_commands"],2)
+            self.assertEqual(len(self.store.pending()),2)
+            self.assertEqual(engine.read_saved_message_tests(self.store)["new_test_commands"],0)
+        finally:
+            engine._telegram_socket_call=orig
+
     def test_missing_private_telegram_never_creates_tasks(self):
         saved=engine.TELEGRAM_SOCKET
         try:
