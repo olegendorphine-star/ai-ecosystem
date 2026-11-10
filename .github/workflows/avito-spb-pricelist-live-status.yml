@@ -1,4 +1,4 @@
-name: Avito SPb PriceList — safe live status verification
+name: Avito four-city SEO — post-autoload read-only verification
 on:
   pull_request:
     paths:
@@ -10,7 +10,7 @@ on:
     paths:
       - '.github/workflows/avito-spb-pricelist-live-status.yml'
   schedule:
-    - cron: '23 08 * * *'
+    - cron: '23 12 * * *'
   workflow_dispatch:
     inputs:
       approve_readonly:
