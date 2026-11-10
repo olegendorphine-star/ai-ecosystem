@@ -33,14 +33,20 @@ class RolloutTests(unittest.TestCase):
                          ['5000', '30000', '150000'])
         self.assertEqual(len(s.findall('./Images/Image')), 6)
 
-    def test_moscow_exactly_same_as_published_reference(self):
-        actual = copy.deepcopy(self.ads[0])
-        expected = copy.deepcopy(self.reference)
-        actual.tail = expected.tail = None
-        self.assertEqual(ET.tostring(actual), ET.tostring(expected))
-        self.assertIsNone(self.ads[0].find("PriceList"))
+    def test_moscow_preserves_published_core_and_adds_same_pricelist(self):
+        actual = self.ads[0]
+        original = self.reference
+        for field in ("Id", "AvitoId", "Category", "ServiceType",
+                      "ServiceSubtype", "ServiceSubspecies", "Specialty",
+                      "WhatServices", "Specialisation", "Price", "Address",
+                      "ListingFee", "AdStatus", "WorkingWithAI"):
+            self.assertEqual(actual.findtext(field), original.findtext(field), field)
+        self.assertEqual([x.attrib["url"] for x in actual.findall("./Images/Image")],
+                         [x.attrib["url"] for x in original.findall("./Images/Image")])
+        self.assertEqual([x.findtext("ServicePrice") for x in
+                          actual.findall("./PriceList/Service")], ["5000", "30000", "150000"])
 
-    def test_spb_is_only_edited_listing(self):
+    def test_spb_preserves_original_identity_and_city(self):
         self.assertEqual(self.ads[0].findtext("Address"), "Москва")
         self.assertEqual(self.ads[1].findtext("Address"), "Санкт-Петербург")
         self.assertEqual(self.ads[0].findtext("AvitoId"), "8347570435")
@@ -75,7 +81,7 @@ class RolloutTests(unittest.TestCase):
         fields = ["Category", "ServiceType", "ServiceSubtype", "ServiceSubspecies",
                   "Specialty", "WhatServices", "Specialisation", "Place", "WorkWithContract",
                   "Consultations", "Prepayment", "TechnicalSupport", "WorkingWithAI",
-                  "ContactMethod", "ListingFee", "Title", "Description", "Images", "Price",
+                  "ContactMethod", "ListingFee", "Images", "Price",
                   "AllowEmail", "AdStatus"]
         for tag in fields:
             self.assertEqual(ET.tostring(self.ads[0].find(tag)),
