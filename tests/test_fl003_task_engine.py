@@ -20,10 +20,31 @@ class TaskEngineTests(unittest.TestCase):
         self.assertEqual(len(self.store.pending()),1)
     def test_invalid_kind_rejected(self):
         with self.assertRaises(ValueError):self.store.enqueue("x_xx","send_mail")
-    def test_offline_shop_waits_for_human(self):
+    def test_offline_shop_returns_nonblocking_partial_report(self):
         self.store.enqueue("fixture_shop_002","shop_m185")
         result=engine.execute_tasks(self.store,offline=True)
-        self.assertEqual(result,[{"kind":"shop_m185","state":"waiting_human"}])
+        self.assertEqual(result,[{"kind":"shop_m185","state":"partial_report_ready"}])
+    def test_recent_yandex_fallback_never_invents_verified_price(self):
+        import json,datetime as dt
+        evidence=Path(self.t.name)/"latest.json"
+        checked=dt.datetime.now(dt.timezone.utc).isoformat()
+        payload={
+            "schema":"fl003.autonomous.marketplace.report.v1",
+            "searched_utc":checked,
+            "candidate_counts":{"Ozon":8,"Avito":3},
+            "marketplaces":[
+                {"marketplace":"Ozon","candidates":[{"url":"https://www.ozon.ru/product/logitech-m185-7231898/"}]},
+                {"marketplace":"Avito","candidates":[{"url":"https://www.avito.ru/ufa/tovary_dlya_kompyutera/logitech_m185_7203258990"}]},
+            ]}
+        evidence.write_text(json.dumps(payload,ensure_ascii=False),encoding="utf8")
+        os.chmod(evidence,0o600)
+        result=engine.read_recent_autonomous_index(evidence)
+        self.assertEqual(result["source"],"Yandex Search API index")
+        self.assertEqual(result["candidate_counts"],{"Ozon":8,"Avito":3})
+        self.assertFalse(result["full_comparison_verified"])
+        self.assertFalse(result["requires_owner_captcha"])
+        self.assertTrue(all(p["price_rub"] is None for p in result["products"]))
+
     def test_mail_docx_produces_unsent_draft(self):
         self.store.enqueue("fixture_mail_001","mail_test")
         result=engine.execute_tasks(self.store,offline=True)
