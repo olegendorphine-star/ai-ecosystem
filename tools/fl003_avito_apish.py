@@ -32,6 +32,25 @@ def allowed(url):
     except ValueError:
         return False
 
+def parse_reviews_count(seller):
+    """Provider's documented field is reviews_text, e.g. '3 930 отзывов'."""
+    if not isinstance(seller,dict):
+        return None
+    direct=seller.get("reviews")
+    if type(direct) is int and 0<=direct<=10_000_000:
+        return direct
+    value=seller.get("reviews_text")
+    if not isinstance(value,str) or len(value)>100:
+        return None
+    found=re.search(r"(\\d[\\d\\s\\u00a0\\u202f]{0,16})\\s+отзыв",value,re.I)
+    if not found:
+        return None
+    try:
+        n=int(re.sub(r"\\s","",found.group(1)))
+        return n if 0<=n<=10_000_000 else None
+    except ValueError:
+        return None
+
 def parse_response(data, now=None):
     now=now or dt.datetime.now(dt.timezone.utc)
     if not isinstance(data,dict) or data.get("success") is False:
@@ -63,9 +82,10 @@ def parse_response(data, now=None):
             "source":"API.SH","fetched_at_utc":when,
             "actual_avito_page_verified":False,
             "condition":str(item.get("params") or "")[:200],
+            "condition_new_confirmed":bool(re.search(r"\\b(новый|новая|новое|new)\\b",str(item.get("params") or ""),re.I)),
             "seller_name":str(seller.get("name") or "")[:80] or None,
             "seller_rating":seller.get("rating") if type(seller.get("rating")) in (float,int) else None,
-            "seller_reviews":seller.get("reviews") if type(seller.get("reviews")) is int else None,
+            "seller_reviews":parse_reviews_count(seller),
             "delivery":item.get("delivery") if type(item.get("delivery")) is bool else None,
         })
     return result
@@ -97,6 +117,9 @@ def main():
         assert report["listings"][0]["price_rub"]==690
         assert report["listings"][0]["price_status"]=="provider_fresh"
         assert report["live_avito_page_verified"] is False
+        assert parse_reviews_count({"reviews_text":"3 930 отзывов"}) == 3930
+        assert parse_reviews_count({"reviews_text":"отзывы неизвестны"}) is None
+        assert parse_reviews_count({"reviews_text":"15 отзывов"}) == 15
         print(json.dumps({"selftest":True,"schema":SCHEMA}))
         return
     key=os.environ.get("FL003_APISH_KEY","")
