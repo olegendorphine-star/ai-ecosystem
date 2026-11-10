@@ -37,6 +37,23 @@ try:
         };
       });
     }""")
+
+    node=p.locator('a.admn').nth(2)
+    if "AI-агенты" in node.evaluate("(e)=>e.parentElement?.parentElement?.innerText||''"):
+     node.click(timeout=9000)
+     p.wait_for_timeout(500)
+     out["modal"]=p.evaluate("""()=>{
+       const visible=e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0;
+       const fields=Array.from(document.querySelectorAll('input,textarea,select')).filter(visible)
+          .filter(x=>!['hidden','password','file'].includes(x.type||'')).slice(-32)
+          .map(x=>({tag:x.tagName,name:x.name||'',id:x.id||'',type:x.type||'',placeholder:(x.placeholder||'').slice(0,90),
+             valueLength:String(x.value||'').length,valueStarts:String(x.value||'').slice(0,60)}));
+       const controls=Array.from(document.querySelectorAll('button,a,input[type=submit]')).filter(visible)
+          .map(e=>({tag:e.tagName,text:(e.innerText||e.value||'').trim().slice(0,65),type:e.getAttribute('type')||''}))
+          .filter(x=>/сохран|отмена|закры|измен|ключев|примен/i.test(x.text)).slice(-22);
+       const forms=Array.from(document.forms).filter(visible).map(e=>({method:e.method,fields:Array.from(e.querySelectorAll('input,textarea')).map(x=>x.name).slice(0,18)})).slice(-8);
+       return {fields,controls,forms,dialogText:Array.from(document.querySelectorAll('[role=dialog],.modal,.b-shadow,.b-popup')).filter(visible).map(x=>(x.innerText||'').replace(/\\s+/g,' ').slice(0,330)).slice(-3)};
+     }""")
 finally:
  b.close()
  print(json.dumps(out,ensure_ascii=False,sort_keys=True))
