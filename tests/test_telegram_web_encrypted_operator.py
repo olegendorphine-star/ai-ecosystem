@@ -320,6 +320,30 @@ class UsernameReadIsolation(unittest.TestCase):
         self.assertEqual(result["status"], "chat_transition_not_confirmed")
         page.evaluate_handle.return_value.dispose.assert_called_once()
 
+    def test_delayed_history_appears_after_first_empty_render(self):
+        page = mock.Mock()
+        reads = [[], [{"message_id": 76, "incoming": True,
+                        "text": "Reply after load", "has_media": False}]]
+        def evaluate(script, arg=None):
+            if "resolveUsername" in script:
+                return {"status": "ok", "peer_id": 222}
+            if "?? null" in script:
+                return 111
+            if "getUser(peer)" in script:
+                return True
+            if script == web.MESSAGES_JS:
+                return reads.pop(0)
+            return True
+        page.evaluate.side_effect = evaluate
+        with mock.patch.object(web, "wait_for_chat_dom_transition", return_value=True):
+            result = web.read_verified_username_chat(
+                page, command("web_username_read",
+                              {"username": "@ExampleUser", "limit": 5}))
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["messages"][0]["incoming"])
+        self.assertEqual(result["messages"][0]["text"], "Reply after load")
+        page.evaluate_handle.return_value.dispose.assert_called_once()
+
     def test_valid_username_reads_only_after_verified_transition(self):
         page = mock.Mock()
         def evaluate(script, arg=None):
