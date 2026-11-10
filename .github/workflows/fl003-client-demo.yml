@@ -34,7 +34,7 @@ jobs:
 
   vps_live_public_read:
     # Owner's own in-repo branch; no VPS secrets for forks.
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && vars.FL003_ALLOW_PAID_SEARCH == 'true' && github.event.pull_request.head.repo.full_name == github.repository
     needs: offline
     runs-on: ubuntu-latest
     timeout-minutes: 7
