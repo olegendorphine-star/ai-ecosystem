@@ -48,3 +48,5 @@ jobs:
           print("FL_FREE_JOBS_CANDIDATES",len(d["candidates"]))
           for x in d["details"]:print("FL_FREE_JOB_DETAIL",json.dumps(x,ensure_ascii=False))
           '
+
+# Owner-requested one-time read-only refresh: free AI jobs, 2026-11-10.
