@@ -36,7 +36,7 @@ def extract_indexed_price(snippet):
             hits.append(value)
     return hits[0] if len(hits)==1 else None
 
-def build_report(data):
+def build_report(data, apish=None):
     if not isinstance(data,dict) or data.get("schema")!="fl003.yandex.search.index.v1":
         raise ValueError("not_a_yandex_fl003_search_report")
     if len(data.get("marketplaces",[])) != 2:
@@ -105,6 +105,29 @@ def build_report(data):
             "source_checked_utc":data["checked_utc"],
             "candidates":candidates[:8],
         })
+    # Optional independent Avito provider is useful only when its source
+    # explicitly reports a fresh, uncached fetch; never present it as
+    # directly browser-verified.
+    avito_provider_offers=[]
+    if isinstance(apish,dict) and apish.get("schema")=="fl003.avito.provider.search.v1" and apish.get("status")=="completed":
+        fresh=apish.get("provider_recent_uncached") is True
+        from fl003_yandex_marketplace_search import is_product_card
+        for c in (apish.get("listings") or [])[:20]:
+            if (isinstance(c,dict) and
+                is_product_card(c.get("url",""),"Avito",c.get("title","")) and
+                type(c.get("price_rub")) in (int,float) and
+                100<=c["price_rub"]<=20000):
+                avito_provider_offers.append({
+                    "url":c["url"],"title":c.get("title"),
+                    "price_rub":c["price_rub"],
+                    "price_status":"provider_recent_not_site_verified" if fresh else "provider_stale_or_cached",
+                    "source":"API.SH Avito public listing API",
+                    "source_fetched_at":apish.get("fetched_at_utc"),
+                    "seller_name":c.get("seller_name"),
+                    "seller_rating":c.get("seller_rating"),
+                    "seller_reviews":c.get("seller_reviews"),
+                    "seller_data_directly_verified":False,
+                    "live_site_verified":False})
     indexed = [
         {"marketplace":group["marketplace"],"url":c["url"],
          "price_rub":c["indexed_price_rub"],"verified":False}
@@ -134,6 +157,10 @@ def build_report(data):
         "candidate_counts":all_counts,
         "indexed_price_examples":indexed[:8],
         "verified_current_prices":0,
+        "provider_recent_avito_prices":sum(
+            a["price_status"]=="provider_recent_not_site_verified"
+            for a in avito_provider_offers),
+        "avito_provider_offers":avito_provider_offers,
         "marketplace_comparison_ready":False,
         "next_action":"search_other_approved_sources_or_report_limit",
         "requires_owner_captcha":False,
@@ -179,6 +206,7 @@ def safe_write(path, obj):
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--search-json")
+    p.add_argument("--apish-json",default="")
     p.add_argument("--out")
     p.add_argument("--notify-own-telegram",action="store_true")
     p.add_argument("--selftest",action="store_true")
@@ -194,7 +222,8 @@ def main():
     if not args.search_json:
         raise SystemExit("missing_search_json")
     data=json.loads(Path(args.search_json).read_text(encoding="utf8"))
-    result=build_report(data)
+    provider=json.loads(Path(args.apish_json).read_text(encoding="utf8")) if args.apish_json else None
+    result=build_report(data,provider)
     if args.notify_own_telegram:
         try:
             from fl003_task_engine import _telegram_socket_call
@@ -221,6 +250,7 @@ def main():
         "counts":result["candidate_counts"],
         "indexed_prices_found":len(result["indexed_price_examples"]),
         "verified_prices":0,
+        "provider_recent_avito_prices":result["provider_recent_avito_prices"],
         "mail_fixture_attachments":result["mail"]["attachments"],
         "telegram_delivery":result["telegram"]["delivery_status"],
         "client_demo_accepted":False,
