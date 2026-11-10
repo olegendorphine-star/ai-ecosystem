@@ -1,0 +1,52 @@
+name: FL - encrypted private inbox read-only snapshot
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-private-inbox-readonly-20261110.yml'
+permissions:
+  contents: read
+jobs:
+  inbox_private:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate read-only source and one-time public certificate
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_inbox_readonly_private_20261110.py
+          openssl x509 -in tools/fl_private_inbox_one_time_pub_20261110.pem -noout
+      - name: Create pinned SSH context
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Read saved owner inbox and release encrypted result only
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          data="$(cat tools/fl_inbox_readonly_private_20261110.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          test -n "$data"
+          encrypted="$(printf '%s' "$data" | \
+            openssl cms -encrypt -aes-256-cbc -recip tools/fl_private_inbox_one_time_pub_20261110.pem -outform DER | base64 -w0)"
+          test -n "$encrypted"
+          printf 'FL_PRIVATE_INBOX_CMS_BASE64=%s\n' "$encrypted"
+          echo 'FL_PRIVATE_INBOX_ENCRYPTED_ONLY'
