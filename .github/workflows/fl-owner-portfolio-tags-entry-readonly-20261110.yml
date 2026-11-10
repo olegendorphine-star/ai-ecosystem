@@ -44,3 +44,5 @@ jobs:
           for x in d["sections"]: print("FL_SECTION_EDIT",json.dumps(x,ensure_ascii=False))
           print("FL_EDIT_MODAL",json.dumps(d.get("modal",{}),ensure_ascii=False))
           '
+
+# Owner asked for tag editor mapping; one more read-only preflight.
