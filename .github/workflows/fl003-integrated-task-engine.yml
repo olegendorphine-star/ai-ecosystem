@@ -24,7 +24,8 @@ jobs:
       - name: Test engine, mail DOCX, marketplace gates
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/fl003_client_demo.py tools/fl003_task_engine.py
+          python3 -m py_compile tools/fl003_client_demo.py tools/fl003_task_engine.py tools/fl003_telegram_selftest.py
+          python3 tools/fl003_telegram_selftest.py
           python3 -m unittest discover -s tests -p 'test_fl003_client_demo.py' -v
           python3 -m unittest discover -s tests -p 'test_fl003_task_engine.py' -v
 
@@ -54,12 +55,29 @@ jobs:
           PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
         run: |
           set -euo pipefail
-          for script in fl003_client_demo.py fl003_task_engine.py; do
+          for script in fl003_client_demo.py fl003_task_engine.py fl003_telegram_selftest.py; do
             test -f "tools/$script"
             cat "tools/$script" | ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
               "install -d -m 700 ~/.fl003-demo/app && umask 077 && cat > ~/.fl003-demo/app/$script && chmod 600 ~/.fl003-demo/app/$script"
           done
           echo SERVER_TASK_ENGINE_DEPLOYED
+      - name: Send exactly two at-most-once test markers to owner's own Saved Messages
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+             '"$HOME/.avito-agent/venv/bin/python" "$HOME/.fl003-demo/app/fl003_telegram_selftest.py" --run-once' > "$RUNNER_TEMP/fl003-self-test.json"
+          python3 - "$RUNNER_TEMP/fl003-self-test.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding='utf8'))
+          assert d['schema']=='fl003.telegram.selftest.v1'
+          print("FL003_SAVED_MESSAGES_SELFTEST_STATUS",d['status'])
+          for i in d.get('results',[]):
+            print("FL003_SAVED_MESSAGES_MARKER",i['kind'],i['status'])
+          PY
       - name: Run integrated real server test with only own Saved Messages intake
         env:
           HOST: ${{ secrets.AVITO_SERVER_HOST }}
