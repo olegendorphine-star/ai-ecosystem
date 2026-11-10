@@ -117,6 +117,13 @@ def build_report(data):
                       "price_rub":None}
                       for g in products]}
     reply=draft_reply(mail,shop)
+    # In this autonomous mode the user is never asked to solve site challenges.
+    # The shared legacy draft template references a manual browser; replace only
+    # that advice with a truthful autonomous fallback statement.
+    legacy="Для завершения нужна разрешённая проверка карточек в браузере; при запросе сайта — ручное участие владельца."
+    replacement="Система зафиксировала ограничение доступа площадок. Ручная капча не требуется: продолжим искать доступные разрешённые источники, а непроверенные сведения не будем выдавать за актуальные."
+    if legacy in reply.get("text",""):
+        reply["text"]=reply["text"].replace(legacy,replacement)
     report={
         "schema":SCHEMA,
         "generated_utc":dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
