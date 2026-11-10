@@ -13,6 +13,8 @@ import hashlib
 import io
 import json
 import os
+import zipfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email import policy
 from email.message import EmailMessage
@@ -34,6 +36,42 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def create_synthetic_docx() -> bytes:
+    """Real minimal Office Open XML package; synthetic, no personal data."""
+    paragraphs = ["Заявка на закупку оборудования",
+                  "Модель: Logitech M185",
+                  "Количество: 2 шт.",
+                  "Срок поставки: 7 календарных дней",
+                  "Нужна гарантия и возможность возврата."]
+    xml_body="".join("<w:p><w:r><w:t>"+p+"</w:t></w:r></w:p>" for p in paragraphs)
+    xml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+xml_body+"</w:body></w:document>"
+    data=io.BytesIO()
+    with zipfile.ZipFile(data,"w",compression=zipfile.ZIP_DEFLATED) as docx:
+        docx.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+        docx.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml" Id="rId1"/></Relationships>')
+        docx.writestr("word/document.xml", xml)
+    return data.getvalue()
+
+
+def extract_docx_summary(data: bytes) -> str:
+    if len(data)>2_000_000:
+        raise ValueError("docx_payload_too_large")
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        names=z.namelist()
+        if len(names)>70 or "word/document.xml" not in names:
+            raise ValueError("docx_invalid_package")
+        member=z.getinfo("word/document.xml")
+        if member.file_size>200_000:
+            raise ValueError("docx_uncompressed_too_large")
+        root=ET.fromstring(z.read("word/document.xml"))
+    ns={"w":"http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    paragraphs=[]
+    for p in root.findall(".//w:p",ns)[:40]:
+        txt="".join((t.text or "") for t in p.findall(".//w:t",ns)).strip()
+        if txt: paragraphs.append(txt)
+    return "\n".join(paragraphs)[:3200]
+
+
 def create_synthetic_mail() -> bytes:
     """Create a non-personal .eml with a real CSV attachment in memory."""
     msg = EmailMessage()
@@ -48,6 +86,7 @@ def create_synthetic_mail() -> bytes:
     )
     spec = "модель;интерфейс;количество;лимит_за_шт_руб\nLogitech M185;USB-приёмник;2;2000\n"
     msg.add_attachment(spec.encode("utf-8"), maintype="text", subtype="csv", filename="requirements.csv")
+    msg.add_attachment(create_synthetic_docx(), maintype="application", subtype="vnd.openxmlformats-officedocument.wordprocessingml.document", filename="brief.docx")
     return msg.as_bytes(policy=policy.default)
 
 
@@ -59,10 +98,17 @@ def parse_mail(raw: bytes) -> dict:
     attachments = []
     for part in msg.iter_attachments():
         fname = part.get_filename() or "unnamed"
+        payload = part.get_payload(decode=True) or b""
+        if fname.lower().endswith(".docx"):
+            try:
+                summary=extract_docx_summary(payload)
+                attachments.append({"file":fname,"status":"parsed_docx" if summary else "empty_docx","summary":summary})
+            except (ValueError, zipfile.BadZipFile, ET.ParseError, KeyError):
+                attachments.append({"file":fname,"status":"invalid_docx"})
+            continue
         if not fname.lower().endswith(".csv"):
             attachments.append({"file": fname, "status": "unsupported_file_type"})
             continue
-        payload = part.get_payload(decode=True) or b""
         if len(payload) > 100_000:
             attachments.append({"file": fname, "status": "too_large"})
             continue
@@ -211,6 +257,9 @@ def draft_reply(mail: dict, shop: dict) -> dict:
     if reqs:
         r = reqs[0]
         lines.append(f"Требуется: {r['quantity']} шт., {r['interface']}, бюджет до {r['cap_per_item_rub']} ₽ за штуку.")
+    for a in mail["attachments"]:
+        if a.get("status")=="parsed_docx":
+            lines.append("Из файла "+a["file"]+" дополнительно извлечено: "+a["summary"].replace("\n","; ")[:500])
     verified = [p for p in shop["products"] if p.get("status") == "verified_price_and_card"]
     if len(verified) >= 2:
         lines.append("Проверенные на момент просмотра предложения:")
