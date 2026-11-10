@@ -1,4 +1,4 @@
-name: FL - encrypted private inbox read-only snapshot
+name: FL - encrypted private inbox read-only latest message
 on:
   push:
     branches: [main]
