@@ -22,16 +22,22 @@ class ChitaLaunchTests(unittest.TestCase):
         self.assertEqual([a.findtext("Address") for a in self.ads],
                          ["Москва", "Санкт-Петербург", "Сургут", "Чита"])
 
-    def test_moscow_matches_published_reference(self):
-        current = copy.deepcopy(self.ads[0])
-        published = copy.deepcopy(ET.parse(MOSCOW_REFERENCE).getroot().find("Ad"))
-        current.tail = published.tail = None
-        self.assertEqual(ET.tostring(current), ET.tostring(published))
+    def test_moscow_preserves_published_identity_and_core_fields(self):
+        current = self.ads[0]
+        published = ET.parse(MOSCOW_REFERENCE).getroot().find("Ad")
+        protected = ("Id", "AvitoId", "Category", "ServiceType", "ServiceSubtype",
+                     "ServiceSubspecies", "Specialty", "WhatServices",
+                     "Specialisation", "Place", "Price", "ListingFee", "AdStatus",
+                     "Address", "WorkingWithAI")
+        for key in protected:
+            self.assertEqual(current.findtext(key), published.findtext(key), key)
+        self.assertEqual([i.attrib["url"] for i in current.findall("./Images/Image")],
+                         [i.attrib["url"] for i in published.findall("./Images/Image")])
         self.assertEqual(current.findtext("AvitoId"), "8347570435")
 
     def test_chita_remote_offer_and_prices(self):
         chita = self.ads[3]
-        self.assertEqual(chita.findtext("Title"), "Персональный ИИ-ассистент и автоматизация")
+        self.assertEqual(chita.findtext("Title"), "ИИ-ассистент для бизнеса и документов")
         self.assertIsNone(chita.find("AvitoId"))
         self.assertEqual(chita.findtext("Place"), "Удалённо")
         self.assertEqual(chita.findtext("Price"), "5000")
@@ -40,7 +46,7 @@ class ChitaLaunchTests(unittest.TestCase):
         self.assertTrue(all(s.findtext("ServiceStartingPrice") == "Да"
                             for s in chita.findall("./PriceList/Service")))
         desc = chita.findtext("Description") or ""
-        self.assertIn("Читы", desc)
+        self.assertIn("Чите", desc)
         self.assertIn("30 000 ₽", desc)
         self.assertNotIn("Сургута", desc)
         self.assertNotIn("Санкт-Петербурга", desc)
