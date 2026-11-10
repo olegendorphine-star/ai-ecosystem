@@ -27,6 +27,23 @@ class ClientDemoTests(unittest.TestCase):
         self.assertEqual(d["structured_requirements"][0]["cap_per_item_rub"], 2000)
         self.assertFalse(d["mail_sent"])
         self.assertFalse(d["mailbox_accessed"])
+    def test_actual_gmail_received_mime_with_two_attachments(self):
+        # Message was sent to Gmail and read back by connector before
+        # privacy-sanitizing From/To/Message-ID for this public test repo.
+        raw=(Path(__file__).resolve().parent/"fixtures"/
+             "fl003_gmail_real_message_sanitized.eml").read_bytes()
+        mail=parse_mail(raw)
+        self.assertEqual(len(mail["attachments"]),2)
+        self.assertEqual({a["status"] for a in mail["attachments"]},
+                         {"parsed","parsed_docx"})
+        row=mail["structured_requirements"][0]
+        self.assertEqual(row["model"],"Logitech M185")
+        self.assertEqual(row["quantity"],2)
+        self.assertEqual(row["cap_per_item_rub"],2000)
+        self.assertEqual(row["interface"],"USB receiver")
+        self.assertEqual(row["delivery_days"],7)
+        self.assertFalse(mail["mail_sent"])
+
     def test_unknown_price_is_never_invented(self):
         mail = parse_mail(create_synthetic_mail())
         reply = draft_reply(mail, {"products": [{"marketplace": "Ozon", "source_url": "https://www.ozon.ru/product/example/", "status": "site_access_or_human_login_required", "price_rub": None}]})
