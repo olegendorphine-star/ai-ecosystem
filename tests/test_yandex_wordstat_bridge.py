@@ -69,6 +69,15 @@ class WordstatBridgeTests(unittest.TestCase):
             self.assertFalse(result["billable"])
             self.assertIn("getRegionsTree", api.call_args.args[0])
 
+    def test_free_regions_without_folder_id(self):
+        with patch.object(w, "request_json", return_value={
+            "regions": [{"id": "225", "label": "Россия"}]
+        }) as api:
+            result = w.call_wordstat({"action": "regions"}, "fake-key", "", False)
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["root_regions"][0]["name"], "Россия")
+            self.assertEqual(api.call_args.args[2], {})
+
     def test_mock_top(self):
         cmd = {"action": "top", "phrase": "ИИ собеседник",
                "region": "225", "device": "DEVICE_ALL"}
