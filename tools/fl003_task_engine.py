@@ -72,6 +72,14 @@ class Store:
             self.conn.execute("UPDATE tasks SET state=?,result_json=? WHERE source_key=? AND state='queued'",
                 (state,json.dumps(result,ensure_ascii=False),key))
 
+    def requeue_waiting_shopping(self):
+        """Resume only after a fresh independently captured owner-browser comparison."""
+        if read_verified_products() is None:
+            return 0
+        with self.conn:
+            cur=self.conn.execute("UPDATE tasks SET state='queued' WHERE kind='shop_m185' AND state='waiting_human'")
+        return cur.rowcount
+
     def summary(self):
         rows=self.conn.execute("SELECT kind,state,count(*) FROM tasks GROUP BY kind,state").fetchall()
         return [{"kind":k,"state":s,"count":n} for k,s,n in rows]
@@ -206,6 +214,7 @@ def main():
     p.add_argument("--fixture",action="store_true",help="Two test commands; never reads Telegram")
     p.add_argument("--telegram-read",action="store_true",help="Read ONLY explicit markers in Saved Messages")
     p.add_argument("--offline",action="store_true",help="No browser network")
+    p.add_argument("--resume",action="store_true",help="Resume gated shopping after owner-solved site challenge")
     args=p.parse_args()
     prepare_storage()
     store=Store()
@@ -217,9 +226,10 @@ def main():
         telegram={"status":"not_requested"}
         if args.telegram_read:
             telegram=read_saved_message_tests(store)
+        resumed=store.requeue_waiting_shopping() if args.resume and not args.offline else 0
         completed=execute_tasks(store,offline=args.offline)
         print(json.dumps({"schema":DOC_VERSION,"transport":"VPS","telegram":telegram,
-                          "executed":completed,"summary":store.summary(),
+                          "resumed_after_human":resumed,"executed":completed,"summary":store.summary(),
                           "external_messages_sent":0,"mail_sent":False,
                           "purchase_performed":False},ensure_ascii=False,sort_keys=True))
     finally:
