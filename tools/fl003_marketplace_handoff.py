@@ -6,7 +6,7 @@ mouse/keyboard actions use an isolated Chromium session (no FL/Telegram cookies)
 No automatic CAPTCHA solving, buying, messaging, login, or credential logging.
 """
 from __future__ import annotations
-import hmac, json, os, re, secrets, signal, subprocess, sys, time
+import hmac, json, os, re, secrets, signal, sqlite3, subprocess, sys, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -27,7 +27,7 @@ PAGE = '''<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewp
 <h2>Демо FL-003 · серверный браузер</h2>
 <p><small>Доступ только к двум публичным карточкам Ozon/Авито. Браузер расположен на VPS. Ни вход в другие аккаунты, ни покупки, ни сообщения недоступны. Если маркетплейс требует проверку, пройдите её самостоятельно, без автоматического обхода.</small></p>
 <div id="status">Проверка доступа…</div>
-<button onclick="go('ozon')">Открыть Ozon</button><button onclick="go('avito')">Открыть Авито</button><button onclick="read()">Проверить карточку</button><button onclick="refresh()">Обновить экран</button>
+<button onclick="go('ozon')">Открыть Ozon</button><button onclick="go('avito')">Открыть Авито</button><button onclick="read()">Проверить карточку</button><button onclick="tasks()">Статус задач</button><button onclick="refresh()">Обновить экран</button>
 <img id="screen" alt="Изображение текущей страницы удалённого браузера" onclick="clickScreen(event)">
 <div><button onclick="key('Tab')">Tab</button><button onclick="key('Enter')">Enter</button><button onclick="key('Space')">Пробел</button><button onclick="key('Backspace')">⌫</button></div>
 <div id="evidence"></div><p><small>Экран доступен только в течение ограниченной сессии. Данные вне двух разрешённых сайтов вводить нельзя. При блокировке сообщите результат: это честная граница текущей инфраструктуры.</small></p>
@@ -40,6 +40,7 @@ async function go(which){await req('act',{op:'go',which});await refresh()}
 async function clickScreen(e){if(!ready)return;let r=e.target.getBoundingClientRect(),x=Math.round((e.clientX-r.left)/r.width*1200),y=Math.round((e.clientY-r.top)/r.height*820);const v=await req('act',{op:'click',x,y});if(v.evidence)document.getElementById('evidence').textContent=JSON.stringify(v.evidence);setTimeout(refresh,400)}
 async function key(k){const v=await req('act',{op:'key',key:k});if(v.evidence)document.getElementById('evidence').textContent=JSON.stringify(v.evidence);await refresh()}
 async function read(){const r=await req('act',{op:'inspect'});if(r.ok)document.getElementById('evidence').textContent='Проверка: '+JSON.stringify(r.evidence);await refresh()}
+async function tasks(){const r=await fetch('/api/tasks',{credentials:'same-origin'});const d=await r.json();document.getElementById('evidence').textContent='Задачи: '+JSON.stringify(d);}
 claim();
 </script></html>'''
 
@@ -182,6 +183,15 @@ class Handler(BaseHTTPRequestHandler):
         if self.path=='/':
             out=PAGE.encode('utf8');self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(out)));self.end_headers();self.wfile.write(out);return
         if not self.ok():return self.reply(403,{'ok':False,'error':'not_authorized'})
+        if self.path=='/api/tasks':
+            db=Path.home()/'.fl003-demo'/'state'/'tasks.sqlite3'
+            if db.is_symlink() or not db.is_file():return self.reply(200,{'status':'no_tasks'})
+            try:
+                with sqlite3.connect('file:'+str(db)+'?mode=ro',uri=True,timeout=2) as conn:
+                    rows=conn.execute("SELECT kind,state,COUNT(*) FROM tasks GROUP BY kind,state").fetchall()
+                return self.reply(200,{'status':'ok','tasks':[{'kind':k,'state':st,'count':n} for k,st,n in rows[:20]]})
+            except (OSError,sqlite3.Error):
+                return self.reply(200,{'status':'read_unavailable'})
         if self.path=='/api/status':
             return self.reply(200,{'ok':True,'page':s.page.url if s.url_ok() else 'restricted','minutes':max(0,int((s.deadline-time.monotonic())/60)),'csrf':s.csrf})
         if self.path.startswith('/shot'):
