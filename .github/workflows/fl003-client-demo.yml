@@ -5,6 +5,7 @@ on:
     paths:
       - 'tools/fl003_client_demo.py'
       - 'tools/fl003_screencast.py'
+      - 'tools/fl003_customer_acceptance.py'
       - 'tools/fl003_render_panels.py'
       - 'tests/fixtures/fl003_gmail_real_message_sanitized.eml'
       - 'tools/fl003_yandex_marketplace_search.py'
@@ -26,7 +27,8 @@ jobs:
       - name: Test synthetic email, attachment and fail-closed shopping
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/fl003_client_demo.py tools/fl003_screencast.py tools/fl003_render_panels.py tools/fl003_yandex_marketplace_search.py
+          python3 -m py_compile tools/fl003_client_demo.py tools/fl003_screencast.py tools/fl003_render_panels.py tools/fl003_yandex_marketplace_search.py tools/fl003_customer_acceptance.py
+          python3 tools/fl003_customer_acceptance.py --selftest
           python3 -m unittest discover -s tests -p 'test_fl003_client_demo.py' -v
           python3 tools/fl003_client_demo.py --offline
 
@@ -152,9 +154,25 @@ jobs:
           tar -xzf "$RUNNER_TEMP/fl003-output.tgz" -C "$RUNNER_TEMP/fl003-recording"
           test -s "$RUNNER_TEMP/fl003-recording/fl003-actual-vps-browser.webm"
           cp "$RUNNER_TEMP/fl003-yandex-index.json" "$RUNNER_TEMP/fl003-recording/yandex-search-index.json"
+      - name: Strict customer acceptance — reject blocked 403/429 or missing capabilities
+        run: |
+          set -euo pipefail
+          python3 tools/fl003_customer_acceptance.py \
+            --input "$RUNNER_TEMP/fl003-recording/report.json" \
+            --out "$RUNNER_TEMP/fl003-recording/CUSTOMER_ACCEPTANCE.json"
+          python3 - "$RUNNER_TEMP/fl003-recording/CUSTOMER_ACCEPTANCE.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding='utf8'))
+          assert d['schema']=='fl003.customer.acceptance.v1'
+          assert d['messages_sent_by_validator']==0
+          if not d['customer_deliverable_ready']:
+              print("FL003_DELIVERABLE_REJECTED_NOT_FOR_CUSTOMER",d['blocking_reasons'])
+          else:
+              print("FL003_DELIVERABLE_READY_FOR_HUMAN_VISUAL_QA_NOT_AUTO_SENT")
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: fl003-real-vps-browser-screencast
+          name: fl003-INTERNAL-diagnostic-browser-evidence-NOT-CLIENT-DEMO
           path: ${{ runner.temp }}/fl003-recording/
           retention-days: 7
           if-no-files-found: error
