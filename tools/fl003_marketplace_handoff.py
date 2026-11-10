@@ -6,7 +6,7 @@ mouse/keyboard actions use an isolated Chromium session (no FL/Telegram cookies)
 No automatic CAPTCHA solving, buying, messaging, login, or credential logging.
 """
 from __future__ import annotations
-import hmac, json, os, re, secrets, signal, sys, time
+import hmac, json, os, re, secrets, signal, subprocess, sys, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -69,6 +69,7 @@ class State:
         if not self.url_ok():self.page.goto('about:blank')
         self.last={}
         self.verified={}
+        self.resumed_once=False
         path=ROOT/'handoff_token'
         fd=os.open(path,os.O_CREAT|os.O_WRONLY|os.O_TRUNC,0o600)
         with os.fdopen(fd,'w') as f:f.write(self.secret)
@@ -141,7 +142,21 @@ class State:
                 fd=os.open(target,flags,0o600)
                 with os.fdopen(fd,'w',encoding='utf-8') as stream:
                     json.dump(payload,stream,ensure_ascii=False,indent=2)
-                self.last={**verified,'both_prices_verified':len(self.verified)==2}
+                if len(self.verified)==2 and not self.resumed_once:
+                    self.resumed_once=True
+                    runner=Path.home()/'.fl003-demo'/'app'/'fl003_task_engine.py'
+                    if runner.is_file() and not runner.is_symlink():
+                        try:
+                            subprocess.Popen([sys.executable,str(runner),'--resume'],
+                                             cwd=str(runner.parent),
+                                             stdin=subprocess.DEVNULL,
+                                             stdout=subprocess.DEVNULL,
+                                             stderr=subprocess.DEVNULL,
+                                             start_new_session=True)
+                        except OSError:
+                            pass
+                self.last={**verified,'both_prices_verified':len(self.verified)==2,
+                           'server_task_resume_requested':self.resumed_once}
                 return self.last
             self.last={'status':'visible_page_price_not_verified','title':title,'url':self.page.url}
             return self.last
