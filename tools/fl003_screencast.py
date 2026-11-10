@@ -16,6 +16,7 @@ from playwright.sync_api import sync_playwright
 from fl003_client_demo import (
     CARD_SOURCES, create_synthetic_mail, parse_mail, inspect_card, draft_reply
 )
+from fl003_yandex_marketplace_search import is_product_card
 
 def render(title, content, accent="#74b6ff"):
     return ("""<!doctype html><html lang="ru"><meta charset="utf-8">
@@ -33,21 +34,53 @@ def render(title, content, accent="#74b6ff"):
 def text(s):
     return html.escape(str(s))
 
+def load_search_evidence(path):
+    """Read pre-fetched Yandex Search API evidence; never treat index data as live."""
+    if not path:
+        return None, CARD_SOURCES
+    raw=json.loads(Path(path).read_text(encoding="utf8"))
+    if raw.get("schema") != "fl003.yandex.search.index.v1":
+        raise ValueError("unsupported_yandex_evidence")
+    chosen=[]
+    counts={}
+    for marketplace in ("Ozon","Avito"):
+        match=next((m for m in raw.get("marketplaces",[])
+                    if m.get("marketplace")==marketplace),None)
+        if not match or match.get("status")!="found":
+            raise ValueError("yandex_search_missing_marketplace_"+marketplace.lower())
+        safe=[c for c in match.get("candidates",[])
+              if c.get("source_type")=="yandex_search_index"
+              and c.get("live_price_verified") is False
+              and is_product_card(c.get("url",""),marketplace,c.get("title",""))]
+        if not safe:
+            raise ValueError("yandex_candidates_not_verified_as_links_"+marketplace.lower())
+        counts[marketplace]=len(safe)
+        chosen.append({"marketplace":marketplace,"url":safe[0]["url"],"expected":"m185"})
+    evidence={"source":"Yandex Search API v2","checked_utc":raw.get("checked_utc"),
+              "filtered_candidate_counts":counts,
+              "search_index_only":True,"prices_verified_by_search":False,
+              "chosen_urls":[x["url"] for x in chosen]}
+    return evidence, tuple(chosen)
+
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--output-dir",required=True)
+    p.add_argument("--search-json",default="")
     args=p.parse_args()
     out=Path(args.output_dir).expanduser()
     if out.is_symlink():raise SystemExit("unsafe_output_symlink")
     out.mkdir(mode=0o700,parents=True,exist_ok=True)
     os.chmod(out,0o700)
+    search_evidence,sources=load_search_evidence(args.search_json)
     when=datetime.now(timezone.utc).isoformat(timespec="seconds")
     report={"schema":"fl003.real.vps.screencast.v1",
             "checked_utc":when,"runtime":"isolated VPS Chromium / Playwright",
             "browser_on_vps":True,"recording_is_real_browser_session":True,
             "mail_source":"SYNTHETIC .eml with actual CSV + DOCX file bytes",
             "mailbox_connected":False,"kimi_api_called":False,
-            "external_messages_sent":0,"purchases":0,"products":[]}
+            "external_messages_sent":0,"purchases":0,"products":[],
+            "search_evidence":search_evidence}
     with sync_playwright() as pw:
         browser=pw.chromium.launch(headless=True,args=["--no-sandbox"])
         ctx=browser.new_context(locale="ru-RU",timezone_id="Europe/Moscow",
@@ -61,7 +94,18 @@ def main():
             "<p class='small'>Каждый сайт открывается непосредственно из браузера сервера. "
             "Цены не подставляются из примеров. Если сайт ограничит доступ — это будет видно на записи.</p>"))
         page.wait_for_timeout(3000)
-        for src in CARD_SOURCES:
+        if search_evidence:
+            names=search_evidence["filtered_candidate_counts"]
+            summary=("<p>Yandex Search API: Ozon — "+str(names["Ozon"])+
+                     " карточек; Авито — "+str(names["Avito"])+" объявлений.</p>")
+            summary+=("<p class='small'>Время индексного поиска: "+
+                      text(search_evidence["checked_utc"])+"</p>")
+            summary+="<p class='bad'>Ссылки найдены в поиске. Текущие цены и наличие НЕ подтверждены.</p>"
+            summary+="<p class='small'>Первый Ozon: "+text(sources[0]["url"])+
+                     "</p><p class='small'>Первый Авито: "+text(sources[1]["url"])+"</p>"
+            page.set_content(render("Поиск Яндекса · действительные результаты API",summary))
+            page.wait_for_timeout(4500)
+        for src in sources:
             page.set_content(render("Переход на "+text(src["marketplace"]),
                 "<p>Открываем реальную страницу по адресу:</p><p class='small'>"+text(src["url"])+"</p>"))
             page.wait_for_timeout(1300)
@@ -121,6 +165,8 @@ def main():
     print(json.dumps({"schema":report["schema"],"video":str(out/"fl003-actual-vps-browser.webm"),
        "verified":report["verified_marketplace_cards"],
        "mail_attachments":report["mail"]["attachment_statuses"],
+       "yandex_search_included":bool(search_evidence),
+       "yandex_candidates":search_evidence["filtered_candidate_counts"] if search_evidence else None,
        "full_client_demo_ready":report["full_client_demo_ready"],
        "external_messages_sent":0},ensure_ascii=False))
 if __name__=="__main__":main()
