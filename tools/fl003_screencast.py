@@ -101,8 +101,8 @@ def main():
             summary+=("<p class='small'>Время индексного поиска: "+
                       text(search_evidence["checked_utc"])+"</p>")
             summary+="<p class='bad'>Ссылки найдены в поиске. Текущие цены и наличие НЕ подтверждены.</p>"
-            summary+="<p class='small'>Первый Ozon: "+text(sources[0]["url"])+
-                     "</p><p class='small'>Первый Авито: "+text(sources[1]["url"])+"</p>"
+            summary+=("<p class='small'>Первый Ozon: "+text(sources[0]["url"])+
+                      "</p><p class='small'>Первый Авито: "+text(sources[1]["url"])+"</p>")
             page.set_content(render("Поиск Яндекса · действительные результаты API",summary))
             page.wait_for_timeout(4500)
         for src in sources:
