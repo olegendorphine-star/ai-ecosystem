@@ -38,3 +38,5 @@ jobs:
             -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" \
             'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
           printf '%s\n' "$result" | python3 -c 'import sys,json;d=json.load(sys.stdin);assert d["schema"]=="fl.owner.works.edit.preflight.v1" and d["owner"] and d["writes"] is False;print("FL_WORKS_EDIT_PREFLIGHT",json.dumps(d,ensure_ascii=False))'
+
+# Owner-requested 2026-11-10 read-only reassessment before any edit.
