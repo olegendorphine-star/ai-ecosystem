@@ -22,7 +22,7 @@ def run():
     if not isinstance(att,dict):att={}
     print("FH_PROFILE_ATTRIBUTE_KEYS",json.dumps(sorted(att.keys()),ensure_ascii=False))
     # Do not print attribute values or name/login/email. Summarize only completeness.
-    for name in ("headline","title","about","bio","description","description_html","skills","specializations","categories","portfolio","status","is_verified","verified","profile_completed","is_active"):
+    for name in ("first_name","last_name","avatar","location","cv","cv_html","headline","title","about","bio","description","description_html","skills","specializations","categories","portfolio","snippet_count","status","verification","is_verified","verified","profile_completed","is_active"):
         if name not in att:continue
         v=att[name]
         if isinstance(v,str):vstate="filled" if v.strip() else "empty"
