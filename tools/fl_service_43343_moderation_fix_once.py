@@ -123,6 +123,13 @@ def main():
                 return fail("target_title_not_found")
             if REMOVE not in text:
                 return fail("obsolete_description_absent_no_blind_write")
+            tab=page.get_by_text("Управление услугой",exact=True)
+            if tab.count()!=1:
+                return fail("manage_tab_unavailable")
+            tab.click(timeout=6500)
+            page.wait_for_timeout(500)
+            if "#ui-textarea-description-input" not in page.content():
+                return fail("manage_editor_did_not_open")
             fields={
                 "title":unique("#ui-input-example-name-input",page),
                 "desc":unique("#ui-textarea-description-input",page),
