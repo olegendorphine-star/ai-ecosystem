@@ -1,7 +1,7 @@
 name: FL-003 autonomous report (no human CAPTCHA)
 on:
   pull_request:
-    paths: ['tools/fl003_autonomous_index_report.py', '.github/workflows/fl003-autonomous-marketplace.yml']
+    paths: ['tools/fl003_autonomous_index_report.py', 'tools/fl003_avito_apish.py', '.github/workflows/fl003-autonomous-marketplace.yml']
 permissions:
   contents: read
 concurrency:
@@ -19,7 +19,8 @@ jobs:
       - name: Offline test automated report, ZIP/DOCX and URL validation
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/fl003_autonomous_index_report.py tools/fl003_yandex_marketplace_search.py tools/fl003_client_demo.py tools/fl003_task_engine.py
+          python3 -m py_compile tools/fl003_avito_apish.py tools/fl003_autonomous_index_report.py tools/fl003_yandex_marketplace_search.py tools/fl003_client_demo.py tools/fl003_task_engine.py
+          python3 tools/fl003_avito_apish.py --selftest
           python3 tools/fl003_autonomous_index_report.py --selftest
           PYTHONPATH=tools python3 - <<'PY'
           from fl003_autonomous_index_report import build_report,owner_note
@@ -38,6 +39,15 @@ jobs:
           assert r['candidate_counts']=={'Ozon':1,'Avito':1}
           assert r['indexed_price_examples'][0]['price_rub']==799
           assert r['verified_current_prices']==0
+          apish={'schema':'fl003.avito.provider.search.v1','status':'completed',
+                 'provider_recent_uncached':True,'fetched_at_utc':'2026-11-11T00:00:00Z',
+                 'listings':[{'title':'Logitech M185','url':'https://www.avito.ru/ufa/tovary_dlya_kompyutera/mysh_logitech_m185_7203258990',
+                              'price_rub':690,'seller_name':'тест','seller_rating':4.9,
+                              'seller_reviews':12}]}
+          enriched=build_report(sample,apish)
+          assert enriched['provider_recent_avito_prices']==1
+          assert enriched['avito_provider_offers'][0]['price_rub']==690
+          assert enriched['verified_current_prices']==0
           assert r['requires_owner_captcha'] is False
           assert 'ручное участие владельца' not in r['draft_reply']['text']
           assert 'Ручная капча не требуется' in r['draft_reply']['text']
@@ -59,6 +69,20 @@ jobs:
           assert d['schema']=='fl003.yandex.search.index.v1'
           print('YANDEX_COUNTS',[(m['marketplace'],m['status'],len(m['candidates'])) for m in d['marketplaces']])
           PY
+      - name: Optional Avito provider (disabled until approved free credits/key)
+        env:
+          FL003_APISH_KEY: ${{ secrets.FL003_APISH_KEY }}
+          FL003_APISH_ENABLED: ${{ vars.FL003_APISH_ENABLED }}
+        run: |
+          set -euo pipefail
+          python3 tools/fl003_avito_apish.py --out "$RUNNER_TEMP/fl003-avito-provider.json"
+          python3 - "$RUNNER_TEMP/fl003-avito-provider.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding="utf8"))
+          assert d["schema"]=="fl003.avito.provider.search.v1"
+          assert d.get("outbound_requests",0)<=1
+          print("AVITO_PROVIDER_STATUS",d["status"])
+          PY
       - name: Prepare pinned SSH
         env:
           KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
@@ -79,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh_opts=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}")
-          tar -czf - tools/fl003_autonomous_index_report.py tools/fl003_yandex_marketplace_search.py tools/fl003_client_demo.py tools/fl003_task_engine.py -C "$RUNNER_TEMP" fl003-source.json | \
+          tar -czf - tools/fl003_autonomous_index_report.py tools/fl003_yandex_marketplace_search.py tools/fl003_client_demo.py tools/fl003_task_engine.py -C "$RUNNER_TEMP" fl003-source.json fl003-avito-provider.json | \
             ssh "${ssh_opts[@]}" "$USER@$HOST" 'install -d -m 700 "$HOME/.fl003-autonomous"; umask 077; tar -xzf - -C "$HOME/.fl003-autonomous"'
           ssh "${ssh_opts[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-summary.json"
           set -euo pipefail
@@ -87,6 +111,7 @@ jobs:
           install -d -m 700 "$base/reports"
           "$HOME/.avito-agent/venv/bin/python" "$base/tools/fl003_autonomous_index_report.py" \
             --search-json "$base/fl003-source.json" \
+            --apish-json "$base/fl003-avito-provider.json" \
             --out "$base/reports/$FL003_RUN_ID.json" --notify-own-telegram
           REMOTE
           python3 - "$RUNNER_TEMP/fl003-summary.json" <<'PY'
