@@ -57,7 +57,7 @@ jobs:
           for script in fl003_client_demo.py fl003_task_engine.py; do
             test -f "tools/$script"
             cat "tools/$script" | ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
-              "install -d -m 700 \"\\DOLLARHOME/.fl003-demo/app\" && umask 077 && cat > \"\\DOLLARHOME/.fl003-demo/app/$script\" && chmod 600 \"\\DOLLARHOME/.fl003-demo/app/$script\""
+              "install -d -m 700 ~/.fl003-demo/app && umask 077 && cat > ~/.fl003-demo/app/$script && chmod 600 ~/.fl003-demo/app/$script"
           done
           echo SERVER_TASK_ENGINE_DEPLOYED
       - name: Run integrated real server test with only own Saved Messages intake
