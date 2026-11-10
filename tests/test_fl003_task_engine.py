@@ -36,6 +36,24 @@ class TaskEngineTests(unittest.TestCase):
         p.write_text('{"schema":"fl003.marketplace.manual.evidence.v2","products":{"Ozon":{"price_rub":100}}}')
         os.chmod(p,0o600)
         self.assertIsNone(engine.read_verified_products(p))
+    def test_only_owner_self_notifications_and_no_resend(self):
+        self.assertTrue(self.store.enqueue("tg_mail_synthetic_test","mail_test"))
+        engine.execute_tasks(self.store,offline=True)
+        previous=engine._telegram_socket_call
+        outgoing=[]
+        try:
+            engine._telegram_socket_call=lambda command:(outgoing.append(command) or {"status":"sent_confirmed"})
+            a=engine.notify_own_saved_messages(self.store)
+            b=engine.notify_own_saved_messages(self.store)
+            self.assertEqual(a["attempted"],1)
+            self.assertEqual(b["attempted"],0)
+            self.assertEqual(len(outgoing),1)
+            self.assertEqual(outgoing[0]["action"],"web_self_note")
+            self.assertNotIn("https://",outgoing[0]["params"]["text"])
+            self.assertIn("Ничего не отправлено",outgoing[0]["params"]["text"])
+        finally:
+            engine._telegram_socket_call=previous
+
     def test_private_saved_messages_intake_ignores_unrelated_content(self):
         orig=engine._telegram_socket_call
         try:
