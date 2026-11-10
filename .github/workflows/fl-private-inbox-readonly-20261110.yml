@@ -1,4 +1,4 @@
-name: FL - encrypted private inbox read-only latest message
+name: FL - encrypted private inbox read-only latest message compact
 on:
   push:
     branches: [main]
