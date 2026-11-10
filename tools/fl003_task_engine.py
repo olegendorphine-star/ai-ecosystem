@@ -121,7 +121,7 @@ def read_saved_message_tests(store:Store)->dict:
     try:
         data=_telegram_socket_call({"action":"web_self_read","params":{"limit":12}})
         if data.get("status")!="ok" or data.get("saved_messages_only") is not True:
-            return {**state,"status":"self_read_unavailable","safe_reason":str(data.get("status") or "invalid")[:80]}
+            return {**state,"status":"self_read_unavailable","safe_reason":(str(data.get("status") or "invalid")+":"+str(data.get("exception_class") or "none"))[:100]}
         state["saved_dialog_verified"]=True
         for msg in data.get("messages",[]):
             marker=msg.get("text","").strip().upper()
