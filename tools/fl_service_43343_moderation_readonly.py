@@ -99,6 +99,33 @@ try:
                                           .map(b=>({disabled:b.disabled,visible:b.getBoundingClientRect().width>0})),
                                 pageUrl:location.href
                             })""")
+
+                            try:
+                                first=out["wizard_fields"]["fields"]
+                                if (first[0]["value"]==TARGET_TITLE and
+                                    "согласуем дополнительно" in first[1]["value"] and
+                                    "Отклонена" in page.locator("body").inner_text()[:1800]):
+                                    progress=[]
+                                    for step in ("pricing","category","cover"):
+                                        btn=page.get_by_role("button",name="Продолжить",exact=True)
+                                        if btn.count()!=1 or not btn.is_enabled():
+                                            progress.append({"step":step,"state":"continue_unavailable"})
+                                            break
+                                        btn.click(timeout=7000)
+                                        page.wait_for_timeout(500)
+                                        preview=page.evaluate("""() => ({
+                                            price:document.querySelector('#ui-input-price')?.value||null,
+                                            days:document.querySelector('#ui-input-days')?.value||null,
+                                            visibleButtons:[...document.querySelectorAll('button')]
+                                              .filter(x=>x.getBoundingClientRect().width>0&&x.getBoundingClientRect().height>0)
+                                              .map(x=>(x.innerText||'').trim()).filter(Boolean).slice(-14),
+                                            bodyTail:(document.body?.innerText||'').slice(-900),
+                                            categoryPresent:(document.body?.innerText||'').includes('AI-автоматизация')
+                                        })""")
+                                        progress.append({"step":step,**preview})
+                                    out["wizard_preflight_steps"]=progress
+                            except Exception as e:
+                                out["wizard_preflight_error"]=type(e).__name__
                             out["management_ui"]=page.evaluate("""() => {
                                 const els=[...document.querySelectorAll('*')]
                                   .filter(e=>e.childElementCount<2&&(e.innerText||'').trim()==='Управление услугой').slice(0,3);
