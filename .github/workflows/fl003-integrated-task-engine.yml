@@ -155,19 +155,21 @@ jobs:
           test -f "$root/browser/telegram_resident_daemon.py"
           tgt1="$root/app/tools/telegram_owner_operator.py"
           tgt2="$root/browser/telegram_web_encrypted_operator.py"
+          tgt3="$root/app/tools/telegram_web_encrypted_operator.py"
           src1="$stage/telegram_owner_operator.py"
           src2="$stage/telegram_web_encrypted_operator.py"
-          test -f "$tgt1" && test -f "$tgt2" && test -f "$src1" && test -f "$src2"
+          test -f "$tgt1" && test -f "$tgt2" && test -f "$tgt3" && test -f "$src1" && test -f "$src2"
           "$root/bin/telegram-python" -m py_compile "$src1" "$src2" "$stage/fl003_task_engine.py"
           install -m 600 "$stage/fl003_task_engine.py" "$app/fl003_task_engine.py"
           install -m 600 "$stage/fl003_client_demo.py" "$app/fl003_client_demo.py"
-          if ! cmp -s "$src1" "$tgt1" || ! cmp -s "$src2" "$tgt2"; then
+          if ! cmp -s "$src1" "$tgt1" || ! cmp -s "$src2" "$tgt2" || ! cmp -s "$src2" "$tgt3"; then
             if ! command -v git >/dev/null 2>&1; then
               echo TG_FL003_BLOCKED_NO_GIT_HASH_VALIDATION
               exit 1
             fi
             current1="$(git hash-object "$tgt1")"
             current2="$(git hash-object "$tgt2")"
+            current3="$(git hash-object "$tgt3")"
             case "$current1" in
               95144e7324f9e873915a673783e78808306baa8f|837d931c7d74438dbcad1ad84ee200661211c3e0) ;;
               *) echo TG_FL003_BLOCKED_UNEXPECTED_OWNER_OPERATOR; exit 1 ;;
@@ -176,12 +178,17 @@ jobs:
               e6eeca2888ae23258bb0aed0e55a37d398012e3e|e2ccf4bf1d903fc7b9d3d7d28e1a895a77ba99a9) ;;
               *) echo TG_FL003_BLOCKED_UNEXPECTED_WEB_OPERATOR; exit 1 ;;
             esac
+            case "$current3" in
+              e6eeca2888ae23258bb0aed0e55a37d398012e3e|e2ccf4bf1d903fc7b9d3d7d28e1a895a77ba99a9) ;;
+              *) echo TG_FL003_BLOCKED_UNEXPECTED_APP_WEB_OPERATOR; exit 1 ;;
+            esac
           fi
-          if cmp -s "$src1" "$tgt1" && cmp -s "$src2" "$tgt2"; then
+          if cmp -s "$src1" "$tgt1" && cmp -s "$src2" "$tgt2" && cmp -s "$src2" "$tgt3"; then
             echo TG_FL003_CANARY_ALREADY_INSTALLED
           else
             cp -p "$tgt1" "$backup/telegram_owner_operator.pre-fl003.py"
             cp -p "$tgt2" "$backup/telegram_web_encrypted_operator.pre-fl003.py"
+            cp -p "$tgt3" "$backup/telegram_app_web_encrypted_operator.pre-fl003.py"
             is_systemd=0
             if systemctl --user is-active --quiet telegram-resident.service 2>/dev/null; then
               is_systemd=1
@@ -191,8 +198,10 @@ jobs:
             fi
             install -m 600 "$src1" "$tgt1.new"
             install -m 600 "$src2" "$tgt2.new"
+            install -m 600 "$src2" "$tgt3.new"
             mv -f "$tgt1.new" "$tgt1"
             mv -f "$tgt2.new" "$tgt2"
+            mv -f "$tgt3.new" "$tgt3"
             start_resident() {
               if [ "$is_systemd" -eq 1 ]; then
                 systemctl --user start telegram-resident.service
@@ -217,6 +226,7 @@ jobs:
               "$root/bin/telegram-python" "$root/browser/telegram_resident_daemon.py" stop >/dev/null 2>&1 || true
               cp -p "$backup/telegram_owner_operator.pre-fl003.py" "$tgt1"
               cp -p "$backup/telegram_web_encrypted_operator.pre-fl003.py" "$tgt2"
+              cp -p "$backup/telegram_app_web_encrypted_operator.pre-fl003.py" "$tgt3"
               start_resident
               exit 1
             fi
