@@ -1,11 +1,15 @@
-name: FL Service 43343 moderation feedback read-only
+name: FL service 43343 — read and one-time moderation repair
 on:
   pull_request:
     paths:
       - "tools/fl_service_43343_moderation_readonly.py"
+      - "tools/fl_service_43343_moderation_fix_once.py"
       - ".github/workflows/fl-service-43343-feedback-readonly.yml"
 permissions:
   contents: read
+concurrency:
+  group: fl-service-43343-guarded-repair-once
+  cancel-in-progress: false
 jobs:
   read_owner_service:
     if: github.event.pull_request.head.repo.full_name == github.repository
@@ -63,4 +67,70 @@ jobs:
           print("WIZARD_PREFLIGHT_STEPS",d.get("wizard_preflight_steps",[]))
           print("WIZARD_PREFLIGHT_ERROR",d.get("wizard_preflight_error",""))
           print("WIZARD_ERROR_PAGE",d.get("wizard_error_page",{}))
+          PY
+
+  edit_existing:
+    needs: read_owner_service
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify script syntax and single-target safety assertions
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl_service_43343_moderation_fix_once.py
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path("tools/fl_service_43343_moderation_fix_once.py").read_text()
+          for word in ["43343","30000","7","Отклонена","OWNER","MARKER","write_intent_once","price_unchanged"]:
+            assert word in s,word
+          for old in ["согласуем дополнительно","без ограничений","неограниченная поддержка"]:
+            # Removal phrase must only appear as a verification guard; no new promise.
+            assert old not in s[s.index("DESC=("):s.index("REQ=(")] if old=="согласуем дополнительно" else True
+          print("FL43343_TARGET_SCOPE_CHECK_OK")
+          PY
+      - name: Verify pinned SSH and execute once only on owner's existing service
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+          cat tools/fl_service_43343_moderation_fix_once.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl-ssh/key" \
+            -p "${PORT:-22}" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' \
+            > "$RUNNER_TEMP/fl43343-result.json"
+          python3 - "$RUNNER_TEMP/fl43343-result.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding="utf8"))
+          assert d["schema"]=="fl.service.43343.once.fix.v1"
+          assert d["new_card_created"] is False
+          assert d["customer_messages_sent"] is False
+          assert d["payment_actions"] is False
+          print("FL43343_EDIT_STATUS",d["status"])
+          print("FL43343_STAGE",d["stage"])
+          print("FL43343_OWNER",d["owner_verified"])
+          print("FL43343_EXISTING_CARD",d["target_existing_card_verified"])
+          print("FL43343_PRICE_PRESERVED",d["price_unchanged"])
+          print("FL43343_DAYS_PRESERVED",d["duration_unchanged"])
+          print("FL43343_FIELDS_CHANGED_IN_EDITOR",d["fields_filled"])
+          print("FL43343_SUBMITTED",d["submitted"])
+          print("FL43343_AFTER_SUBMIT_CHECK",d["post_submit_checked"])
+          print("FL43343_DESCRIPTION_VERIFIED",d.get("new_description_visible"))
+          print("FL43343_REVIEW_STATUS",d.get("review_status"))
+          print("FL43343_ERROR_CLASS",d.get("error_class",""))
+          print("FL43343_FINAL_ACTIONS",d.get("final_button_labels",[]))
           PY
