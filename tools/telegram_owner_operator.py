@@ -25,7 +25,7 @@ LEDGER = ROOT / "state" / "outbound.sqlite3"
 ALLOWED = frozenset({"status", "dialogs", "read", "reply",
                      "web_status", "web_dialogs", "web_read", "web_reply",
                      "web_self_note", "web_phone_message", "web_username_message",
-                     "web_chat_message", "web_owner_contact_link"})
+                     "web_chat_message", "web_owner_contact_link", "web_username_read"})
 MAX_TEXT = 3500
 
 
@@ -70,6 +70,7 @@ def validate(command: dict) -> dict:
         "reply": {"chat_id", "reply_to_id", "text", "approved_by_owner"},
         "web_status": set(), "web_dialogs": {"limit"},
         "web_read": {"peer_id", "limit"},
+        "web_username_read": {"username", "limit"},
         "web_reply": {"peer_id", "reply_to_id", "text", "approved_by_owner"},
         "web_self_note": {"text", "approved_by_owner"},
         "web_phone_message": {"phone", "text", "approved_by_owner"},
@@ -88,7 +89,7 @@ def validate(command: dict) -> dict:
             not -(2**63) < params["chat_id"] < 2**63 or
             params["chat_id"] == 0):
             raise Rejected("invalid chat id")
-    if action in {"read", "web_read"}:
+    if action in {"read", "web_read", "web_username_read"}:
         cap = 20 if action == "read" else 12
         if type(params.get("limit", 10)) is not int or not 1 <= params.get("limit", 10) <= cap:
             raise Rejected("invalid message limit")
@@ -96,6 +97,11 @@ def validate(command: dict) -> dict:
         peer_id = params.get("peer_id")
         if type(peer_id) is not int or not -(2**53) < peer_id < 2**53 or peer_id == 0:
             raise Rejected("invalid web peer id")
+    if action == "web_username_read":
+        username = params.get("username")
+        if (type(username) is not str or
+                not __import__("re").fullmatch(r"@?[A-Za-z][A-Za-z0-9_]{4,31}", username)):
+            raise Rejected("read requires one exact public username")
     if action == "web_phone_message":
         phone, msg = params.get("phone"), params.get("text")
         if (type(phone) is not str or
