@@ -111,9 +111,10 @@ def main():
             "Обход CAPTCHA не выполнялся. ПК владельца не использовался.</p>"))
         page.wait_for_timeout(4300)
         page.close()
+        # Save while the Playwright driver/context is still alive.
+        video.save_as(str(out/"fl003-actual-vps-browser.webm"))
         ctx.close()
         browser.close()
-        video.save_as(str(out/"fl003-actual-vps-browser.webm"))
     report_path=out/"report.json"
     with report_path.open("w",encoding="utf8") as f:
         json.dump(report,f,ensure_ascii=False,indent=2)
