@@ -71,7 +71,8 @@ def classify(shop,title,body,http_status=None):
         result["price_rub"]=prices[0]
         result["price_method"]="public_visible_retailer_price_block"
         # Stock/delivery is tied to the product's own CTA, not recommended tiles.
-        next_segment=body[m.end():m.end()+800].lower()
+        raw_segment=body[m.end():m.end()+800]
+        next_segment=raw_segment.lower()
         if "нет в наличии" in next_segment or "товар закончился" in next_segment:
             result["availability"]="out_of_stock"
             result["status"]="not_available"
@@ -82,7 +83,7 @@ def classify(shop,title,body,http_status=None):
             result["status"]="availability_not_verified"
             return result
         result["availability"]="order_button_with_delivery_hint"
-        seller=re.search(r"(ООО\s*[«\"].{3,75}?[»\"])",next_segment,flags=re.I)
+        seller=re.search(r"(ООО\s*[«\"].{3,75}?[»\"])",raw_segment,flags=re.I)
         if seller:
             result["seller"]=seller.group(1)
         # Delivery date and price may vary by ZIP / region or account.
