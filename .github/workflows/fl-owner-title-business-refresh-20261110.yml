@@ -1,0 +1,58 @@
+name: FL - owner business headline refresh 20261110
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fl_owner_title_business_refresh_20261110.py'
+      - '.github/workflows/fl-owner-title-business-refresh-20261110.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fl-owner-title-business-refresh-20261110
+  cancel-in-progress: false
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 -m py_compile tools/fl_owner_title_business_refresh_20261110.py
+      - name: Prepare pinned SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Save owner's business headline, no paid actions
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_owner_title_business_refresh_20261110.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c '
+          import sys,json
+          d=json.load(sys.stdin)
+          assert d["schema"]=="fl.owner.business.title.refresh.v1"
+          for k in ("paid","messages","other_fields_changed","security_changed"):assert d[k] is False
+          print("FL_TITLE_OWNER",d["owner"])
+          print("FL_TITLE_STATUS",d["status"])
+          print("FL_TITLE_CLICKED",d["clicked"])
+          print("FL_TITLE_READBACK",d["readback"])
+          assert d["owner"] and d["readback"]
+          '
