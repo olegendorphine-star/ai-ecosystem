@@ -230,7 +230,9 @@ def main():
             raise ValueError("unsafe_mail_input")
         mail_raw=mail_file.read_bytes()
     result=build_report(data,provider,mail_raw)
-    if args.notify_own_telegram:
+    if args.notify_own_telegram and os.getenv("FL003_ALLOW_SELF_NOTIFICATIONS")!="1":
+        result["telegram"]["delivery_status"]="blocked_no_explicit_send_permission"
+    elif args.notify_own_telegram:
         try:
             from fl003_task_engine import _telegram_socket_call
             outcome=_telegram_socket_call({
