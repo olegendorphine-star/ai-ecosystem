@@ -111,7 +111,6 @@ def build_report(data, apish=None):
     avito_provider_offers=[]
     if isinstance(apish,dict) and apish.get("schema")=="fl003.avito.provider.search.v1" and apish.get("status")=="completed":
         fresh=apish.get("provider_recent_uncached") is True
-        from fl003_yandex_marketplace_search import is_product_card
         for c in (apish.get("listings") or [])[:20]:
             if (isinstance(c,dict) and
                 is_product_card(c.get("url",""),"Avito",c.get("title","")) and
