@@ -52,6 +52,13 @@ jobs:
           assert 'ручное участие владельца' not in r['draft_reply']['text']
           assert 'Ручная капча не требуется' in r['draft_reply']['text']
           assert len(r['mail']['attachments'])==2
+          from pathlib import Path
+          raw=(Path('tests/fixtures')/'fl003_gmail_real_message_sanitized.eml').read_bytes()
+          real=build_report(sample,apish,raw)
+          assert real['mail']['source']=='gmail_received_privacy_sanitized_relay'
+          assert real['mail']['requirements'][0]['delivery_days']==7
+          assert {a['status'] for a in real['mail']['attachments']}=={'parsed','parsed_docx'}
+          assert real['mailbox_connected'] is False
           assert len(owner_note(r))<=300
           print('FL003_AUTONOMOUS_OFFLINE_TESTS_OK')
           PY
@@ -103,7 +110,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh_opts=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}")
-          tar -czf - tools/fl003_autonomous_index_report.py tools/fl003_yandex_marketplace_search.py tools/fl003_client_demo.py tools/fl003_task_engine.py -C "$RUNNER_TEMP" fl003-source.json fl003-avito-provider.json | \
+          tar -czf - tools/fl003_autonomous_index_report.py tools/fl003_yandex_marketplace_search.py tools/fl003_client_demo.py tools/fl003_task_engine.py tests/fixtures/fl003_gmail_real_message_sanitized.eml -C "$RUNNER_TEMP" fl003-source.json fl003-avito-provider.json | \
             ssh "${ssh_opts[@]}" "$USER@$HOST" 'install -d -m 700 "$HOME/.fl003-autonomous"; umask 077; tar -xzf - -C "$HOME/.fl003-autonomous"'
           ssh "${ssh_opts[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-summary.json"
           set -euo pipefail
@@ -112,6 +119,7 @@ jobs:
           "$HOME/.avito-agent/venv/bin/python" "$base/tools/fl003_autonomous_index_report.py" \
             --search-json "$base/fl003-source.json" \
             --apish-json "$base/fl003-avito-provider.json" \
+            --mail-eml "$base/tests/fixtures/fl003_gmail_real_message_sanitized.eml" \
             --out "$base/reports/$FL003_RUN_ID.json" --notify-own-telegram
           REMOTE
           python3 - "$RUNNER_TEMP/fl003-summary.json" <<'PY'
@@ -134,6 +142,8 @@ jobs:
           assert d['external_messages_sent']==0 and d['purchases']==0
           assert d['mailbox_connected'] is False and d['kimi_api_called'] is False
           assert d['mail']['draft_status']=='created_not_sent'
+          assert d['mail']['source']=='gmail_received_privacy_sanitized_relay'
+          assert {a['status'] for a in d['mail']['attachments']}=={'parsed','parsed_docx'}
           print('AUTONOMOUS_REPORT_EVIDENCE_OK')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
