@@ -50,6 +50,7 @@ jobs:
           print("SERVICE_REVIEW_CONTEXT",d["review_excerpt"])
           print("SERVICE_EDITOR_OPENED",d["edit_page_opened"])
           print("SERVICE_MODERATOR_MESSAGE",d["moderation_excerpt"])
+          print("SERVICE_PAGE_TOP",d["editor_excerpt"])
           print("SERVICE_CURRENT_DESCRIPTION",d["current_description"])
           print("SERVICE_LINKS",d["service_links"] if "service_links" in d else [])
           PY
