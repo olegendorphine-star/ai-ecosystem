@@ -209,6 +209,12 @@ def main():
             result["telegram"]["delivery_status"]="not_confirmed"
     if args.out:
         safe_write(args.out,result)
+        # Keep the most recent autonomous discovery as a bounded local data source
+        # for the pre-existing Telegram task engine. Never write outside the
+        # caller-selected private report directory.
+        latest=Path(args.out).expanduser().parent/"latest.json"
+        if latest != Path(args.out).expanduser():
+            safe_write(latest,result)
     print(json.dumps({
         "schema":SCHEMA,
         "status":"finished_with_source_limitations",
