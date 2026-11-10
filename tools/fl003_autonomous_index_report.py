@@ -36,7 +36,7 @@ def extract_indexed_price(snippet):
             hits.append(value)
     return hits[0] if len(hits)==1 else None
 
-def build_report(data, apish=None):
+def build_report(data, apish=None, mail_raw=None):
     if not isinstance(data,dict) or data.get("schema")!="fl003.yandex.search.index.v1":
         raise ValueError("not_a_yandex_fl003_search_report")
     if len(data.get("marketplaces",[])) != 2:
@@ -47,7 +47,7 @@ def build_report(data, apish=None):
             raise ValueError
     except (ValueError,KeyError,AttributeError):
         raise ValueError("invalid_search_timestamp")
-    mail=parse_mail(create_synthetic_mail())
+    mail=parse_mail(mail_raw if mail_raw is not None else create_synthetic_mail())
     if len(mail["structured_requirements"])<1 or not all(
         x.get("status") in ("parsed","parsed_docx")
         for x in mail["attachments"]
@@ -164,7 +164,7 @@ def build_report(data, apish=None):
         "next_action":"search_other_approved_sources_or_report_limit",
         "requires_owner_captcha":False,
         "mail":{
-            "source":"synthetic_MIME_fixture_not_real_mailbox",
+            "source":"gmail_received_privacy_sanitized_relay" if mail_raw is not None else "synthetic_MIME_fixture_not_real_mailbox",
             "subject":mail["subject"],
             "attachments":[{"filename":a["file"],"status":a["status"]}
                            for a in mail["attachments"]],
@@ -206,6 +206,7 @@ def main():
     p=argparse.ArgumentParser()
     p.add_argument("--search-json")
     p.add_argument("--apish-json",default="")
+    p.add_argument("--mail-eml",default="")
     p.add_argument("--out")
     p.add_argument("--notify-own-telegram",action="store_true")
     p.add_argument("--selftest",action="store_true")
@@ -222,7 +223,13 @@ def main():
         raise SystemExit("missing_search_json")
     data=json.loads(Path(args.search_json).read_text(encoding="utf8"))
     provider=json.loads(Path(args.apish_json).read_text(encoding="utf8")) if args.apish_json else None
-    result=build_report(data,provider)
+    mail_raw=None
+    if args.mail_eml:
+        mail_file=Path(args.mail_eml)
+        if mail_file.is_symlink() or mail_file.stat().st_size>1_000_000:
+            raise ValueError("unsafe_mail_input")
+        mail_raw=mail_file.read_bytes()
+    result=build_report(data,provider,mail_raw)
     if args.notify_own_telegram:
         try:
             from fl003_task_engine import _telegram_socket_call
