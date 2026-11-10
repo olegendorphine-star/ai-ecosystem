@@ -1,11 +1,6 @@
 name: FL-003 Telegram self-read canary — controlled private deploy
 on:
-  pull_request:
-    paths:
-      - 'tools/telegram_owner_operator.py'
-      - 'tools/telegram_web_encrypted_operator.py'
-      - 'tools/fl003_task_engine.py'
-      - '.github/workflows/fl003-telegram-selfread-canary.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
