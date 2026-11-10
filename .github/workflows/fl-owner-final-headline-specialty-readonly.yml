@@ -45,3 +45,5 @@ jobs:
           print("FL_FINAL_DISPLAY_NAME",d["name_set"],d["surname_set"])
           for k in ("specializations","portfolio_sections","profile"):print("FL_FINAL_SPECIALTY_VIEW",k,json.dumps(d.get(k,{}),ensure_ascii=False))
           '
+
+# One-time owner-triggered independent verification of revised title, 2026-11-10.
