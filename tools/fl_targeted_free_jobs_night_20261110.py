@@ -16,7 +16,9 @@ JOBS={
  "5528587":"https://www.fl.ru/projects/5528587/razrabotchik-dlya-razvrtyivaniya-ai-platformyi.html",
  "5528547":"https://www.fl.ru/projects/5528547/sozdat-ii-agenta.html",
  "5528632":"https://www.fl.ru/projects/5528632/integratsiya-zakazyi-iz-avito-i-vk-v-telegram.html",
- "5528119":"https://www.fl.ru/projects/5528119/razrabotka-veb-servisa-s-ii-assistentom-na-yandex-ai-studio.html"
+ "5528119":"https://www.fl.ru/projects/5528119/razrabotka-veb-servisa-s-ii-assistentom-na-yandex-ai-studio.html",
+ "5528645":"https://www.fl.ru/projects/5528645/razrabotka-telegram-bota-s-umnyimi-otvetami-i-primom-zayavok.html",
+ "5528575":"https://www.fl.ru/projects/5528575/razrabotka-telegram-bota-dlya-upravleniya-avtoparkom-mvp.html"
 }
 out={"schema":"fl.owner.job.bids.readonly.v1","owner_verified":False,"read_only":True,"bids_sent":0,"payments":0,"messages_read":0,"checked":[]}
 b=Browser()
