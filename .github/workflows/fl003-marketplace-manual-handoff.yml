@@ -28,11 +28,8 @@ jobs:
 
   owner_portal:
     # Never spawn another 20-minute private browser on every PR update.
-    if: >-
-      (github.event_name == 'workflow_dispatch') ||
-      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
-       github.event.label.name == 'fl003-owner-portal' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+    # Disabled: no outgoing portal links or Telegram messages until user explicitly changes policy.
+    if: ${{ false }}
     needs: offline
     concurrency:
       group: fl003-marketplace-owner-portal
