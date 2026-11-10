@@ -51,7 +51,7 @@ jobs:
       - name: Run restricted read-only request
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          YANDEX_WORDSTAT_API_KEY: ${{ secrets.YANDEX_WORDSTAT_API_KEY }}
+          YANDEX_WORDSTAT_API_KEY: ${{ secrets.yandex_api }}
           YANDEX_WORDSTAT_FOLDER_ID: ${{ secrets.YANDEX_WORDSTAT_FOLDER_ID }}
           # Intentionally disabled. Separate reviewed change needed for billed GetTop.
           WORDSTAT_ALLOW_BILLABLE: 'false'
