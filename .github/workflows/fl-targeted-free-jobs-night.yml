@@ -1,0 +1,51 @@
+name: FL Night Job Shortlist — owner eligibility read-only
+
+on:
+  pull_request:
+    paths:
+      - "tools/fl_targeted_free_jobs_night_20261110.py"
+      - ".github/workflows/fl-targeted-free-jobs-night.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify_owner_eligible:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 -m py_compile tools/fl_targeted_free_jobs_night_20261110.py
+      - name: Read selected jobs only over pinned SSH (no bids)
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+          cat tools/fl_targeted_free_jobs_night_20261110.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' \
+            > "$RUNNER_TEMP/eligibility.json"
+          python3 - "$RUNNER_TEMP/eligibility.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding="utf8"))
+          assert d["schema"]=="fl.owner.job.bids.readonly.v1"
+          assert d["owner_verified"] is True
+          assert d["read_only"] and d["bids_sent"]==d["payments"]==d["messages_read"]==0
+          for c in d["checked"]:
+              print("FL_JOB_FREE_CHECK",json.dumps(c,ensure_ascii=False,sort_keys=True))
+          PY
