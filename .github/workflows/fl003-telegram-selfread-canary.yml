@@ -82,6 +82,18 @@ jobs:
           "$root/bin/telegram-python" -m py_compile "$src1" "$src2" "$stage/fl003_task_engine.py"
           install -m 600 "$stage/fl003_task_engine.py" "$app/fl003_task_engine.py"
           install -m 600 "$stage/fl003_client_demo.py" "$app/fl003_client_demo.py"
+          if ! cmp -s "$src1" "$tgt1" || ! cmp -s "$src2" "$tgt2"; then
+            if ! command -v git >/dev/null 2>&1; then
+              echo TG_FL003_BLOCKED_NO_GIT_HASH_VALIDATION
+              exit 1
+            fi
+            current1="$(git hash-object "$tgt1")"
+            current2="$(git hash-object "$tgt2")"
+            if [ "$current1" != "95144e7324f9e873915a673783e78808306baa8f" ] || [ "$current2" != "e6eeca2888ae23258bb0aed0e55a37d398012e3e" ]; then
+              echo TG_FL003_BLOCKED_UNEXPECTED_EXISTING_TELEGRAM_CODE
+              exit 1
+            fi
+          fi
           if cmp -s "$src1" "$tgt1" && cmp -s "$src2" "$tgt2"; then
             echo TG_FL003_CANARY_ALREADY_INSTALLED
           else
