@@ -1154,7 +1154,10 @@ def execute_on_page(page, command: dict) -> dict:
         return {"status": "ok", "action": action,
                 "dialogs": normalize_dialogs(items, p.get("limit", 10))}
     if action == "web_self_read":
-        return read_owner_fl003_self_notes(page, p.get("limit", 12))
+        try:
+            return read_owner_fl003_self_notes(page, p.get("limit", 12))
+        except Exception as exc:
+            return {"status":"self_read_internal_error", "exception_class":type(exc).__name__}
     if action == "web_self_note":
         return send_owner_self_note(page, command)
     if action == "web_owner_contact_link":
