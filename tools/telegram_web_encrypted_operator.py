@@ -35,7 +35,7 @@ from pathlib import Path
 ROOT = Path.home() / ".telegram-agent" / "browser"
 LOCK = ROOT / "rootless_owner.lock"
 ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_self_read", "web_reply", "web_self_note", "web_phone_message", "web_username_message",
-                     "web_chat_message", "web_owner_contact_link"})
+                     "web_chat_message", "web_owner_contact_link", "web_username_read"})
 REPLY_LEDGER = ROOT / "owner_approved_reply_attempts.sqlite3"
 MAX_REPLY_TEXT = 2000
 
@@ -72,8 +72,15 @@ DIALOGS_JS = r"""limit => {
   }).filter(d => d.peer_id !== null && !!d.title);
 }"""
 
-MESSAGES_JS = r"""limit => {
-  const bubbles = [...document.querySelectorAll('#column-center .bubble[data-mid]')];
+MESSAGES_JS = r"""({peer,limit}) => {
+  const app = window.appImManager;
+  const active = app?.chat?.bubbles?.chatInner;
+  // The page can contain multiple mounted chat views during transitions.
+  // Only the live chatInner belonging to the selected peer may be read.
+  if (Number(app?.chat?.peerId) !== peer || app?.chat?.setPeerPromise ||
+      !active?.isConnected || typeof active?.querySelectorAll !== 'function')
+    return [];
+  const bubbles = [...active.querySelectorAll('.bubble[data-mid]')];
   return bubbles.slice(-limit).map(bubble => {
     const mid = Number(bubble.getAttribute('data-mid'));
     const text = (bubble.querySelector('.message [data-message-text-source]')?.textContent
@@ -971,6 +978,166 @@ def normalize_messages(rows, limit: int):
     return result
 
 
+def wait_for_chat_dom_transition(page, peer_id: int, previous_peer, old_bubbles) -> bool:
+    """Wait for the actual *previous* bubble nodes to leave the DOM.
+
+    Telegram Web K may change appImManager.chat.peerId before replacing the
+    message view. Reading #column-center immediately can leak the last chat's
+    bubbles into the requested peer. A timeout fails closed, never returns
+    messages whose ownership cannot be established.
+    """
+    changed_peer = str(previous_peer) != str(peer_id)
+    selected_js = "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)"
+    detached_js = (
+        "(nodes) => { const inner = window.appImManager?.chat?.bubbles?.chatInner;"
+        " return !!inner?.isConnected &&"
+        " nodes.every(node => !inner.contains(node)); }")
+    for _ in range(24):
+        if page.evaluate(selected_js, peer_id) is True:
+            if not changed_peer or old_bubbles.evaluate(detached_js) is True:
+                page.wait_for_timeout(400)
+                if page.evaluate(selected_js, peer_id) is True:
+                    if not changed_peer or old_bubbles.evaluate(detached_js) is True:
+                        return True
+        page.wait_for_timeout(400)
+    return False
+
+
+def read_verified_username_chat(page, command: dict) -> dict:
+    """Read only a verified personal public username, without sending.
+
+    Unlike web_read, this can find an older conversation absent from the
+    virtualized visible sidebar. Return only from an exact peer after the
+    previous chat's bubble elements are gone; otherwise fail closed.
+    """
+    p = command["params"]
+    username, limit = p.get("username"), p.get("limit", 10)
+    if (type(username) is not str or
+            not re.fullmatch(r"@?[A-Za-z][A-Za-z0-9_]{4,31}", username) or
+            type(limit) is not int or not 1 <= limit <= 12):
+        return {"status": "invalid_username_read"}
+    username = username.lstrip("@").lower()
+    try:
+        resolved = page.evaluate(
+            """async username => {
+              const app = window.appImManager;
+              const users = app?.managers?.appUsersManager;
+              if (typeof users?.resolveUsername !== 'function')
+                return {status:'username_lookup_unavailable'};
+              try {
+                const user = await users.resolveUsername(username);
+                if (user?._ !== 'user' || user.pFlags?.deleted ||
+                    user.pFlags?.bot || user.pFlags?.self)
+                  return {status:'target_not_personal_user'};
+                const names = [user.username,
+                  ...(Array.isArray(user.usernames)
+                    ? user.usernames.filter(x => x?.active !== false)
+                      .map(x => x?.username) : [])]
+                  .filter(x => typeof x === 'string')
+                  .map(x => x.toLowerCase());
+                if (!names.includes(username))
+                  return {status:'username_identity_mismatch'};
+                if (typeof user.id?.toPeerId !== 'function')
+                  return {status:'target_peer_unavailable'};
+                const peer = Number(user.id.toPeerId(false));
+                if (!Number.isSafeInteger(peer) || peer <= 0 ||
+                    peer === Number(window.rootScope?.myId))
+                  return {status:'target_peer_unavailable'};
+                return {status:'ok', peer_id:peer};
+              } catch (e) {
+                if (e?.type === 'USERNAME_NOT_OCCUPIED' ||
+                    e?.type === 'USERNAME_INVALID')
+                  return {status:'username_not_found'};
+                if (String(e?.type || '').startsWith('FLOOD_WAIT_'))
+                  return {status:'telegram_rate_limited'};
+                return {status:'username_lookup_restricted'};
+              }
+            }""", username)
+        if not isinstance(resolved, dict) or resolved.get("status") != "ok":
+            return {"status": resolved.get("status", "username_lookup_unavailable")
+                    if isinstance(resolved, dict) else "username_lookup_unavailable"}
+        peer = resolved.get("peer_id")
+        if type(peer) is not int or not 0 < peer < 2**53:
+            return {"status": "target_peer_unavailable"}
+        previous_peer = page.evaluate(
+            "() => window.appImManager?.chat?.peerId ?? null")
+        old_bubbles = page.evaluate_handle(
+            "() => [...document.querySelectorAll('#column-center .bubble[data-mid]')]")
+        try:
+            opened = page.evaluate(
+                """peer => {
+                  const app = window.appImManager;
+                  if (typeof app?.setInnerPeer !== 'function') return false;
+                  app.setInnerPeer({peerId:peer});
+                  return true;
+                }""", peer)
+            if opened is not True:
+                return {"status": "target_chat_unavailable"}
+            for _ in range(25):
+                ready = page.evaluate(
+                    """peer => {
+                      const app = window.appImManager;
+                      return Number(app?.chat?.peerId) === peer &&
+                        !app?.chat?.setPeerPromise &&
+                        !!app?.chat?.bubbles?.chatInner?.isConnected;
+                    }""", peer)
+                if ready is True:
+                    break
+                page.wait_for_timeout(450)
+            else:
+                return {"status": "target_chat_not_verified"}
+            if not wait_for_chat_dom_transition(
+                    page, peer, previous_peer, old_bubbles):
+                return {"status": "chat_transition_not_confirmed"}
+        finally:
+            old_bubbles.dispose()
+        verified = page.evaluate(
+            """async ({peer,username}) => {
+              const app = window.appImManager;
+              if (Number(app?.chat?.peerId) !== peer) return false;
+              try {
+                const u = await app.managers.appUsersManager.getUser(peer);
+                const names = [u?.username,
+                  ...(Array.isArray(u?.usernames)
+                    ? u.usernames.filter(x => x?.active !== false)
+                      .map(x => x?.username) : [])]
+                  .filter(x => typeof x === 'string')
+                  .map(x => x.toLowerCase());
+                return u?._ === 'user' && !u.pFlags?.deleted &&
+                  !u.pFlags?.bot && names.includes(username);
+              } catch (_) { return false; }
+            }""", {"peer": peer, "username": username})
+        if verified is not True:
+            return {"status": "username_identity_not_verified"}
+        page.wait_for_timeout(900)
+        messages = normalize_messages(
+            page.evaluate(MESSAGES_JS, {"peer": peer, "limit": limit}), limit)
+        # History sometimes arrives after Web K has selected and mounted a
+        # previously inactive conversation. Give it bounded time, but never
+        # take bubbles from another chat or conclude that empty means no reply.
+        for _ in range(6):
+            if messages:
+                break
+            if page.evaluate(
+                    "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)",
+                    peer) is not True:
+                return {"status": "chat_changed_during_read"}
+            page.wait_for_timeout(650)
+            messages = normalize_messages(
+                page.evaluate(MESSAGES_JS, {"peer": peer, "limit": limit}), limit)
+        if not messages:
+            return {"status": "chat_history_not_visible"}
+        if page.evaluate(
+                "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)",
+                peer) is not True:
+            return {"status": "chat_changed_during_read"}
+        return {"status": "ok", "action": "web_username_read",
+                "verified_username": username, "messages": messages,
+                "may_mark_read": True}
+    except Exception:
+        return {"status": "username_read_unavailable"}
+
+
 def execute_on_page(page, command: dict) -> dict:
     """Execute a validated owner command on an already authenticated page.
 
@@ -996,6 +1163,8 @@ def execute_on_page(page, command: dict) -> dict:
         return send_approved_phone_message(page, command)
     if action == "web_username_message":
         return send_approved_username_message(page, command)
+    if action == "web_username_read":
+        return read_verified_username_chat(page, command)
     # Opening a chat may mark it read. For web_reply we also
     # verify an inbound bubble before taking any send action.
     peer_id = p["peer_id"]
@@ -1003,6 +1172,13 @@ def execute_on_page(page, command: dict) -> dict:
     row = page.locator(selector).first
     if row.count() != 1 or not row.is_visible():
         return {"status": "chat_not_in_visible_list", "action": action}
+    # Capture actual DOM element identities before changing conversations.
+    # Message IDs or text alone cannot prove peer ownership: different chats
+    # legitimately have overlapping message IDs and similar content.
+    previous_peer = page.evaluate(
+        "() => window.appImManager?.chat?.peerId ?? null")
+    old_bubbles = page.evaluate_handle(
+        "() => [...document.querySelectorAll('#column-center .bubble[data-mid]')]")
     row.focus()
     page.keyboard.press("Enter")
     # A forum row or hidden overlay can swallow Enter. The
@@ -1036,16 +1212,32 @@ def execute_on_page(page, command: dict) -> dict:
             peer_id)
         # Diagnostic booleans only, encrypted result: never reveal
         # internal peer ID or chat content if selection is uncertain.
+        old_bubbles.dispose()
         return {"status": "requested_chat_not_opened", "action": action,
                 "selection_checks": checks}
+    try:
+        transition_ready = wait_for_chat_dom_transition(
+            page, peer_id, previous_peer, old_bubbles)
+    finally:
+        old_bubbles.dispose()
+    if not transition_ready:
+        return {"status": "chat_transition_not_confirmed", "action": action}
     page.wait_for_timeout(900)
     if action == "web_reply":
         return send_approved_reply(page, peer_id, p, command)
     if action == "web_chat_message":
         return send_approved_existing_chat_message(page, command)
     messages = normalize_messages(
-        page.evaluate(MESSAGES_JS, p.get("limit", 10)),
+        page.evaluate(MESSAGES_JS, {"peer": peer_id, "limit": p.get("limit", 10)}),
         p.get("limit", 10))
+    # An empty scrape after switching is not proof that a previously
+    # contacted person never answered. Keep the check explicitly inconclusive.
+    if not messages:
+        return {"status": "chat_history_not_visible", "action": action}
+    if page.evaluate(
+            "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)",
+            peer_id) is not True:
+        return {"status": "chat_changed_during_read", "action": action}
     return {"status": "ok", "action": action, "peer_id": peer_id,
             "messages": messages, "may_mark_read": True}
 
