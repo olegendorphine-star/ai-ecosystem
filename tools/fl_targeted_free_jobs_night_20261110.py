@@ -59,3 +59,5 @@ finally:
  try:b.close()
  except Exception:pass
 print(json.dumps(out,ensure_ascii=False))
+
+# 2026-11-10: read-only verification of bid 5528764 after timed-out one-time submission.
