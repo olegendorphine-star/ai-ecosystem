@@ -26,8 +26,8 @@ jobs:
           python3 tools/fl003_yandex_marketplace_search.py --dry-run
       - name: Search Ozon and Avito with existing Yandex secret; keep results source-labeled
         env:
-          YANDEX_FL003_API_KEY: ${{ secrets.YANDEX_FL003_WEBSEARCH_API_KEY }}
-          YANDEX_FL003_FOLDER_ID: ${{ secrets.YANDEX_WORDSTAT_FOLDER_ID }}
+          YANDEX_FL003_API_KEY: ${{ secrets.YANDEX_FL003_WEBSEARCH_API_KEY || secrets.yandex_api }}
+          YANDEX_FL003_FOLDER_ID: b1ga59a6ib54m2km5cgd
         run: |
           set -euo pipefail
           python3 tools/fl003_yandex_marketplace_search.py --out "$RUNNER_TEMP/fl003-yandex-index.json"
