@@ -14,6 +14,7 @@ checks={
     "checked_utc":datetime.now(timezone.utc).isoformat(timespec="seconds"),
     "vps_python_running":True,
     "existing_chromium_cache":safe_dir_exists(home/".cache"/"ms-playwright"),
+    "vps_cyrillic_font_present":safe_file_exists(home/".fl003-screencast"/"fonts"/"DejaVuSans.ttf"),
     "existing_marketplace_handoff_code":safe_file_exists(home/".fl003-handoff"/"app.py"),
     "existing_marketplace_handoff_profile":safe_dir_exists(home/".fl003-handoff"/"profile"),
     "existing_telegram_resident_socket":False,
@@ -40,4 +41,9 @@ try:
         checks["existing_telegram_resident_authorized"]=r.get("authorized") is True
 except Exception:
     pass
+try:
+    import PIL
+    checks["vps_pillow_available"]=True
+except ImportError:
+    checks["vps_pillow_available"]=False
 print(json.dumps(checks,sort_keys=True))
