@@ -126,6 +126,14 @@ try:
                                     out["wizard_preflight_steps"]=progress
                             except Exception as e:
                                 out["wizard_preflight_error"]=type(e).__name__
+                                out["wizard_error_page"]=page.evaluate("""() => ({
+                                    bodyTail:(document.body?.innerText||'').slice(-1800),
+                                    buttons:[...document.querySelectorAll('button')]
+                                      .filter(x=>x.getBoundingClientRect().width>0&&x.getBoundingClientRect().height>0)
+                                      .map(x=>({text:(x.innerText||'').trim().slice(0,75),disabled:x.disabled})).slice(-12),
+                                    fieldCount:document.querySelectorAll('#ui-textarea-description-input').length
+                                })""")
+
                             out["management_ui"]=page.evaluate("""() => {
                                 const els=[...document.querySelectorAll('*')]
                                   .filter(e=>e.childElementCount<2&&(e.innerText||'').trim()==='Управление услугой').slice(0,3);
