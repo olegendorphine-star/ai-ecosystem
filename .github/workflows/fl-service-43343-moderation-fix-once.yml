@@ -81,5 +81,7 @@ jobs:
           print("FL43343_DESCRIPTION_VERIFIED",d.get("new_description_visible"))
           print("FL43343_REVIEW_STATUS",d.get("review_status"))
           print("FL43343_ERROR_CLASS",d.get("error_class",""))
+          print("FL43343_CLICK_DEBUG",d.get("click_debug",{}))
+          print("FL43343_CLICK_FAILURE_CODES",d.get("click_failure_codes",[]))
           print("FL43343_FINAL_ACTIONS",d.get("final_button_labels",[]))
           PY
