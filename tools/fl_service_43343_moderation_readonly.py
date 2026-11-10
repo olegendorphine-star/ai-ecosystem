@@ -90,6 +90,15 @@ try:
                               .filter(e=>/редактир|изменить|отклон|управлен|доработ/i.test(e.text)||/edit/i.test(e.href))
                               .slice(0,20)""")
                             out["management_controls"]=controls
+                            out["wizard_fields"]=page.evaluate("""() => ({
+                                fields:['#ui-input-example-name-input','#ui-textarea-description-input',
+                                        '#ui-textarea-emp_requirement-input','#ui-input-emp_result-input']
+                                       .map(id=>({id,present:document.querySelector(id)!=null,
+                                                  value:(document.querySelector(id)?.value||'').slice(0,3500)})),
+                                progress:[...document.querySelectorAll('button')].filter(b=>(b.innerText||'').trim()==='Продолжить')
+                                          .map(b=>({disabled:b.disabled,visible:b.getBoundingClientRect().width>0})),
+                                pageUrl:location.href
+                            })""")
                             out["management_ui"]=page.evaluate("""() => {
                                 const els=[...document.querySelectorAll('*')]
                                   .filter(e=>e.childElementCount<2&&(e.innerText||'').trim()==='Управление услугой').slice(0,3);
