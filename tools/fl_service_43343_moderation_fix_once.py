@@ -128,7 +128,7 @@ def main():
                 return fail("manage_tab_unavailable")
             tab.click(timeout=6500)
             page.wait_for_timeout(500)
-            if "#ui-textarea-description-input" not in page.content():
+            if page.locator("#ui-textarea-description-input").count()!=1:
                 return fail("manage_editor_did_not_open")
             fields={
                 "title":unique("#ui-input-example-name-input",page),
