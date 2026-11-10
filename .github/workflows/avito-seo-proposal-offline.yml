@@ -1,0 +1,21 @@
+name: Avito SEO draft - verify immutable live listings offline
+on:
+  pull_request:
+    paths:
+      - 'reference/avito-seo-proposal-2026-11-10.xml'
+      - 'tests/test_avito_seo_proposal_2026_11_10.py'
+      - '.github/workflows/avito-seo-proposal-offline.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify XML copy only, no writes or API calls
+        run: |
+          python3 -m py_compile tests/test_avito_seo_proposal_2026_11_10.py
+          python3 -m unittest discover -s tests -p 'test_avito_seo_proposal_2026_11_10.py' -v
