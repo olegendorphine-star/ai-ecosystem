@@ -108,6 +108,12 @@ jobs:
           set -euo pipefail
           ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}")
           tar -czf - tools/fl003_client_demo.py tools/fl003_screencast.py tools/fl003_yandex_marketplace_search.py -C "$RUNNER_TEMP" fl003-yandex-index.json | ssh "${ssh_args[@]}" "$USER@$HOST" 'install -d -m 700 "$HOME/.fl003-screencast" && tar -xzf - -C "$HOME/.fl003-screencast"'
+          # No font in Git or downloadable artifact: install permissively licensed
+          # DejaVu into private VPS runtime, to avoid blank Cyrillic captions.
+          test -r /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+          cat /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf | \
+            ssh "${ssh_args[@]}" "$USER@$HOST" \
+              'install -d -m 700 "$HOME/.fl003-screencast/fonts"; umask 077; cat > "$HOME/.fl003-screencast/fonts/DejaVuSans.ttf"; test -s "$HOME/.fl003-screencast/fonts/DejaVuSans.ttf"'
           ssh "${ssh_args[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-video-summary.json"
           set -euo pipefail
           root="$HOME/.fl003-screencast"
