@@ -2,10 +2,8 @@ name: FL-003 manual marketplace handoff - encrypted 20 min portal
 
 on:
   pull_request:
-    paths:
-      - 'tools/fl003_marketplace_handoff.py'
-      - 'tools/fl003_handoff_owner_public.pem'
-      - '.github/workflows/fl003-marketplace-manual-handoff.yml'
+    # CI checks run on pushes, but the owner portal starts ONLY on explicit label.
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 permissions:
@@ -27,8 +25,16 @@ jobs:
           openssl pkey -pubin -in tools/fl003_handoff_owner_public.pem -noout
 
   owner_portal:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    # Never spawn another 20-minute private browser on every PR update.
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+       github.event.label.name == 'fl003-owner-portal' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     needs: offline
+    concurrency:
+      group: fl003-marketplace-owner-portal
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 7
     steps:
