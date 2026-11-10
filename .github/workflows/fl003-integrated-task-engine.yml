@@ -35,7 +35,9 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_telegram_resident_daemon.py' -v
 
   server_acceptance:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # User explicitly forbids outbound messages and resident changes in FL-003.
+    # Leave offline unit tests active; server writes require a separate opt-in.
+    if: ${{ false }}
     needs: [offline, telegram_selfread_canary]
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -108,7 +110,9 @@ jobs:
           PY
 
   telegram_selfread_canary:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # User explicitly forbids outbound messages and resident changes in FL-003.
+    # Leave offline unit tests active; server writes require a separate opt-in.
+    if: ${{ false }}
     needs: offline
     runs-on: ubuntu-latest
     timeout-minutes: 9
