@@ -14,6 +14,7 @@ import sys
 import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlencode
 
 ISSUE_NUMBER = 162
 OWNER = "olegendorphine-star"
@@ -23,6 +24,12 @@ RESULT_PREFIX = "WORDSTAT_BRIDGE_RESULT_V1 "
 YANDEX_BASE = "https://searchapi.api.cloud.yandex.net/v2/wordstat/"
 GITHUB_COMMENTS = "https://api.github.com/repos/" + REPO + "/issues/162/comments"
 DEVICES = {"DEVICE_ALL", "DEVICE_DESKTOP", "DEVICE_PHONE", "DEVICE_TABLET"}
+
+# At the current tariff, 300 GetTop calls cost at most 6 RUB/day.
+# Rolling-hour cap stays below Yandex's default 100 Wordstat calls/hour.
+MAX_DAILY_PAID = 300
+MAX_ROLLING_HOURLY_PAID = 90
+CACHE_TTL = dt.timedelta(hours=24)
 
 
 def parse_command(event: dict, now: dt.datetime) -> dict | None:
@@ -62,7 +69,14 @@ def parse_command(event: dict, now: dt.datetime) -> dict | None:
         device = data.get("device", "DEVICE_ALL")
         if not re.fullmatch(r"[0-9]{1,8}", region) or device not in DEVICES:
             raise ValueError("invalid_region_or_device")
-        normalized.update(phrase=phrase.strip(), region=region, device=device)
+        num_phrases = data.get("num_phrases", 100)
+        fresh = data.get("fresh", False)
+        if type(num_phrases) is not int or not 10 <= num_phrases <= 100:
+            raise ValueError("invalid_num_phrases")
+        if type(fresh) is not bool:
+            raise ValueError("invalid_fresh_flag")
+        normalized.update(phrase=phrase.strip(), region=region, device=device,
+                          num_phrases=num_phrases, fresh=fresh)
     return normalized
 
 
@@ -77,17 +91,25 @@ def request_json(url: str, token: str, payload: dict | None = None,
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = Request(url, headers=headers, data=data, method=method)
     with urlopen(req, timeout=15) as response:
-        raw = response.read(300001)
-    if len(raw) > 300000:
+        raw = response.read(2000001)
+    if len(raw) > 2000000:
         raise ValueError("response_too_large")
     return json.loads(raw.decode("utf-8"))
 
 
-def read_bot_results(gh_token: str) -> list[dict]:
-    """Read all visible response pages; fail closed if the history exceeds cap."""
+def read_bot_results(gh_token: str, now: dt.datetime | None = None) -> list[dict]:
+    """Use the last 24h+10m for quotas, cache and short-lived command ids.
+
+    Commands expire after ten minutes. Filtering the public issue history
+    prevents progressively slower requests as the journal grows.
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
+    since = (now - dt.timedelta(days=1, minutes=10)).isoformat()
     results = []
-    for page in range(1, 21):
-        url = GITHUB_COMMENTS + "?per_page=100&page=" + str(page)
+    for page in range(1, 41):
+        # Compact pages bound response bytes when many keyword phrases are saved.
+        url = GITHUB_COMMENTS + "?" + urlencode(
+            {"per_page": 50, "page": page, "since": since})
         comments = request_json(url, "Bearer " + gh_token)
         if not isinstance(comments, list):
             raise ValueError("unexpected_github_response")
@@ -105,7 +127,7 @@ def read_bot_results(gh_token: str) -> list[dict]:
                     results.append(record)
             except ValueError:
                 continue
-        if len(comments) < 100:
+        if len(comments) < 50:
             return results
     raise ValueError("history_too_large_fail_closed")
 
@@ -122,6 +144,50 @@ def count_daily_paid_reservations(records: list[dict], now: dt.datetime) -> int:
                if item.get("status") == "started"
                and item.get("method") == "GetTop"
                and str(item.get("checked_at", "")).startswith(day))
+
+
+def record_timestamp(record: dict) -> dt.datetime | None:
+    try:
+        stamp = dt.datetime.fromisoformat(
+            str(record.get("checked_at", "")).replace("Z", "+00:00"))
+        return stamp.astimezone(dt.timezone.utc) if stamp.tzinfo else None
+    except (ValueError, TypeError):
+        return None
+
+
+def count_hourly_paid_reservations(records: list[dict], now: dt.datetime) -> int:
+    """Rolling-hour count; failures and ambiguous attempts still reserve quota."""
+    return sum(1 for item in records
+               if item.get("status") == "started"
+               and item.get("method") == "GetTop"
+               and (stamp := record_timestamp(item)) is not None
+               and now - dt.timedelta(hours=1) < stamp <= now)
+
+
+def find_cached_top(records: list[dict], command: dict,
+                    now: dt.datetime) -> dict | None:
+    if command.get("fresh", False):
+        return None
+    candidates = []
+    for item in records:
+        stamp = record_timestamp(item)
+        if (item.get("status") == "ok" and item.get("method") == "GetTop"
+                and str(item.get("phrase", "")).casefold().strip()
+                == command["phrase"].casefold().strip()
+                and item.get("region") == command["region"]
+                and item.get("device") == command["device"]
+                and item.get("num_phrases") == command["num_phrases"]
+                and isinstance(item.get("results"), list)
+                and stamp is not None and dt.timedelta(0) <= now - stamp < CACHE_TTL):
+            candidates.append((stamp, item))
+    if not candidates:
+        return None
+    stamp, result = max(candidates, key=lambda pair: pair[0])
+    return {**{key: result[key] for key in
+               ("method", "phrase", "region", "device", "num_phrases",
+                "totalCount", "results", "associations") if key in result},
+            "status": "ok", "billable": False, "cached": True,
+            "source_checked_at": stamp.isoformat()}
 
 
 def post_result(gh_token: str, result: dict) -> None:
@@ -155,11 +221,16 @@ def call_wordstat(command: dict, api_key: str, folder_id: str,
     # For an API key issued to a service account, Yandex Search API uses
     # that account's folder. An explicit mismatched folderId can return 403.
     # Do not attach the optional folderId even if a secret is configured.
-    payload = {"phrase": command["phrase"], "numPhrases": 20,
+    payload = {"phrase": command["phrase"],
+               "numPhrases": command.get("num_phrases", 100),
                "regions": [command["region"]], "devices": [command["device"]]}
     result = request_json(YANDEX_BASE + "topRequests", auth, payload, method="POST")
+    if isinstance(result, dict) and str(result.get("totalCount")) == "0" and "results" not in result:
+        result = {**result, "results": []}
     if not isinstance(result, dict) or not isinstance(result.get("results"), list):
-        return {"status": "unexpected_yandex_response"}
+        # Never publish provider error bodies or credentials in a public issue.
+        return {"status": "unexpected_yandex_response",
+                "response_shape": "missing_results"}
     def select(items, maximum):
         return [{"phrase": str(x.get("phrase", ""))[:110],
                  "count": str(x.get("count", ""))[:24]}
@@ -167,9 +238,10 @@ def call_wordstat(command: dict, api_key: str, folder_id: str,
     return {"status": "ok", "method": "GetTop", "billable": True,
             "phrase": command["phrase"], "region": command["region"],
             "device": command["device"],
+            "num_phrases": command.get("num_phrases", 100),
             "totalCount": str(result.get("totalCount", ""))[:24],
-            "results": select(result["results"], 10),
-            "associations": select(result.get("associations", []), 5)}
+            "results": select(result["results"], 100),
+            "associations": select(result.get("associations") or [], 20)}
 
 
 def main() -> int:
@@ -193,18 +265,23 @@ def main() -> int:
     folder_id = os.environ.get("YANDEX_WORDSTAT_FOLDER_ID", "")
     allow_paid = os.environ.get("WORDSTAT_ALLOW_BILLABLE", "false").lower() == "true"
     try:
-        history = read_bot_results(gh_token)
+        history = read_bot_results(gh_token, now)
         if any(item.get("command_id") == command["command_id"] for item in history):
             print("Command already handled")
             return 0
         if command["action"] == "top" and allow_paid and key:
-            # Fixed spending limit: 10 GetTop requests per UTC day (10 x 0.02 RUB).
-            # Fail closed if a reservation cannot be posted to the trusted issue.
-            # Reservations prevent a crashed run from silently retrying a paid call.
-            if count_daily_paid_reservations(history, now) >= 10:
+            # Cache hits are free; a fresh=True command explicitly skips cache.
+            cached = find_cached_top(history, command, now)
+            if cached is not None:
+                response = cached
+            elif count_daily_paid_reservations(history, now) >= MAX_DAILY_PAID:
                 response = {"status": "daily_paid_limit_reached",
-                            "daily_limit": 10, "method": "GetTop"}
+                            "daily_limit": MAX_DAILY_PAID, "method": "GetTop"}
+            elif count_hourly_paid_reservations(history, now) >= MAX_ROLLING_HOURLY_PAID:
+                response = {"status": "hourly_paid_limit_reached",
+                            "hourly_limit": MAX_ROLLING_HOURLY_PAID, "method": "GetTop"}
             else:
+                # Reserve before billing. No automatic retry after failure.
                 post_result(gh_token, {
                     "status": "started", "method": "GetTop", "billable": True,
                     "command_id": command["command_id"],
@@ -214,7 +291,8 @@ def main() -> int:
         else:
             response = call_wordstat(command, key, folder_id, allow_paid)
     except HTTPError as exc:
-        response = {"status": "upstream_http_error", "code": exc.code}
+        response = {"status": "provider_rate_limit" if exc.code == 429
+                    else "upstream_http_error", "code": exc.code}
     except (URLError, TimeoutError, ValueError, TypeError, KeyError):
         response = {"status": "upstream_unavailable"}
     response["command_id"] = command["command_id"]

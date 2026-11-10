@@ -145,5 +145,114 @@ class WordstatBridgeTests(unittest.TestCase):
             api.assert_not_called()
 
 
+    def test_top_defaults_to_100_phrases_and_accepts_fresh(self):
+        cmd = w.parse_command(self.event(action="top", extras={
+            "phrase": "нейросеть для общения", "fresh": True}), self.now)
+        self.assertEqual(cmd["num_phrases"], 100)
+        self.assertTrue(cmd["fresh"])
+        with self.assertRaises(ValueError):
+            w.parse_command(self.event(action="top", extras={
+                "phrase": "нейросеть для общения", "num_phrases": 2000}), self.now)
+
+    def test_larger_result_is_returned_without_extra_api_call(self):
+        command = {"action": "top", "phrase": "нейросеть для общения",
+                   "region": "225", "device": "DEVICE_ALL",
+                   "num_phrases": 100}
+        rows = [{"phrase": "query " + str(i), "count": str(i)} for i in range(100)]
+        associations = [{"phrase": "related " + str(i), "count": "1"}
+                        for i in range(20)]
+        with patch.object(w, "request_json", return_value={
+            "totalCount": "12345", "results": rows,
+            "associations": associations}) as api:
+            result = w.call_wordstat(command, "fake-key", "", True)
+            self.assertEqual(api.call_count, 1)
+            self.assertEqual(api.call_args.args[2]["numPhrases"], 100)
+            self.assertEqual(len(result["results"]), 100)
+            self.assertEqual(len(result["associations"]), 20)
+            self.assertEqual(result["num_phrases"], 100)
+
+    def test_empty_wordstat_is_valid_when_total_count_zero(self):
+        cmd = {"action": "top", "phrase": "редчайший запрос",
+               "region": "225", "device": "DEVICE_ALL"}
+        with patch.object(w, "request_json", return_value={"totalCount": "0"}):
+            result = w.call_wordstat(cmd, "fake-key", "", True)
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["results"], [])
+
+    def test_hourly_reservations_use_rolling_window(self):
+        def started(minutes):
+            return {"status": "started", "method": "GetTop",
+                    "checked_at": (self.now - dt.timedelta(minutes=minutes)).isoformat()}
+        records = [started(30)] * 90 + [started(90)]
+        self.assertEqual(w.count_hourly_paid_reservations(records, self.now), 90)
+        self.assertEqual(w.count_daily_paid_reservations(records, self.now), 91)
+
+    def test_cache_hit_matches_phrase_region_device_and_size(self):
+        command = {"action": "top", "phrase": "ИИ Собеседник",
+                   "region": "225", "device": "DEVICE_ALL",
+                   "num_phrases": 100, "fresh": False}
+        record = {"status": "ok", "method": "GetTop",
+                  "phrase": "ии собеседник", "region": "225",
+                  "device": "DEVICE_ALL", "num_phrases": 100,
+                  "totalCount": "216", "results": [{"phrase": "test", "count": "1"}],
+                  "associations": [], "billable": True,
+                  "checked_at": (self.now - dt.timedelta(hours=2)).isoformat()}
+        cached = w.find_cached_top([record], command, self.now)
+        self.assertEqual(cached["totalCount"], "216")
+        self.assertTrue(cached["cached"])
+        self.assertFalse(cached["billable"])
+        self.assertIsNone(w.find_cached_top([record],
+            {**command, "fresh": True}, self.now))
+        self.assertIsNone(w.find_cached_top([record],
+            {**command, "region": "213"}, self.now))
+        self.assertIsNone(w.find_cached_top([record], command,
+            self.now + dt.timedelta(days=2)))
+
+    def test_history_requests_only_recent_comments(self):
+        with patch.object(w, "request_json", return_value=[]) as api:
+            self.assertEqual(w.read_bot_results("token", self.now), [])
+            url = api.call_args.args[0]
+            self.assertIn("per_page=50", url)
+            self.assertIn("since=", url)
+
+    def test_daily_and_hourly_constants_respect_provider_quota(self):
+        self.assertGreaterEqual(w.MAX_DAILY_PAID, 100)
+        self.assertLess(w.MAX_ROLLING_HOURLY_PAID, 100)
+
+    def test_cached_main_does_not_reserve_or_call_provider(self):
+        import os
+        import tempfile
+        now = dt.datetime.now(dt.timezone.utc)
+        data = {
+            "schema": "wordstat.bridge.command.v1", "command_id": self.id,
+            "action": "top", "phrase": "нейросеть для общения",
+            "region": "225", "device": "DEVICE_ALL",
+            "issued_at": (now - dt.timedelta(seconds=10)).isoformat(),
+            "expires_at": (now + dt.timedelta(minutes=5)).isoformat()}
+        event = {"action": "created", "issue": {"number": w.ISSUE_NUMBER},
+                 "comment": {"user": {"login": w.OWNER},
+                             "body": w.COMMAND_PREFIX + json.dumps(data)}}
+        cached = {"status": "ok", "method": "GetTop",
+                  "phrase": "нейросеть для общения", "region": "225",
+                  "device": "DEVICE_ALL", "num_phrases": 100,
+                  "totalCount": "200", "results": [], "associations": [],
+                  "checked_at": (now - dt.timedelta(minutes=5)).isoformat()}
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as event_file:
+            json.dump(event, event_file)
+            event_file.flush()
+            with patch.dict(os.environ, {
+                    "GITHUB_EVENT_PATH": event_file.name,
+                    "GITHUB_TOKEN": "gh-mock",
+                    "YANDEX_WORDSTAT_API_KEY": "wordstat-mock",
+                    "WORDSTAT_ALLOW_BILLABLE": "true"}):
+                with patch.object(w, "read_bot_results", return_value=[cached]):
+                    with patch.object(w, "call_wordstat") as provider:
+                        with patch.object(w, "post_result") as post:
+                            self.assertEqual(w.main(), 0)
+                            provider.assert_not_called()
+                            self.assertEqual(post.call_count, 1)
+                            self.assertTrue(post.call_args.args[1]["cached"])
+
+
 if __name__ == "__main__":
     unittest.main()

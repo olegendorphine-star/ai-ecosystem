@@ -54,7 +54,8 @@ jobs:
           YANDEX_WORDSTAT_API_KEY: ${{ secrets.yandex_api }}
           YANDEX_WORDSTAT_FOLDER_ID: ${{ secrets.YANDEX_WORDSTAT_FOLDER_ID }}
           # Owner authorized paid Wordstat requests on 2026-11-10.
-          # Worker hard-limits GetTop to 10 per UTC day; service-account folderId is optional.
+          # Worker: 300 GetTop/day, 90/hour rolling, 24-hour cache, up to 100 phrases.
+          # Yandex default Wordstat quota is 100/hour; paid requests still owner-only.
           WORDSTAT_ALLOW_BILLABLE: 'true'
         run: |
           set -euo pipefail
