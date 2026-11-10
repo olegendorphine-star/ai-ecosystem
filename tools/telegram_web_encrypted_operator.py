@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path.home() / ".telegram-agent" / "browser"
 LOCK = ROOT / "rootless_owner.lock"
-ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_reply", "web_self_note", "web_phone_message", "web_username_message",
+ALLOWED = frozenset({"web_status", "web_dialogs", "web_read", "web_self_read", "web_reply", "web_self_note", "web_phone_message", "web_username_message",
                      "web_chat_message", "web_owner_contact_link"})
 REPLY_LEDGER = ROOT / "owner_approved_reply_attempts.sqlite3"
 MAX_REPLY_TEXT = 2000
@@ -260,6 +260,49 @@ def send_approved_reply(page, peer_id: int, p: dict, command: dict) -> dict:
         # Never repeat this attempted command; owner checks Telegram manually
         # if UI acknowledgement cannot be established.
         return {"status": "send_status_uncertain_no_retry"}
+
+
+def read_owner_fl003_self_notes(page, limit: int) -> dict:
+    """Only FL003 test markers from the account's own self-chat. No other messages."""
+    if type(limit) is not int or not 1 <= limit <= 12:
+        return {"status":"invalid_limit"}
+    selected = page.evaluate(
+        """() => {
+          const self=Number(window.rootScope?.myId);
+          const app=window.appImManager;
+          if (!Number.isSafeInteger(self) || self<=0 ||
+              typeof app?.setInnerPeer !== 'function')return false;
+          app.setInnerPeer({peerId:self});
+          return true;
+        }""")
+    if selected is not True:
+        return {"status":"self_chat_unavailable"}
+    ready=False
+    for _ in range(25):
+        ready=page.evaluate(
+            """() => {
+             const self=Number(window.rootScope?.myId);
+             const app=window.appImManager;
+             return Number.isSafeInteger(self)&&self>0 &&
+               Number(app?.chat?.peerId)===self &&
+               !app?.chat?.setPeerPromise &&
+               !!app?.chat?.bubbles?.chatInner?.isConnected;
+            }""")
+        if ready is True:break
+        page.wait_for_timeout(450)
+    if ready is not True:
+        return {"status":"self_chat_not_verified"}
+    peer=page.evaluate("() => Number(window.rootScope?.myId)")
+    messages=page.evaluate(MESSAGES_JS,{"peer":peer,"limit":limit})
+    allowed={"FL003: ТОВАР M185","FL003: ПИСЬМО ТЕСТ"}
+    selected=[]
+    for m in messages:
+        raw=m.get("text","")
+        mid=m.get("message_id")
+        if type(raw) is str and raw.strip().upper() in allowed and type(mid) is int and mid>0:
+            selected.append({"message_id":mid,"text":raw.strip().upper(),"incoming":m.get("incoming")})
+    return {"status":"ok","action":"web_self_read","messages":selected,
+            "saved_messages_only":True,"may_mark_read":True}
 
 
 def send_owner_self_note(page, command: dict) -> dict:
@@ -943,6 +986,8 @@ def execute_on_page(page, command: dict) -> dict:
         items = page.evaluate(DIALOGS_JS, p.get("limit", 10))
         return {"status": "ok", "action": action,
                 "dialogs": normalize_dialogs(items, p.get("limit", 10))}
+    if action == "web_self_read":
+        return read_owner_fl003_self_notes(page, p.get("limit", 12))
     if action == "web_self_note":
         return send_owner_self_note(page, command)
     if action == "web_owner_contact_link":
