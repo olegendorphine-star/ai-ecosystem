@@ -168,10 +168,14 @@ jobs:
             fi
             current1="$(git hash-object "$tgt1")"
             current2="$(git hash-object "$tgt2")"
-            if [ "$current1" != "95144e7324f9e873915a673783e78808306baa8f" ] || [ "$current2" != "e6eeca2888ae23258bb0aed0e55a37d398012e3e" ]; then
-              echo TG_FL003_BLOCKED_UNEXPECTED_EXISTING_TELEGRAM_CODE
-              exit 1
-            fi
+            case "$current1" in
+              95144e7324f9e873915a673783e78808306baa8f|837d931c7d74438dbcad1ad84ee200661211c3e0) ;;
+              *) echo TG_FL003_BLOCKED_UNEXPECTED_OWNER_OPERATOR; exit 1 ;;
+            esac
+            case "$current2" in
+              e6eeca2888ae23258bb0aed0e55a37d398012e3e|e2ccf4bf1d903fc7b9d3d7d28e1a895a77ba99a9) ;;
+              *) echo TG_FL003_BLOCKED_UNEXPECTED_WEB_OPERATOR; exit 1 ;;
+            esac
           fi
           if cmp -s "$src1" "$tgt1" && cmp -s "$src2" "$tgt2"; then
             echo TG_FL003_CANARY_ALREADY_INSTALLED
