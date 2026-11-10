@@ -34,6 +34,29 @@ def now():
 def domain_matches(host, names):
     return any(host == name or host.endswith("." + name) for name in names)
 
+def is_product_card(url, marketplace, title=""):
+    """Reject Avito search/category pages and Ozon non-product pages."""
+    try:
+        u = urllib.parse.urlsplit(url)
+        host = (u.hostname or "").lower()
+        if (u.scheme != "https" or not domain_matches(host, DOMAIN_ALLOW[marketplace])
+                or u.username or u.password or u.port or u.query or u.fragment):
+            return False
+        parts = [urllib.parse.unquote(x) for x in u.path.split("/") if x]
+        name = (title + " " + (parts[-1] if parts else "")).lower()
+        if "m185" not in name:
+            return False
+        if marketplace == "Ozon":
+            return (len(parts) == 2 and parts[0] == "product"
+                    and re.search(r"-[0-9]{6,13}$", parts[-1]) is not None)
+        if marketplace == "Avito":
+            return (len(parts) == 3 and parts[1] == "tovary_dlya_kompyutera"
+                    and re.search(r"_[0-9]{7,13}$", parts[-1]) is not None)
+        return False
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
 def parse_xml_docs(xml_bytes, marketplace, limit=8):
     root=ET.fromstring(xml_bytes)
     results=[]
@@ -44,16 +67,14 @@ def parse_xml_docs(xml_bytes, marketplace, limit=8):
             parsed=urllib.parse.urlsplit(url)
         except ValueError:
             continue
-        if parsed.scheme != "https" or not parsed.hostname or not domain_matches(parsed.hostname, DOMAIN_ALLOW[marketplace]):
-            continue
-        if parsed.username or parsed.password or parsed.port:
+        title=doc.find("title")
+        # Search result markup may contain <hlword> nested emphasis.
+        title_text="".join(title.itertext()) if title is not None else ""
+        if not is_product_card(url, marketplace, title_text):
             continue
         if url in seen:
             continue
         seen.add(url)
-        title=doc.find("title")
-        # Search result markup may contain <hlword> nested emphasis.
-        title_text="".join(title.itertext()) if title is not None else ""
         fragments=[]
         pnode=doc.find("passages")
         if pnode is not None:
@@ -63,6 +84,7 @@ def parse_xml_docs(xml_bytes, marketplace, limit=8):
                         "url": url[:750], "title": title_text[:180],
                         "snippet": re.sub(r"\s+", " ", " ".join(fragments))[:450],
                         "source_type": "yandex_search_index",
+                        "url_verified_as_product_path": True,
                         "live_price_verified": False, "availability_verified": False,
                         "seller_verified": False})
         if len(results)>=limit:
@@ -130,6 +152,11 @@ def main():
         assert domain_matches("www.ozon.ru",("ozon.ru",))
         assert not domain_matches("ozon.ru.evil.example",("ozon.ru",))
         assert not domain_matches("avito.ru.evil.example",("avito.ru",))
+        assert is_product_card("https://www.avito.ru/ufa/tovary_dlya_kompyutera/besprovodnaya_mysh_logitech_m185_7203258990", "Avito")
+        assert is_product_card("https://www.ozon.ru/product/logitech-m185-7231898/", "Ozon")
+        assert not is_product_card("https://www.avito.ru/moskva/tovary_dlya_kompyutera?q=logitech+m185", "Avito")
+        assert not is_product_card("https://www.avito.ru/moskva/tovary_dlya_kompyutera/klaviatury_i_myshi-ASgBAgICAUTGB7xO", "Avito")
+        assert not is_product_card("https://www.ozon.ru/category/m185-logitech/", "Ozon")
         print(json.dumps({"selftest":True,"max_requests":2}))
         return
     report=execute(os.getenv("YANDEX_FL003_API_KEY",""),os.getenv("YANDEX_FL003_FOLDER_ID",""))
