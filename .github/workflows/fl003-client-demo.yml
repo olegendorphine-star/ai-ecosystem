@@ -1,0 +1,85 @@
+name: FL-003 client demo — bounded VPS evidence (no account writes)
+
+on:
+  pull_request:
+    paths:
+      - 'tools/fl003_client_demo.py'
+      - 'tests/test_fl003_client_demo.py'
+      - '.github/workflows/fl003-client-demo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test synthetic email, attachment and fail-closed shopping
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl003_client_demo.py
+          python3 -m unittest discover -s tests -p 'test_fl003_client_demo.py' -v
+          python3 tools/fl003_client_demo.py --offline
+
+  vps_live_public_read:
+    # Owner's own in-repo branch; no VPS secrets for forks.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify pinned SSH context
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl003-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl003-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl003-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl003-ssh/key" "$RUNNER_TEMP/fl003-ssh/known_hosts"
+      - name: Execute isolated server demo, synthetic inbox and public pages only
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          cat tools/fl003_client_demo.py | ssh -F /dev/null -4 -T \
+             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+             -o StrictHostKeyChecking=yes \
+             -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" \
+             -o IdentitiesOnly=yes -o LogLevel=ERROR \
+             -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" \
+             "$USER@$HOST" \
+             'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" - --print-full --out "$HOME/.fl003-demo/reports/latest.json"' \
+             > "$RUNNER_TEMP/fl003-evidence.json"
+          python3 - "$RUNNER_TEMP/fl003-evidence.json" <<'PY'
+          import json,sys
+          with open(sys.argv[1], encoding="utf-8") as f: d=json.load(f)
+          assert d["schema"]=="fl003.client.demo.v1"
+          assert d["mail"]["structured_requirements"]
+          assert d["reply"]["approval_required"] is True and d["reply"]["sent"] is False
+          assert d["external_write_actions"]==0 and d["external_messages_sent"]==0
+          assert d["private_mailbox_connected"] is False and d["telegram_connected"] is False
+          print("VPS_DEMO_WORKSTATION_OFF", d["workstation_needed"] is False)
+          print("VPS_DEMO_MAIL_ATTACHMENT_PARSED", True)
+          print("VPS_DEMO_REPLY_DRAFT_ONLY", True)
+          print("VPS_DEMO_SHOPPING_STATUS", [p["status"] for p in d["shopping"]["products"]])
+          print("VPS_DEMO_FULL_CLIENT_DEMO_READY", d["client_facing_full_demo_ready"])
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fl003-synthetic-evidence
+          path: ${{ runner.temp }}/fl003-evidence.json
+          retention-days: 7
+          if-no-files-found: error
