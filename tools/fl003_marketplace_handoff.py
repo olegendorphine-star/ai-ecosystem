@@ -148,7 +148,7 @@ class State:
                     runner=Path.home()/'.fl003-demo'/'app'/'fl003_task_engine.py'
                     if runner.is_file() and not runner.is_symlink():
                         try:
-                            subprocess.Popen([sys.executable,str(runner),'--resume'],
+                            subprocess.Popen([sys.executable,str(runner),'--resume','--notify-self'],
                                              cwd=str(runner.parent),
                                              stdin=subprocess.DEVNULL,
                                              stdout=subprocess.DEVNULL,
