@@ -928,6 +928,28 @@ def normalize_messages(rows, limit: int):
     return result
 
 
+def wait_for_chat_dom_transition(page, peer_id: int, previous_peer, old_bubbles) -> bool:
+    """Wait for the actual *previous* bubble nodes to leave the DOM.
+
+    Telegram Web K may change appImManager.chat.peerId before replacing the
+    message view. Reading #column-center immediately can leak the last chat's
+    bubbles into the requested peer. A timeout fails closed, never returns
+    messages whose ownership cannot be established.
+    """
+    changed_peer = str(previous_peer) != str(peer_id)
+    selected_js = "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)"
+    detached_js = "(nodes) => nodes.every(node => !node.isConnected)"
+    for _ in range(24):
+        if page.evaluate(selected_js, peer_id) is True:
+            if not changed_peer or old_bubbles.evaluate(detached_js) is True:
+                page.wait_for_timeout(400)
+                if page.evaluate(selected_js, peer_id) is True:
+                    if not changed_peer or old_bubbles.evaluate(detached_js) is True:
+                        return True
+        page.wait_for_timeout(400)
+    return False
+
+
 def execute_on_page(page, command: dict) -> dict:
     """Execute a validated owner command on an already authenticated page.
 
@@ -958,6 +980,13 @@ def execute_on_page(page, command: dict) -> dict:
     row = page.locator(selector).first
     if row.count() != 1 or not row.is_visible():
         return {"status": "chat_not_in_visible_list", "action": action}
+    # Capture actual DOM element identities before changing conversations.
+    # Message IDs or text alone cannot prove peer ownership: different chats
+    # legitimately have overlapping message IDs and similar content.
+    previous_peer = page.evaluate(
+        "() => window.appImManager?.chat?.peerId ?? null")
+    old_bubbles = page.evaluate_handle(
+        "() => [...document.querySelectorAll('#column-center .bubble[data-mid]')]")
     row.focus()
     page.keyboard.press("Enter")
     # A forum row or hidden overlay can swallow Enter. The
@@ -991,8 +1020,16 @@ def execute_on_page(page, command: dict) -> dict:
             peer_id)
         # Diagnostic booleans only, encrypted result: never reveal
         # internal peer ID or chat content if selection is uncertain.
+        old_bubbles.dispose()
         return {"status": "requested_chat_not_opened", "action": action,
                 "selection_checks": checks}
+    try:
+        transition_ready = wait_for_chat_dom_transition(
+            page, peer_id, previous_peer, old_bubbles)
+    finally:
+        old_bubbles.dispose()
+    if not transition_ready:
+        return {"status": "chat_transition_not_confirmed", "action": action}
     page.wait_for_timeout(900)
     if action == "web_reply":
         return send_approved_reply(page, peer_id, p, command)
@@ -1001,6 +1038,14 @@ def execute_on_page(page, command: dict) -> dict:
     messages = normalize_messages(
         page.evaluate(MESSAGES_JS, p.get("limit", 10)),
         p.get("limit", 10))
+    # An empty scrape after switching is not proof that a previously
+    # contacted person never answered. Keep the check explicitly inconclusive.
+    if not messages:
+        return {"status": "chat_history_not_visible", "action": action}
+    if page.evaluate(
+            "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)",
+            peer_id) is not True:
+        return {"status": "chat_changed_during_read", "action": action}
     return {"status": "ok", "action": action, "peer_id": peer_id,
             "messages": messages, "may_mark_read": True}
 

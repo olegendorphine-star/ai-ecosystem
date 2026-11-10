@@ -201,6 +201,65 @@ class UIHelpers(unittest.TestCase):
         self.assertIn("browser.close()", source)
 
 
+class WebReadTransitionSafety(unittest.TestCase):
+    def test_previous_chat_bubbles_must_detach(self):
+        page = mock.Mock()
+        page.evaluate.return_value = True
+        handle = mock.Mock()
+        handle.evaluate.side_effect = [False, False, True, True]
+        self.assertTrue(web.wait_for_chat_dom_transition(page, 22, 11, handle))
+        self.assertGreaterEqual(page.wait_for_timeout.call_count, 3)
+
+    def test_transition_timeout_fails_closed(self):
+        page = mock.Mock()
+        page.evaluate.return_value = True
+        handle = mock.Mock()
+        handle.evaluate.return_value = False
+        self.assertFalse(web.wait_for_chat_dom_transition(page, 22, 11, handle))
+        self.assertEqual(handle.evaluate.call_count, 24)
+
+    def test_same_chat_without_switch_is_allowed(self):
+        page = mock.Mock()
+        page.evaluate.return_value = True
+        handle = mock.Mock()
+        self.assertTrue(web.wait_for_chat_dom_transition(page, 22, 22, handle))
+        handle.evaluate.assert_not_called()
+
+    def test_no_web_read_when_old_bubbles_remain(self):
+        page = mock.Mock()
+        row = page.locator.return_value.first
+        row.count.return_value = 1
+        row.is_visible.return_value = True
+        def evaluate(script, peer=None):
+            if "?? null" in script:
+                return 111
+            if script == web.MESSAGES_JS:
+                raise AssertionError("stale chat contents were read")
+            return True
+        page.evaluate.side_effect = evaluate
+        handle = page.evaluate_handle.return_value
+        handle.evaluate.return_value = False
+        result = web.execute_on_page(
+            page, command("web_read", {"peer_id": 222, "limit": 5}))
+        self.assertEqual(result["status"], "chat_transition_not_confirmed")
+        handle.dispose.assert_called_once()
+
+    def test_empty_dom_is_not_a_confirmed_empty_history(self):
+        page = mock.Mock()
+        row = page.locator.return_value.first
+        row.count.return_value = 1
+        row.is_visible.return_value = True
+        page.evaluate.side_effect = lambda script, peer=None: (
+            None if "?? null" in script else
+            [] if script == web.MESSAGES_JS else True)
+        handle = page.evaluate_handle.return_value
+        handle.evaluate.return_value = True
+        result = web.execute_on_page(
+            page, command("web_read", {"peer_id": 222, "limit": 5}))
+        self.assertEqual(result["status"], "chat_history_not_visible")
+        handle.dispose.assert_called_once()
+
+
 class OwnContactLink(unittest.TestCase):
     def test_accepts_short_normalized_telegram_contact_token(self):
         page = mock.Mock()
