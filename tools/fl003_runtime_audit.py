@@ -46,4 +46,22 @@ try:
     checks["vps_pillow_available"]=True
 except ImportError:
     checks["vps_pillow_available"]=False
+try:
+    evidence=home/".fl003-handoff"/"verified_evidence.json"
+    if evidence.is_file() and not evidence.is_symlink():
+        record=json.loads(evidence.read_text(encoding="utf8"))
+        products=record.get("products") or {}
+        verified=sorted(
+            k for k,v in products.items()
+            if k in ("Ozon","Avito") and isinstance(v,dict) and
+               v.get("status")=="verified_product_price" and
+               isinstance(v.get("price_rub"),(int,float)))
+        checks["verified_live_marketplaces"]=verified
+        checks["both_prices_verified"]=len(verified)==2
+    else:
+        checks["verified_live_marketplaces"]=[]
+        checks["both_prices_verified"]=False
+except Exception:
+    checks["verified_live_marketplaces"]=[]
+    checks["both_prices_verified"]=False
 print(json.dumps(checks,sort_keys=True))
