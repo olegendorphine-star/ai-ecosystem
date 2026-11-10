@@ -106,9 +106,10 @@ def read_bot_results(gh_token: str, now: dt.datetime | None = None) -> list[dict
     now = now or dt.datetime.now(dt.timezone.utc)
     since = (now - dt.timedelta(days=1, minutes=10)).isoformat()
     results = []
-    for page in range(1, 31):
+    for page in range(1, 41):
+        # Compact pages bound response bytes when many keyword phrases are saved.
         url = GITHUB_COMMENTS + "?" + urlencode(
-            {"per_page": 100, "page": page, "since": since})
+            {"per_page": 50, "page": page, "since": since})
         comments = request_json(url, "Bearer " + gh_token)
         if not isinstance(comments, list):
             raise ValueError("unexpected_github_response")
@@ -126,7 +127,7 @@ def read_bot_results(gh_token: str, now: dt.datetime | None = None) -> list[dict
                     results.append(record)
             except ValueError:
                 continue
-        if len(comments) < 100:
+        if len(comments) < 50:
             return results
     raise ValueError("history_too_large_fail_closed")
 
@@ -240,7 +241,7 @@ def call_wordstat(command: dict, api_key: str, folder_id: str,
             "num_phrases": command.get("num_phrases", 100),
             "totalCount": str(result.get("totalCount", ""))[:24],
             "results": select(result["results"], 100),
-            "associations": select(result.get("associations", []), 20)}
+            "associations": select(result.get("associations") or [], 20)}
 
 
 def main() -> int:
