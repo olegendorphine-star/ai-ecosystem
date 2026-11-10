@@ -113,24 +113,36 @@ def parse_mail(raw: bytes) -> dict:
             attachments.append({"file": fname, "status": "too_large"})
             continue
         decoded = payload.decode("utf-8-sig", errors="strict")
-        reader = csv.DictReader(io.StringIO(decoded), delimiter=";")
+        header=decoded.splitlines()[0] if decoded.splitlines() else ""
+        sep=";" if header.count(";") > header.count(",") else ","
+        reader = csv.DictReader(io.StringIO(decoded), delimiter=sep)
         rows = list(reader)
-        expected = {"модель", "интерфейс", "количество", "лимит_за_шт_руб"}
-        if not rows or not expected.issubset(set(rows[0])):
+        ru={"модель", "интерфейс", "количество", "лимит_за_шт_руб"}
+        en={"model", "quantity", "interface", "limit_rub_per_unit"}
+        headers=set(rows[0]) if rows else set()
+        if not rows or not (ru.issubset(headers) or en.issubset(headers)):
             attachments.append({"file": fname, "status": "invalid_format"})
             continue
+        english=en.issubset(headers)
         entries = []
         for row in rows[:10]:
             try:
-                quantity = int(row["количество"])
-                cap = int(row["лимит_за_шт_руб"])
-                if quantity < 1 or cap < 1:
+                quantity = int(row["quantity" if english else "количество"])
+                cap = int(row["limit_rub_per_unit" if english else "лимит_за_шт_руб"])
+                delivery=int(row.get("delivery_days") or 0) if english else 0
+                if not (1<=quantity<=1000 and 1<=cap<=10_000_000 and 0<=delivery<=365):
                     raise ValueError()
-            except ValueError:
+            except (ValueError,TypeError):
                 attachments.append({"file": fname, "status": "invalid_numeric_data"})
                 break
-            entries.append({"model": row["модель"], "interface": row["интерфейс"],
-                            "quantity": quantity, "cap_per_item_rub": cap})
+            item={"model": row["model" if english else "модель"],
+                  "interface": row["interface" if english else "интерфейс"],
+                  "quantity": quantity, "cap_per_item_rub": cap}
+            if english:
+                item.update({"condition":row.get("condition"),
+                             "wireless":row.get("wireless"),
+                             "delivery_days":delivery or None})
+            entries.append(item)
         else:
             attachments.append({"file": fname, "status": "parsed", "rows": entries})
     good = next((a for a in attachments if a.get("status") == "parsed"), None)
