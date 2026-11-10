@@ -79,6 +79,36 @@ try:
                         out["editor_excerpt"]=compact(details.get("top"),1800)
                         out["moderation_excerpt"]=compact(" || ".join(details.get("blocks",[])[:7]),3000)
                         out["current_description"]=compact(details.get("fields",[""])[0] if details.get("fields") else "",3000)
+                        try:
+                            menu=page.get_by_text("Управление услугой",exact=True).first
+                            if menu.count()==1 and menu.is_visible():
+                                menu.click(timeout=3000)
+                                page.wait_for_timeout(250)
+                            controls=page.evaluate("""() => [...document.querySelectorAll('a,button,[role=menuitem]')]
+                              .map(e=>({text:(e.innerText||e.getAttribute('aria-label')||'').trim().slice(0,140),
+                                       href:e.href||'',tag:e.tagName}))
+                              .filter(e=>/редактир|изменить|отклон|управлен|доработ/i.test(e.text)||/edit/i.test(e.href))
+                              .slice(0,20)""")
+                            out["management_controls"]=controls
+                            edits=[e for e in controls if "редактир" in e["text"].lower() and
+                                   e.get("href","").startswith("https://www.fl.ru/")]
+                            if len(edits)==1:
+                                editor_url=edits[0]["href"]
+                                er=page.goto(editor_url,wait_until="domcontentloaded",timeout=15000)
+                                if er and er.status==200 and is_fl_url(page.url):
+                                    out["edit_form_readonly"]=True
+                                    form=page.evaluate("""() => ({
+                                       fields:[...document.querySelectorAll('textarea,input,[contenteditable=true]')]
+                                        .map(e=>({tag:e.tagName,id:e.id,name:e.name||'',type:e.type||'',
+                                            value:(e.value||e.innerText||'').slice(0,3800)}))
+                                        .filter(e=>e.value&&e.value.length>40).slice(0,10),
+                                       excerpt:(document.body?.innerText||'').slice(0,3500)
+                                    })""")
+                                    out["edit_form_fields"]=form["fields"]
+                                    out["edit_form_excerpt"]=compact(form["excerpt"],2500)
+                        except Exception as e:
+                            out["management_status"]="read_only_menu_error_"+type(e).__name__
+
                 out["status"]="ok"
 except Exception as exc:
     out["status"]="technical_error_"+type(exc).__name__
