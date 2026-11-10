@@ -48,3 +48,5 @@ jobs:
 # Owner asked for tag editor mapping; one more read-only preflight.
 
 # Confirm asynchronous keyword form before writing any tag.
+
+# Read-only active keyword field and modal save control probe.
