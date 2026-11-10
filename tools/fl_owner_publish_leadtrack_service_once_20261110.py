@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Owner-approved one-time two fixed-price FL services WITH new local covers.
-Explicit prior read-only check confirmed no listings visible. No paid actions and no blind retries.
+"""One new, owner-approved fixed-price FL service with a locally rendered cover.
+No paid actions, duplicated publications, or blind retries; existing cards untouched.
 """
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -27,7 +27,7 @@ services=[
    "список статусов и ответственных, доступ к существующему боту Telegram, "
    "краткое описание сценария, условия размещения. Персональные данные и пароли не нужны для оценки."),
   "result":("Рабочий сценарий учёта заявок и уведомлений из Google Таблицы "
-   "+ журнал ошибок, тестовый прогон и инструкция."),
+   "и журнал ошибок, тестовый прогон и инструкция."),
   "group":"Автоматизация бизнеса","subcat":"AI-автоматизация"}
 ]
 
