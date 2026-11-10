@@ -1,0 +1,55 @@
+name: FL - owner portfolio search tags once 20261110
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fl-owner-portfolio-search-tags-once-20261110.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fl-owner-portfolio-search-tags-20261110
+  cancel-in-progress: false
+jobs:
+  add_tags:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 -m py_compile tools/fl_owner_portfolio_search_tags_apply_once_20261110.py
+      - name: Prepare verified owner-only SSH
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl-ssh/key" "$RUNNER_TEMP/fl-ssh/known_hosts"
+      - name: Save search keywords only in existing owner portfolio categories
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          report="$(cat tools/fl_owner_portfolio_search_tags_apply_once_20261110.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/fl-ssh/key" -p "$port" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -')"
+          printf '%s\n' "$report" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d["schema"]=="fl.owner.portfolio.search.tags.write.v1"
+          for k in ("paid","messages","bids","security","identity_changed"):assert d[k] is False
+          print("FL_PORTFOLIO_TAGS_OWNER",d["owner"])
+          for x in d["writes"]:print("FL_PORTFOLIO_TAGS_SECTION",x["section"],x["status"],x["clicked"],x["verified"])
+          assert d["owner"] and len(d["writes"])==3 and all(x["verified"] for x in d["writes"])
+          '
