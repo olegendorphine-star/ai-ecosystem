@@ -23,7 +23,7 @@ ROOT = Path.home() / ".telegram-agent"
 SESSION = ROOT / "auth" / "owner"
 LEDGER = ROOT / "state" / "outbound.sqlite3"
 ALLOWED = frozenset({"status", "dialogs", "read", "reply",
-                     "web_status", "web_dialogs", "web_read", "web_reply",
+                     "web_status", "web_dialogs", "web_read", "web_self_read", "web_reply",
                      "web_self_note", "web_phone_message", "web_username_message",
                      "web_chat_message", "web_owner_contact_link"})
 MAX_TEXT = 3500
@@ -70,6 +70,7 @@ def validate(command: dict) -> dict:
         "reply": {"chat_id", "reply_to_id", "text", "approved_by_owner"},
         "web_status": set(), "web_dialogs": {"limit"},
         "web_read": {"peer_id", "limit"},
+        "web_self_read": {"limit"},
         "web_reply": {"peer_id", "reply_to_id", "text", "approved_by_owner"},
         "web_self_note": {"text", "approved_by_owner"},
         "web_phone_message": {"phone", "text", "approved_by_owner"},
