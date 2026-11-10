@@ -41,7 +41,7 @@ try:
     node=p.locator('a.admn').nth(2)
     if "AI-агенты" in node.evaluate("(e)=>e.parentElement?.parentElement?.innerText||''"):
      node.click(timeout=9000)
-     p.wait_for_timeout(500)
+     p.wait_for_timeout(1800)
      out["modal"]=p.evaluate("""()=>{
        const visible=e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0;
        const fields=Array.from(document.querySelectorAll('input,textarea,select')).filter(visible)
@@ -52,7 +52,11 @@ try:
           .map(e=>({tag:e.tagName,text:(e.innerText||e.value||'').trim().slice(0,65),type:e.getAttribute('type')||''}))
           .filter(x=>/сохран|отмена|закры|измен|ключев|примен/i.test(x.text)).slice(-22);
        const forms=Array.from(document.forms).filter(visible).map(e=>({method:e.method,fields:Array.from(e.querySelectorAll('input,textarea')).map(x=>x.name).slice(0,18)})).slice(-8);
-       return {fields,controls,forms,dialogText:Array.from(document.querySelectorAll('[role=dialog],.modal,.b-shadow,.b-popup')).filter(visible).map(x=>(x.innerText||'').replace(/\\s+/g,' ').slice(0,330)).slice(-3)};
+       const keys=document.querySelector('textarea[name="user_keys"]');
+       const anc=keys?.closest('form')||keys?.parentElement?.parentElement?.parentElement?.parentElement;
+       const relevant=Array.from(anc?.querySelectorAll('button,a,input[type=submit],input[type=button]')||[]).map(x=>({tag:x.tagName,txt:(x.innerText||x.value||'').trim().slice(0,65),type:x.type||'',id:x.id||'',class:String(x.className||'').slice(0,75)})).slice(-25);
+       const ownerSection=keys?.closest('.b-shadow,.b-popup,.modal,[role=dialog]');
+       return {keyContainerTag:anc?.tagName,keyContainerClass:String(anc?.className||'').slice(0,90),keyControls:relevant,sectionText:(ownerSection?.innerText||'').replace(/\\s+/g,' ').slice(0,350),fields,controls,forms,dialogText:Array.from(document.querySelectorAll('[role=dialog],.modal,.b-shadow,.b-popup')).filter(visible).map(x=>(x.innerText||'').replace(/\\s+/g,' ').slice(0,330)).slice(-3)};
      }""")
 finally:
  b.close()
