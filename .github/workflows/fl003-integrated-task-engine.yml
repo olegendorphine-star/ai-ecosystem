@@ -101,6 +101,7 @@ jobs:
           assert any(x['kind']=='mail_test' and x['state']=='draft_ready' for x in d['executed']) or any(x['kind']=='mail_test' and x['state']=='draft_ready' for x in d['summary'])
           print('FL003_VPS_ENGINE_STATUS',d['summary'])
           print('FL003_TELEGRAM_INTAKE_STATUS',d['telegram']['status'])
+          print('FL003_TELEGRAM_READ_REASON',d['telegram'].get('safe_reason'))
           print('FL003_TELEGRAM_NEW_TEST_COMMANDS',d['telegram'].get('new_test_commands',0))
           print('FL003_EXTERNAL_MESSAGES_SENT',d['external_messages_sent'])
           PY
@@ -232,6 +233,7 @@ jobs:
           r=json.load(open(sys.argv[1],encoding='utf8'))
           assert r["external_messages_sent"]==0
           print("FL003_TELEGRAM_INTAKE_STATUS",r["telegram"]["status"])
+          print("FL003_TELEGRAM_READ_REASON",r["telegram"].get("safe_reason"))
           print("FL003_TELEGRAM_SAVED_ONLY",r["telegram"].get("saved_dialog_verified"))
           print("FL003_TELEGRAM_NEW_COMMANDS",r["telegram"].get("new_test_commands"))
           print("FL003_ENGINE",r["summary"])
