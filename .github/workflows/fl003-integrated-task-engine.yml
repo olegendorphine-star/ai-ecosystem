@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh -F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
-             'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" "$HOME/.fl003-demo/app/fl003_task_engine.py" --fixture --telegram-read --resume' \
+             'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" "$HOME/.fl003-demo/app/fl003_task_engine.py" --fixture --telegram-read --resume --notify-self' \
               > "$RUNNER_TEMP/fl003-results.json"
           python3 - "$RUNNER_TEMP/fl003-results.json" <<'PY'
           import json,sys
@@ -104,6 +104,7 @@ jobs:
           print('FL003_TELEGRAM_READ_REASON',d['telegram'].get('safe_reason'))
           print('FL003_TELEGRAM_NEW_TEST_COMMANDS',d['telegram'].get('new_test_commands',0))
           print('FL003_EXTERNAL_MESSAGES_SENT',d['external_messages_sent'])
+          print('FL003_OWNER_SELF_NOTIFICATIONS',d['self_notifications'])
           PY
 
   telegram_selfread_canary:
