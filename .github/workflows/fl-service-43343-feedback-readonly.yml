@@ -60,4 +60,6 @@ jobs:
           print("MANAGEMENT_STATUS",d.get("management_status",""))
           print("MANAGEMENT_UI",d.get("management_ui",{}))
           print("WIZARD_FIELDS",d.get("wizard_fields",{}))
+          print("WIZARD_PREFLIGHT_STEPS",d.get("wizard_preflight_steps",[]))
+          print("WIZARD_PREFLIGHT_ERROR",d.get("wizard_preflight_error",""))
           PY
