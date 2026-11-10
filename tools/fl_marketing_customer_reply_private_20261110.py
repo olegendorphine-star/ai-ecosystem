@@ -34,10 +34,10 @@ try:
         let links=[...document.querySelectorAll('a[href]')].map(a=>({
          href:a.href,txt:(a.innerText||'').trim().slice(0,120)}))
          .filter(a=>/projects\\/|messages|users\\//.test(a.href)).slice(0,65);
-        return {text:t.slice(-3300),links};
+        return {text:t.slice(Math.max(0,t.indexOf("Ищу начинающего маркетолога")), (t.indexOf("© FL.ru")>0 ? t.indexOf("© FL.ru") : t.length)).slice(-1400),links};
       }""")
       out["chat_text"]=d["text"]
-      out["links"]=d["links"][:2]
+      out["links"]=[]
       out["status"]="opened"
     except Exception:out["status"]="marketing_dialogue_not_opened"
 finally:b.close()
