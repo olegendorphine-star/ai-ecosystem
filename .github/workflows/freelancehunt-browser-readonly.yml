@@ -1,0 +1,49 @@
+name: Freelancehunt - isolated VPS browser probe
+on:
+  push:
+    branches: [feature/freelancehunt-api-probe-20261111]
+    paths:
+      - 'tools/freelancehunt_browser_readonly.py'
+      - '.github/workflows/freelancehunt-browser-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Check syntax
+        run: python3 -m py_compile tools/freelancehunt_browser_readonly.py
+      - name: Check Freelancehunt via VPS headed Chromium (no account writes)
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          SSH_KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER" && test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          printf '%s' "$SSH_KEY" | base64 -d > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ssh/key" "$RUNNER_TEMP/ssh/known_hosts"
+          cat tools/freelancehunt_browser_readonly.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' \
+          | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get("schema")=="fh.browser.readonly.v1"
+          assert d["fl_cookies_used"] is False and d["write_actions"] is False
+          print("FH_BROWSER_RESULT",d["status"])
+          for k,v in d["pages"].items():
+              print("FH_BROWSER_PAGE",k,v["status"],v["result"],v.get("redirected"))
+          if d["status"]!="checked":sys.exit(2)
+          '
