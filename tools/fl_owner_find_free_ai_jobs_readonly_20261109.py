@@ -14,11 +14,12 @@ SOURCES=[
  ("ai","https://www.fl.ru/projects/category/ai-iskusstvenniy-intellekt/"),
  ("ai_agents","https://www.fl.ru/projects/category/ai-iskusstvenniy-intellekt/ai-agenty/"),
  ("business","https://www.fl.ru/projects/category/avtomatizaciya-biznesa/"),
+ ("leadgen","https://www.fl.ru/projects/category/reklama-marketing/prodaji-i-generatsiya-lidov/"),
  ("n8n","https://www.fl.ru/projects/category/ai-iskusstvenniy-intellekt/n8n/"),
  ("bots","https://www.fl.ru/projects/category/messendzhery/"),
 ]
-SKIP={"5528311","5528212","5528431","5528498","5528403","5527732","5527458","5528049","5528568","5528574","5527838"}
-TERMS=["ии","ai","агент","бот","n8n","автоматиз","интеграц","crm","api","telegram","таблиц","документ","данн","google","скрипт","впс","vps","чат","ассистент","нейросет","ботов","rag","python","ocr","бизнес-аналит","голосов","тз","партнер","процесс","система","автопарк"]
+SKIP={"5528311","5528212","5528431","5528498","5528403","5527732","5527458","5528049","5528568","5528574","5527838","5528616"}
+TERMS=["ии","ai","агент","бот","n8n","автоматиз","интеграц","crm","api","telegram","таблиц","документ","данн","google","скрипт","впс","vps","чат","ассистент","нейросет","ботов","rag","python","ocr","бизнес-аналит","голосов","тз","партнер","процесс","система","автопарк","привлечение клиентов","авито","лиды","лидоген"]
 out={"schema":"fl.owner.free.ai.job.discovery.v1","asof_utc":datetime.now(timezone.utc).isoformat(timespec="seconds"),"owner_verified":False,"read_only":True,"bids_sent":False,"payments":False,"messages_read":False,"captcha":False,"categories":[],"candidates":[],"details":[]}
 b=Browser()
 try:
