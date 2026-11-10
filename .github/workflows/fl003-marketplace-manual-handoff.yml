@@ -1,0 +1,143 @@
+name: FL-003 manual marketplace handoff - encrypted 20 min portal
+
+on:
+  pull_request:
+    paths:
+      - 'tools/fl003_marketplace_handoff.py'
+      - 'tools/fl003_handoff_owner_public.pem'
+      - '.github/workflows/fl003-marketplace-manual-handoff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate allowlist and key
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl003_marketplace_handoff.py
+          python3 tools/fl003_marketplace_handoff.py --selftest
+          openssl pkey -pubin -in tools/fl003_handoff_owner_public.pem -noout
+
+  owner_portal:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare existing pinned SSH credentials
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/fl003-ssh"
+          printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl003-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl003-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fl003-ssh/key" "$RUNNER_TEMP/fl003-ssh/known_hosts"
+      - name: Deploy ONLY isolated Ozon/Avito handoff script
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          cat tools/fl003_marketplace_handoff.py | ssh -F /dev/null -4 -T \
+             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+             -o StrictHostKeyChecking=yes \
+             -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" \
+             -o IdentitiesOnly=yes -o LogLevel=ERROR \
+             -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" \
+             "$USER@$HOST" \
+             'install -d -m 700 "$HOME/.fl003-handoff" && cat > "$HOME/.fl003-handoff/app.py" && chmod 600 "$HOME/.fl003-handoff/app.py"'
+          echo FL003_HANDOFF_CODE_INSTALLED
+      - name: Start private 20-minute localhost portal and external HTTPS tunnel
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -4 -T \
+             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+             -o StrictHostKeyChecking=yes \
+             -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" \
+             -o IdentitiesOnly=yes -o LogLevel=ERROR \
+             -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" \
+             "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          root="$HOME/.fl003-handoff"
+          test -x "$HOME/.avito-agent/venv/bin/python"
+          test -x "$HOME/.local/bin/cloudflared"
+          if curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 http://127.0.0.1:8993/health >/dev/null 2>&1; then
+            echo PORT_ALREADY_IN_USE
+            exit 1
+          fi
+          umask 077
+          : > "$root/server.log"
+          : > "$root/cloudflared.log"
+          setsid nohup timeout 1200s env \
+            LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$HOME/.avito-agent/venv/bin/python" "$root/app.py" \
+            > "$root/server.log" 2>&1 < /dev/null &
+          echo $! > "$root/app.pid"
+          ok=0
+          for i in $(seq 1 30); do
+            if curl --noproxy '*' -fsS --max-time 2 http://127.0.0.1:8993/health | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ready") is True' 2>/dev/null; then ok=1;break; fi
+            sleep 1
+          done
+          if [ "$ok" != 1 ] || [ ! -s "$root/handoff_token" ]; then echo PORTAL_NOT_READY;exit 1; fi
+          setsid nohup timeout 1230s "$HOME/.local/bin/cloudflared" \
+             tunnel --no-autoupdate --url http://127.0.0.1:8993 \
+             > "$root/cloudflared.log" 2>&1 < /dev/null &
+          echo $! > "$root/tunnel.pid"
+          found=0
+          for i in $(seq 1 35); do
+            if grep -Eq 'https://[a-z0-9-]+\.trycloudflare\.com' "$root/cloudflared.log"; then found=1;break; fi
+            sleep 1
+          done
+          if [ "$found" != 1 ]; then echo CLOUDFLARE_TUNNEL_UNAVAILABLE;exit 1; fi
+          echo PORTAL_LOCAL_AND_TUNNEL_STARTED
+          REMOTE
+      - name: Encrypt one-time access link; never publish URL or token in logs
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ciphertext="$(ssh -F /dev/null -4 -T \
+             -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+             -o StrictHostKeyChecking=yes \
+             -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" \
+             -o IdentitiesOnly=yes -o LogLevel=ERROR \
+             -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}" \
+             "$USER@$HOST" 'python3 -' <<'PY' | \
+             openssl pkeyutl -encrypt -pubin -inkey tools/fl003_handoff_owner_public.pem \
+                -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | base64 -w0
+          from pathlib import Path
+          import re,sys
+          root=Path.home()/'.fl003-handoff'
+          token=(root/'handoff_token').read_text().strip()
+          log=(root/'cloudflared.log').read_text(errors='replace')
+          links=re.findall(r'https://[a-z0-9-]+\.trycloudflare\.com',log)
+          if not links or len(token)<32:raise SystemExit('private_link_unavailable')
+          plaintext=links[-1]+'/#'+token
+          if len(plaintext)>180:raise SystemExit('private_link_too_long')
+          sys.stdout.buffer.write(plaintext.encode())
+          PY
+          )"
+          test -n "$ciphertext"
+          printf 'FL003_HANDOFF_CIPHER=%s\n' "$ciphertext"
+          echo FL003_HANDOFF_LINK_ENCRYPTED_ONLY
