@@ -39,7 +39,7 @@ def safe_file(path,value):
 try:
   with tempfile.TemporaryDirectory(prefix="fl-own-about-refresh-",dir=ROOT) as tmp:
     browser.open(Path(tmp));p=browser.page
-    navigate(p,ALLOWED_PAGES["settings"])
+    navigate(p,"https://www.fl.ru/users/olegendorphine/setup/main/")
     s=p.evaluate("""()=>({
        own:Array.from(document.querySelectorAll('input')).some(
          x=>(x.value||'').trim().toLowerCase()==='olegendorphine@gmail.com'),
