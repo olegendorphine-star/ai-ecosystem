@@ -33,7 +33,7 @@ try:
           grand:(grand?.innerText||'').replace(/\\s+/g,' ').slice(0,180),
           great:(great?.innerText||'').replace(/\\s+/g,' ').slice(0,220),
           parentTag:parent?.tagName,grandTag:grand?.tagName,grandClass:grand?.className?.toString().slice(0,120),
-          dataKeys:Object.keys(e.dataset||{}).slice(0,15)
+          dataKeys:Object.keys(e.dataset||{}).slice(0,15),functionName:String(e.dataset?.function||"").replace(/[^A-Za-z_]/g,"").slice(0,70),paramDigits:String(e.dataset?.functionParams||"").match(/\\d{1,8}/g)?.slice(0,12)||[]
         };
       });
     }""")
