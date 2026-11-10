@@ -78,7 +78,7 @@ jobs:
             # Only sealed RSA-OAEP ciphertext enters CI. Plaintext never does.
             test "$(wc -c < ops/freelancehunt-token-sealed.b64)" -le 2048
             base64 -d ops/freelancehunt-token-sealed.b64 | wc -c | awk '{if($1 != 384) exit 1}'
-            base64 -d ops/freelancehunt-token-sealed.b64 | ssh "${opts[@]}" "$target" 'bash -c '\''set -euo pipefail; umask 077; d="$HOME/.freelancehunt-agent"; mkdir -p -m 700 "$d"; cat > "$d/payload.enc"; chmod 600 "$d/payload.enc"'\''
+            base64 -d ops/freelancehunt-token-sealed.b64 | ssh "${opts[@]}" "$target" 'umask 077; mkdir -p -m 700 "$HOME/.freelancehunt-agent"; cat > "$HOME/.freelancehunt-agent/payload.enc"; chmod 600 "$HOME/.freelancehunt-agent/payload.enc"'
             ssh "${opts[@]}" "$target" 'bash -s' <<'REMOTE'
           set -euo pipefail
           umask 077
