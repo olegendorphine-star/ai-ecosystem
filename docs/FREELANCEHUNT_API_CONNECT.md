@@ -19,4 +19,4 @@
 
 ## Приёмка
 
-Офлайн-тесты `python -m unittest tests/test_freelancehunt_probe.py`; затем отдельно workflow с безопасным секретом. Пока workflow не выполнен успешно, не заявлять о подключении Freelancehunt или готовности автооткликов.
+Офлайн-тесты `python -m unittest discover -s tests -p test_freelancehunt_probe.py`; затем отдельно workflow с безопасным секретом. Пока workflow не выполнен успешно, не заявлять о подключении Freelancehunt или готовности автооткликов.
