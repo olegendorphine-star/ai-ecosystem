@@ -26,6 +26,7 @@ ROOT=Path.home()/".fl003-demo"
 DATABASE=ROOT/"state"/"tasks.sqlite3"
 TELEGRAM_SOCKET=Path.home()/".telegram-agent"/"browser"/"resident"/"operator.sock"
 EVIDENCE=Path.home()/".fl003-handoff"/"verified_evidence.json"
+AUTONOMOUS_INDEX=Path.home()/".fl003-autonomous"/"reports"/"latest.json"
 TEST_MARKERS={"FL003: ТОВАР M185":"shop_m185","FL003: ПИСЬМО ТЕСТ":"mail_test"}
 DOC_VERSION="fl003.task.engine.v1"
 
@@ -68,7 +69,7 @@ class Store:
         return self.conn.execute("SELECT source_key,kind FROM tasks WHERE state='queued' ORDER BY created_utc LIMIT 10").fetchall()
 
     def finish(self,key,state,result:dict):
-        if state not in ("waiting_human","draft_ready","blocked","failed"):
+        if state not in ("waiting_human","partial_report_ready","draft_ready","blocked","failed"):
             raise ValueError("invalid_state")
         with self.conn:
             self.conn.execute("UPDATE tasks SET state=?,result_json=? WHERE source_key=? AND state='queued'",
@@ -78,7 +79,7 @@ class Store:
         return self.conn.execute(
             "SELECT t.source_key,t.kind,t.state,t.result_json FROM tasks t "
             "LEFT JOIN self_notifications n ON n.source_key=t.source_key AND n.state=t.state "
-            "WHERE t.source_key LIKE 'tg_%' AND t.state IN ('waiting_human','draft_ready') "
+            "WHERE t.source_key LIKE 'tg_%' AND t.state IN ('waiting_human','partial_report_ready','draft_ready') "
             "AND n.source_key IS NULL ORDER BY t.created_utc LIMIT 6").fetchall()
 
     def claim_notification(self,source_key,state):
@@ -95,11 +96,21 @@ class Store:
                 (status,source_key,state))
 
     def requeue_waiting_shopping(self):
-        """Resume only after a fresh independently captured owner-browser comparison."""
-        if read_verified_products() is None:
-            return 0
+        """Migrate legacy manual-wait tasks to autonomous partial reports.
+
+        When real verified evidence eventually becomes available, re-run a
+        partial report for final price comparison without manual retry loops.
+        """
+        verified=read_verified_products() is not None
         with self.conn:
-            cur=self.conn.execute("UPDATE tasks SET state='queued' WHERE kind='shop_m185' AND state='waiting_human'")
+            if verified:
+                cur=self.conn.execute(
+                    "UPDATE tasks SET state='queued' WHERE kind='shop_m185' "
+                    "AND state IN ('waiting_human','partial_report_ready')")
+            else:
+                cur=self.conn.execute(
+                    "UPDATE tasks SET state='queued' WHERE kind='shop_m185' "
+                    "AND state='waiting_human'")
         return cur.rowcount
 
     def summary(self):
@@ -192,6 +203,46 @@ def read_verified_products(evidence=EVIDENCE,max_age_minutes=35):
     except (OSError,KeyError,ValueError,TypeError,OverflowError):
         return None
 
+def read_recent_autonomous_index(path=AUTONOMOUS_INDEX,max_age_hours=24):
+    """Read source-labeled candidates, never elevate index prices to live."""
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        st=path.stat()
+        if st.st_uid!=os.getuid() or st.st_mode & 0o077 or st.st_size>180_000:
+            return None
+        obj=json.loads(path.read_text(encoding="utf8"))
+        if obj.get("schema")!="fl003.autonomous.marketplace.report.v1":
+            return None
+        checked=dt.datetime.fromisoformat(obj["searched_utc"].replace("Z","+00:00"))
+        lag=(utc_now()-checked.astimezone(dt.timezone.utc)).total_seconds()
+        if lag<0 or lag>max_age_hours*3600:
+            return None
+        markets=obj.get("marketplaces") or []
+        if set(m.get("marketplace") for m in markets)!={"Ozon","Avito"}:
+            return None
+        candidates=[]
+        for market in ("Ozon","Avito"):
+            group=next(m for m in markets if m["marketplace"]==market)
+            c=group.get("candidates") or []
+            first=c[0] if c else None
+            link=first.get("url") if first else ""
+            expected="ozon.ru" if market=="Ozon" else "avito.ru"
+            if link:
+                parsed=urlsplit(link)
+                if parsed.scheme!="https" or not (parsed.hostname==expected or parsed.hostname.endswith("."+expected)):
+                    return None
+            candidates.append({"marketplace":market,"source_url":link,
+                               "status":"yandex_index_candidate_unverified",
+                               "price_rub":None,"checked_at_utc":obj["searched_utc"]})
+        return {"source":"Yandex Search API index",
+                "products":candidates,"full_comparison_verified":False,
+                "candidate_counts":obj.get("candidate_counts") or {},
+                "requires_owner_captcha":False}
+    except (OSError,ValueError,TypeError,KeyError,StopIteration,OverflowError):
+        return None
+
+
 def execute_tasks(store:Store,offline=False):
     result=[]
     for key,kind in store.pending():
@@ -202,11 +253,15 @@ def execute_tasks(store:Store,offline=False):
                           "source_url":s["url"],"price_rub":None,"status":"not_checked_offline"}
                           for s in CARD_SOURCES],"full_comparison_verified":False}
                 else:
-                    shop=read_verified_products() or shop_live()
+                    verified=read_verified_products()
+                    # Prefer already-fetched Yandex index data over repeated
+                    # marketplace browser challenges. No owner involvement.
+                    shop=verified or read_recent_autonomous_index() or shop_live()
                 ready=bool(shop["full_comparison_verified"])
-                state="draft_ready" if ready else "waiting_human"
+                state="draft_ready" if ready else "partial_report_ready"
                 content={"kind":kind,"status":state,"shopping":shop,
-                         "action":"offer_comparison" if ready else "manual_marketplace_gate",
+                         "action":"offer_comparison" if ready else "report_source_limitations",
+                         "requires_owner_captcha":False,
                          "message_sent":False}
             else:
                 mail=parse_mail(create_synthetic_mail())
@@ -232,8 +287,17 @@ def notify_own_saved_messages(store:Store)->dict:
     for key,kind,state,raw in store.unsent_self_notifications():
         if kind=="mail_test" and state=="draft_ready":
             text="FL003: Тестовое письмо с CSV/DOCX разобрано на VPS, черновик ответа подготовлен. Ничего не отправлено. Данные синтетические."
-        elif kind=="shop_m185" and state=="waiting_human":
-            text="FL003: Подбор M185 ожидает проверку карточек Ozon/Авито в приватном браузере VPS. Цены пока не подтверждены."
+        elif kind=="shop_m185" and state in ("waiting_human","partial_report_ready"):
+            try:
+                data=json.loads(raw or "{}")
+                counts=data.get("shopping",{}).get("candidate_counts") or {}
+                found=(" Поиск: Ozon "+str(counts.get("Ozon",0))
+                       +", Авито "+str(counts.get("Avito",0))+".") if counts else ""
+            except (ValueError,TypeError):
+                found=""
+            text=("FL003 VPS: запрос M185 обработан автономно."+found+
+                  " Актуальные цены не подтверждены. Система сообщила ограничения, "
+                  "капча и действия владельца не требуются.")
         elif kind=="shop_m185" and state=="draft_ready":
             try:
                 data=json.loads(raw or "{}")
