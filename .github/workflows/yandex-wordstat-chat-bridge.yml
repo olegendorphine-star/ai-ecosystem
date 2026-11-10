@@ -54,7 +54,7 @@ jobs:
           YANDEX_WORDSTAT_API_KEY: ${{ secrets.yandex_api }}
           YANDEX_WORDSTAT_FOLDER_ID: ${{ secrets.YANDEX_WORDSTAT_FOLDER_ID }}
           # Owner authorized paid Wordstat requests on 2026-11-10.
-          # Worker hard-limits GetTop to 10 per UTC day; paid calls require folder ID.
+          # Worker hard-limits GetTop to 10 per UTC day; service-account folderId is optional.
           WORDSTAT_ALLOW_BILLABLE: 'true'
         run: |
           set -euo pipefail

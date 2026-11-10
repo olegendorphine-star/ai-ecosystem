@@ -123,14 +123,20 @@ class WordstatBridgeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 w.read_bot_results("test-token")
 
-    def test_paid_calls_require_folder_id(self):
-        with patch.object(w, "request_json") as api:
-            result = w.call_wordstat({"action": "top", "phrase": "ИИ собеседник",
-                                      "region": "225", "device": "DEVICE_ALL"},
-                                     "mock-key", "", True)
-            self.assertEqual(result["status"], "not_configured")
-            self.assertEqual(result["missing"], "folder_id")
-            api.assert_not_called()
+    def test_paid_service_account_omits_folder_id(self):
+        response = {"totalCount": "120",
+                    "results": [{"phrase": "ии собеседник", "count": "120"}],
+                    "associations": []}
+        for configured_folder in ("", "potentially-wrong-folder"):
+            with self.subTest(folder=configured_folder):
+                with patch.object(w, "request_json", return_value=response) as api:
+                    result = w.call_wordstat(
+                        {"action": "top", "phrase": "ИИ собеседник",
+                         "region": "225", "device": "DEVICE_ALL"},
+                        "mock-key", configured_folder, True)
+                    self.assertEqual(result["status"], "ok")
+                    self.assertNotIn("folderId", api.call_args.args[2])
+                    self.assertEqual(api.call_args.args[2]["regions"], ["225"])
 
     def test_missing_credentials_never_calls_api(self):
         with patch.object(w, "request_json") as api:

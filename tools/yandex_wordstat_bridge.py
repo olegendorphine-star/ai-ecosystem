@@ -152,11 +152,11 @@ def call_wordstat(command: dict, api_key: str, folder_id: str,
                 "root_count": len(roots), "billable": False}
     if not allow_paid:
         return {"status": "paid_requests_disabled", "method": "GetTop"}
-    if not folder_id:
-        return {"status": "not_configured", "missing": "folder_id"}
+    # For an API key issued to a service account, Yandex Search API uses
+    # that account's folder. An explicit mismatched folderId can return 403.
+    # Do not attach the optional folderId even if a secret is configured.
     payload = {"phrase": command["phrase"], "numPhrases": 20,
-               "regions": [command["region"]], "devices": [command["device"]],
-               "folderId": folder_id}
+               "regions": [command["region"]], "devices": [command["device"]]}
     result = request_json(YANDEX_BASE + "topRequests", auth, payload, method="POST")
     if not isinstance(result, dict) or not isinstance(result.get("results"), list):
         return {"status": "unexpected_yandex_response"}
@@ -197,7 +197,7 @@ def main() -> int:
         if any(item.get("command_id") == command["command_id"] for item in history):
             print("Command already handled")
             return 0
-        if command["action"] == "top" and allow_paid and key and folder_id:
+        if command["action"] == "top" and allow_paid and key:
             # Fixed spending limit: 10 GetTop requests per UTC day (10 x 0.02 RUB).
             # Fail closed if a reservation cannot be posted to the trusted issue.
             # Reservations prevent a crashed run from silently retrying a paid call.
