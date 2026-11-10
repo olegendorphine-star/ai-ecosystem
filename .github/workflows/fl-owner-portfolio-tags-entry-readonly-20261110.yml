@@ -42,4 +42,5 @@ jobs:
           assert d["schema"]=="fl.owner.portfolio.tags.entry.readonly.v1"
           assert d["owner"] and d["read_only"] and not d["payments"] and not d["write"]
           for x in d["sections"]: print("FL_SECTION_EDIT",json.dumps(x,ensure_ascii=False))
+          print("FL_EDIT_MODAL",json.dumps(d.get("modal",{}),ensure_ascii=False))
           '
