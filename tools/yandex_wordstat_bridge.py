@@ -102,12 +102,16 @@ def find_existing_result(gh_token: str, command_id: str) -> bool:
 
 def call_wordstat(command: dict, api_key: str, folder_id: str,
                   allow_paid: bool) -> dict:
-    if not api_key or not folder_id:
-        return {"status": "not_configured"}
+    if not api_key:
+        return {"status": "not_configured", "missing": "api_key"}
     auth = "Api-Key " + api_key
     if command["action"] == "regions":
+        # The official REST example also supports a POST without a folder ID.
+        # Include it when available, but avoid requiring a second secret
+        # just for the free connection check.
+        payload = {"folderId": folder_id} if folder_id else {}
         result = request_json(YANDEX_BASE + "getRegionsTree", auth,
-                              {"folderId": folder_id}, method="POST")
+                              payload, method="POST")
         if not isinstance(result, dict) or not isinstance(result.get("regions"), list):
             return {"status": "unexpected_yandex_response"}
         roots = result["regions"]
@@ -117,6 +121,8 @@ def call_wordstat(command: dict, api_key: str, folder_id: str,
                 "root_count": len(roots), "billable": False}
     if not allow_paid:
         return {"status": "paid_requests_disabled", "method": "GetTop"}
+    if not folder_id:
+        return {"status": "not_configured", "missing": "folder_id"}
     payload = {"phrase": command["phrase"], "numPhrases": 20,
                "regions": [command["region"]], "devices": [command["device"]],
                "folderId": folder_id}
