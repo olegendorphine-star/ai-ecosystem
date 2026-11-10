@@ -81,7 +81,7 @@ try:
      open_edit(p,id)
      title_field=p.locator("#ui-input-example-name-input")
      if title_field.count()!=1 or title_field.input_value().strip()!=title:
-      x["status"]="title_mismatch";break
+      x["status"]="title_mismatch_skip";x["editor_title"]=title_field.input_value().strip()[:85] if title_field.count()==1 else "";continue
      continue_step(p)
      desc=p.locator("#ui-textarea-description-input")
      if desc.count()!=1: x["status"]="description_field_missing";break
