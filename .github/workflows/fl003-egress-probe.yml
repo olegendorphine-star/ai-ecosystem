@@ -1,0 +1,44 @@
+name: FL-003 independent egress probe — Ozon Avito MVideo (read only)
+on:
+  pull_request:
+    paths:
+      - 'tools/fl003_egress_probe.py'
+      - '.github/workflows/fl003-egress-probe.yml'
+permissions:
+  contents: read
+jobs:
+  egress:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Offline validate safety guard and syntax
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl003_egress_probe.py
+          python3 tools/fl003_egress_probe.py --selftest
+      - name: Set up browser on independent cloud runner
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -q 'playwright==1.56.0'
+          python3 -m playwright install chromium
+      - name: Check read-only site reachability — no messages or account access
+        run: |
+          set -euo pipefail
+          python3 tools/fl003_egress_probe.py --out-dir fl003-egress
+          python3 - fl003-egress/report.json <<'PY'
+          import json,sys
+          data=json.load(open(sys.argv[1],encoding='utf8'))
+          assert data['schema']=='fl003.marketplace.egress.v1'
+          assert data['requests_limit']==3 and len(data['sites'])==3
+          assert data['outbound_messages_sent']==0 and data['purchases']==0
+          print('FL003_INDEPENDENT_EGRESS_RESULT',[(s['marketplace'],s['http_status'],s['page_status']) for s in data['sites']])
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fl003-INTERNAL-independent-egress-diagnostic
+          path: fl003-egress
+          retention-days: 7
+          if-no-files-found: error
