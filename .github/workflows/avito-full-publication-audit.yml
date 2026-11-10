@@ -2,6 +2,9 @@ name: Avito full publication audit
 on:
   push:
     branches: ["main"]
+    paths:
+      - 'docs/avito-feed.xml'
+      - '.github/workflows/avito-full-publication-audit.yml'
   workflow_dispatch:
 permissions:
   contents: read
