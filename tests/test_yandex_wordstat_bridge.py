@@ -90,6 +90,48 @@ class WordstatBridgeTests(unittest.TestCase):
             self.assertEqual(result["results"][0]["count"], "120")
             self.assertIn("topRequests", api.call_args.args[0])
 
+    def test_paid_daily_budget_counts_only_started_calls(self):
+        records = [
+            {"status": "started", "method": "GetTop",
+             "checked_at": "2026-11-10T02:00:00+00:00"},
+            {"status": "ok", "method": "GetTop",
+             "checked_at": "2026-11-10T02:01:00+00:00"},
+            {"status": "started", "method": "GetTop",
+             "checked_at": "2026-11-09T23:59:00+00:00"},
+            {"status": "started", "method": "GetRegionsTree",
+             "checked_at": "2026-11-10T02:02:00+00:00"},
+        ]
+        self.assertEqual(w.count_daily_paid_reservations(records, self.now), 1)
+
+    def test_paid_history_only_trusts_bot(self):
+        history = [
+            {"user": {"login": "outsider"}, "body":
+             w.RESULT_PREFIX + json.dumps(
+                 {"command_id": self.id, "status": "started", "method": "GetTop"})},
+            {"user": {"login": "github-actions[bot]"}, "body":
+             w.RESULT_PREFIX + json.dumps(
+                 {"command_id": "bot", "status": "started", "method": "GetTop"})},
+        ]
+        with patch.object(w, "request_json", return_value=history):
+            results = w.read_bot_results("test-token")
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["command_id"], "bot")
+
+    def test_paid_history_fails_closed_on_pagination_cap(self):
+        page = [{"user": {"login": "outsider"}, "body": "x"}] * 100
+        with patch.object(w, "request_json", return_value=page):
+            with self.assertRaises(ValueError):
+                w.read_bot_results("test-token")
+
+    def test_paid_calls_require_folder_id(self):
+        with patch.object(w, "request_json") as api:
+            result = w.call_wordstat({"action": "top", "phrase": "ИИ собеседник",
+                                      "region": "225", "device": "DEVICE_ALL"},
+                                     "mock-key", "", True)
+            self.assertEqual(result["status"], "not_configured")
+            self.assertEqual(result["missing"], "folder_id")
+            api.assert_not_called()
+
     def test_missing_credentials_never_calls_api(self):
         with patch.object(w, "request_json") as api:
             result = w.call_wordstat({"action": "regions"}, "", "", False)

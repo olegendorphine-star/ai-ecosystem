@@ -83,21 +83,52 @@ def request_json(url: str, token: str, payload: dict | None = None,
     return json.loads(raw.decode("utf-8"))
 
 
-def find_existing_result(gh_token: str, command_id: str) -> bool:
-    # Fail closed on any GitHub read error, especially before a billed request.
-    comments = request_json(GITHUB_COMMENTS + "?per_page=100", "Bearer " + gh_token)
-    if not isinstance(comments, list):
-        raise ValueError("unexpected_github_response")
-    for comment in comments:
-        body = comment.get("body", "") if isinstance(comment, dict) else ""
-        if body.startswith(RESULT_PREFIX):
-            try:
-                obj = json.loads(body[len(RESULT_PREFIX):])
-                if obj.get("command_id") == command_id:
-                    return True
-            except (ValueError, TypeError, AttributeError):
+def read_bot_results(gh_token: str) -> list[dict]:
+    """Read all visible response pages; fail closed if the history exceeds cap."""
+    results = []
+    for page in range(1, 21):
+        url = GITHUB_COMMENTS + "?per_page=100&page=" + str(page)
+        comments = request_json(url, "Bearer " + gh_token)
+        if not isinstance(comments, list):
+            raise ValueError("unexpected_github_response")
+        for comment in comments:
+            if not isinstance(comment, dict):
                 continue
-    return False
+            if comment.get("user", {}).get("login") != "github-actions[bot]":
+                continue
+            body = comment.get("body", "")
+            if not isinstance(body, str) or not body.startswith(RESULT_PREFIX):
+                continue
+            try:
+                record = json.loads(body[len(RESULT_PREFIX):])
+                if isinstance(record, dict):
+                    results.append(record)
+            except ValueError:
+                continue
+        if len(comments) < 100:
+            return results
+    raise ValueError("history_too_large_fail_closed")
+
+
+def find_existing_result(gh_token: str, command_id: str) -> bool:
+    return any(record.get("command_id") == command_id
+               for record in read_bot_results(gh_token))
+
+
+def count_daily_paid_reservations(records: list[dict], now: dt.datetime) -> int:
+    """All paid requests must have a durable reservation before dispatch."""
+    day = now.date().isoformat()
+    return sum(1 for item in records
+               if item.get("status") == "started"
+               and item.get("method") == "GetTop"
+               and str(item.get("checked_at", "")).startswith(day))
+
+
+def post_result(gh_token: str, result: dict) -> None:
+    body = RESULT_PREFIX + json.dumps(result, ensure_ascii=False,
+                                      separators=(",", ":"))
+    request_json(GITHUB_COMMENTS, "Bearer " + gh_token,
+                 {"body": body}, "POST")
 
 
 def call_wordstat(command: dict, api_key: str, folder_id: str,
@@ -157,16 +188,31 @@ def main() -> int:
     if not gh_token:
         print("GitHub token unavailable")
         return 1
+
+    key = os.environ.get("YANDEX_WORDSTAT_API_KEY", "")
+    folder_id = os.environ.get("YANDEX_WORDSTAT_FOLDER_ID", "")
+    allow_paid = os.environ.get("WORDSTAT_ALLOW_BILLABLE", "false").lower() == "true"
     try:
-        if find_existing_result(gh_token, command["command_id"]):
+        history = read_bot_results(gh_token)
+        if any(item.get("command_id") == command["command_id"] for item in history):
             print("Command already handled")
             return 0
-        response = call_wordstat(
-            command,
-            os.environ.get("YANDEX_WORDSTAT_API_KEY", ""),
-            os.environ.get("YANDEX_WORDSTAT_FOLDER_ID", ""),
-            os.environ.get("WORDSTAT_ALLOW_BILLABLE", "false").lower() == "true",
-        )
+        if command["action"] == "top" and allow_paid and key and folder_id:
+            # Fixed spending limit: 10 GetTop requests per UTC day (10 x 0.02 RUB).
+            # Fail closed if a reservation cannot be posted to the trusted issue.
+            # Reservations prevent a crashed run from silently retrying a paid call.
+            if count_daily_paid_reservations(history, now) >= 10:
+                response = {"status": "daily_paid_limit_reached",
+                            "daily_limit": 10, "method": "GetTop"}
+            else:
+                post_result(gh_token, {
+                    "status": "started", "method": "GetTop", "billable": True,
+                    "command_id": command["command_id"],
+                    "checked_at": now.isoformat(), "source": "Yandex Wordstat API"
+                })
+                response = call_wordstat(command, key, folder_id, True)
+        else:
+            response = call_wordstat(command, key, folder_id, allow_paid)
     except HTTPError as exc:
         response = {"status": "upstream_http_error", "code": exc.code}
     except (URLError, TimeoutError, ValueError, TypeError, KeyError):
@@ -174,9 +220,8 @@ def main() -> int:
     response["command_id"] = command["command_id"]
     response["checked_at"] = now.isoformat()
     response["source"] = "Yandex Wordstat API"
-    body = RESULT_PREFIX + json.dumps(response, ensure_ascii=False, separators=(",", ":"))
     try:
-        request_json(GITHUB_COMMENTS, "Bearer " + gh_token, {"body": body}, "POST")
+        post_result(gh_token, response)
     except (HTTPError, URLError, TimeoutError, ValueError):
         print("Result could not be posted; do not re-run a billed request blindly")
         return 1
