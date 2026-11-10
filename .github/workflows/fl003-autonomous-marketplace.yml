@@ -101,7 +101,7 @@ jobs:
           printf '%s' "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/fl003-ssh/key"
           printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/fl003-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/fl003-ssh/key" "$RUNNER_TEMP/fl003-ssh/known_hosts"
-      - name: Execute real autonomous report on VPS and deliver own Telegram note
+      - name: Execute read-only autonomous report on VPS (no outbound messages)
         env:
           HOST: ${{ secrets.AVITO_SERVER_HOST }}
           USER: ${{ secrets.AVITO_SERVER_USER }}
@@ -120,7 +120,7 @@ jobs:
             --search-json "$base/fl003-source.json" \
             --apish-json "$base/fl003-avito-provider.json" \
             --mail-eml "$base/tests/fixtures/fl003_gmail_real_message_sanitized.eml" \
-            --out "$base/reports/$FL003_RUN_ID.json" --notify-own-telegram
+            --out "$base/reports/$FL003_RUN_ID.json"
           REMOTE
           python3 - "$RUNNER_TEMP/fl003-summary.json" <<'PY'
           import json,sys
@@ -130,7 +130,8 @@ jobs:
           assert d['client_demo_accepted'] is False
           print('VPS_AUTONOMOUS_STATUS',d['status'])
           print('VPS_AUTONOMOUS_COUNTS',d['counts'])
-          print('VPS_OWN_TELEGRAM_DELIVERY',d['telegram_delivery'])
+          assert d['telegram_delivery']=='not_requested'
+          print('VPS_OUTBOUND_MESSAGE_COUNT',0)
           PY
           ssh "${ssh_opts[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-report.json"
           set -euo pipefail
