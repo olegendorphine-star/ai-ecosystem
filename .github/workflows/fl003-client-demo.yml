@@ -5,6 +5,7 @@ on:
     paths:
       - 'tools/fl003_client_demo.py'
       - 'tools/fl003_screencast.py'
+      - 'tools/fl003_yandex_marketplace_search.py'
       - 'tests/test_fl003_client_demo.py'
       - '.github/workflows/fl003-client-demo.yml'
   workflow_dispatch:
@@ -78,6 +79,25 @@ jobs:
           print("VPS_DEMO_SHOPPING_STATUS", [p["status"] for p in d["shopping"]["products"]])
           print("VPS_DEMO_FULL_CLIENT_DEMO_READY", d["client_facing_full_demo_ready"])
           PY
+      - name: Discover live indexed Ozon and Avito product links using bounded Yandex API
+        env:
+          YANDEX_FL003_API_KEY: ${{ secrets.YANDEX_FL003_WEBSEARCH_API_KEY || secrets.yandex_api }}
+          YANDEX_FL003_FOLDER_ID: b1ga59a6ib54m2km5cgd
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/fl003_yandex_marketplace_search.py
+          python3 tools/fl003_yandex_marketplace_search.py --dry-run
+          python3 tools/fl003_yandex_marketplace_search.py --out "$RUNNER_TEMP/fl003-yandex-index.json"
+          python3 - "$RUNNER_TEMP/fl003-yandex-index.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding='utf8'))
+          assert d['schema']=='fl003.yandex.search.index.v1'
+          assert d['requests_sent']==2
+          assert len(d['marketplaces'])==2
+          assert all(m['status']=='found' and m['candidates'] for m in d['marketplaces'])
+          assert all(c['live_price_verified'] is False for m in d['marketplaces'] for c in m['candidates'])
+          print('YANDEX_SEARCH_CANDIDATES', [(m['marketplace'],len(m['candidates'])) for m in d['marketplaces']])
+          PY
       - name: Record real server Chromium browser with anonymized email
         env:
           HOST: ${{ secrets.AVITO_SERVER_HOST }}
@@ -87,13 +107,13 @@ jobs:
         run: |
           set -euo pipefail
           ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}")
-          tar -czf - tools/fl003_client_demo.py tools/fl003_screencast.py | ssh "${ssh_args[@]}" "$USER@$HOST" 'install -d -m 700 "$HOME/.fl003-screencast" && tar -xzf - -C "$HOME/.fl003-screencast"'
+          tar -czf - tools/fl003_client_demo.py tools/fl003_screencast.py tools/fl003_yandex_marketplace_search.py -C "$RUNNER_TEMP" fl003-yandex-index.json | ssh "${ssh_args[@]}" "$USER@$HOST" 'install -d -m 700 "$HOME/.fl003-screencast" && tar -xzf - -C "$HOME/.fl003-screencast"'
           ssh "${ssh_args[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-video-summary.json"
           set -euo pipefail
           root="$HOME/.fl003-screencast"
           output="$root/output/$FL003_RUN_ID"
           umask 077
-          env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" "$root/tools/fl003_screencast.py" --output-dir "$output"
+          env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" "$root/tools/fl003_screencast.py" --output-dir "$output" --search-json "$root/fl003-yandex-index.json"
           test -s "$output/fl003-actual-vps-browser.webm"
           test -s "$output/report.json"
           REMOTE
@@ -113,6 +133,7 @@ jobs:
           REMOTE
           tar -xzf "$RUNNER_TEMP/fl003-output.tgz" -C "$RUNNER_TEMP/fl003-recording"
           test -s "$RUNNER_TEMP/fl003-recording/fl003-actual-vps-browser.webm"
+          cp "$RUNNER_TEMP/fl003-yandex-index.json" "$RUNNER_TEMP/fl003-recording/yandex-search-index.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fl003-real-vps-browser-screencast
