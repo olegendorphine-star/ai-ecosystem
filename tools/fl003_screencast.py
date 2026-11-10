@@ -77,17 +77,22 @@ def main():
     p=argparse.ArgumentParser()
     p.add_argument("--output-dir",required=True)
     p.add_argument("--search-json",default="")
+    p.add_argument("--mail-eml",default="")
+    p.add_argument("--panel-dir",default="")
     args=p.parse_args()
     out=Path(args.output_dir).expanduser()
     if out.is_symlink():raise SystemExit("unsafe_output_symlink")
     out.mkdir(mode=0o700,parents=True,exist_ok=True)
     os.chmod(out,0o700)
     search_evidence,sources=load_search_evidence(args.search_json)
+    panel_dir=Path(args.panel_dir) if args.panel_dir else None
+    if panel_dir and not panel_dir.is_dir():
+        raise ValueError("panel_dir_missing")
     when=datetime.now(timezone.utc).isoformat(timespec="seconds")
     report={"schema":"fl003.real.vps.screencast.v1",
             "checked_utc":when,"runtime":"isolated VPS Chromium / Playwright",
             "browser_on_vps":True,"recording_is_real_browser_session":True,
-            "mail_source":"SYNTHETIC .eml with actual CSV + DOCX file bytes",
+            "mail_source":"Gmail received privacy-sanitized MIME" if args.mail_eml else "SYNTHETIC .eml with actual CSV + DOCX file bytes",
             "mailbox_connected":False,"kimi_api_called":False,
             "external_messages_sent":0,"purchases":0,"products":[],
             "search_evidence":search_evidence}
@@ -98,15 +103,30 @@ def main():
             record_video_dir=str(out),record_video_size={"width":1280,"height":720})
         page=ctx.new_page()
         video=page.video
-        page.set_content(render("FL-003 · Протокол живого браузера VPS",
+        def display(panel,markup):
+            if panel_dir:
+                asset=panel_dir/(panel+".png")
+                if asset.is_symlink() or not asset.is_file() or asset.stat().st_size>3_000_000:
+                    raise RuntimeError("missing_video_panel_"+panel)
+                encoded=base64.b64encode(asset.read_bytes()).decode("ascii")
+                page.set_content("<html><body style='margin:0;background:#0d1727'>"
+                    "<img style='display:block;width:1280px;height:720px' src='data:image/png;base64,"
+                    +encoded+"'></body></html>")
+                page.wait_for_function("() => { const i=document.querySelector('img');return i&&i.complete&&i.naturalWidth===1280; }",timeout=8000)
+            else:
+                page.set_content(markup)
+        display("intro",render("FL-003 · Протокол живого браузера VPS",
             "<span class='tag'>Действительная сессия Playwright</span>"
             "<p>Поручение: выбрать Logitech M185 на Ozon и Авито.</p>"
             "<p class='small'>Каждый сайт открывается непосредственно из браузера сервера. "
             "Цены не подставляются из примеров. Если сайт ограничит доступ — это будет видно на записи.</p>"))
         # Verify the embedded Cyrillic-capable font loaded before accepting the recording.
-        page.evaluate("() => document.fonts.ready")
-        if page.evaluate("() => !document.fonts.check('24px FLDemo')"):
-            raise RuntimeError("demo_font_failed_to_load")
+        if not panel_dir:
+            page.evaluate("() => document.fonts.ready")
+            if page.evaluate("() => !document.fonts.check('24px FLDemo')"):
+                raise RuntimeError("demo_font_failed_to_load")
+        else:
+            page.screenshot(path=str(out/"frame_intro.png"))
         page.wait_for_timeout(3000)
         if search_evidence:
             names=search_evidence["filtered_candidate_counts"]
@@ -117,10 +137,10 @@ def main():
             summary+="<p class='bad'>Ссылки найдены в поиске. Текущие цены и наличие НЕ подтверждены.</p>"
             summary+=("<p class='small'>Первый Ozon: "+text(sources[0]["url"])+
                       "</p><p class='small'>Первый Авито: "+text(sources[1]["url"])+"</p>")
-            page.set_content(render("Поиск Яндекса · действительные результаты API",summary))
+            display("search",render("Поиск Яндекса · действительные результаты API",summary))
             page.wait_for_timeout(4500)
         for src in sources:
-            page.set_content(render("Переход на "+text(src["marketplace"]),
+            display("start_"+src["marketplace"].lower(),render("Переход на "+text(src["marketplace"]),
                 "<p>Открываем реальную страницу по адресу:</p><p class='small'>"+text(src["url"])+"</p>"))
             page.wait_for_timeout(1300)
             result=inspect_card(page,src)
@@ -130,13 +150,16 @@ def main():
             status=text(result.get("status"))
             price=result.get("price_rub")
             label=("%s ₽" % price) if price is not None else "НЕ ПОДТВЕРЖДЕНА"
-            page.set_content(render("Проверка "+text(src["marketplace"]),
+            if not panel_dir:
+                page.set_content(render("Проверка "+text(src["marketplace"]),
                 "<p>Статус проверки: <code>"+status+"</code></p>"
                 "<p>Цена: <strong class='bad'>"+text(label)+"</strong></p>"
                 "<p class='small'>Источник: "+text(src["url"])+"</p>"
                 "<p class='small'>Записано: "+text(result.get("checked_at_utc"))+"</p>"))
             page.wait_for_timeout(2200)
-        mail=parse_mail(create_synthetic_mail())
+        raw_mail=Path(args.mail_eml).read_bytes() if args.mail_eml else create_synthetic_mail()
+        if len(raw_mail)>1_000_000:raise ValueError("mail_input_too_large")
+        mail=parse_mail(raw_mail)
         shop={"products":report["products"]}
         draft=draft_reply(mail,shop)
         report["mail"]={"subject":mail["subject"],"attachment_files":
@@ -145,22 +168,23 @@ def main():
             "structured_requirements":mail["structured_requirements"],
             "draft_created":True,"draft_sent":False}
         report["draft"] = draft
-        page.set_content(render("Письмо с вложениями · тестовые данные",
+        display("mail",render("Письмо с вложениями · тестовые данные",
             "<span class='tag'>Синтетическое письмо, настоящий MIME разбор на VPS</span>"
             "<p>Тема: "+text(mail["subject"])+"</p>"
             "<p>Вложения:</p><pre>"+text("\n".join(
             a["file"]+" — "+a["status"] for a in mail["attachments"]))+"</pre>"
             "<p class='small'>Требования извлечены непосредственно из CSV и DOCX.</p>"))
         page.wait_for_timeout(3500)
+        if panel_dir: page.screenshot(path=str(out/"frame_mail.png"))
         body=draft.get("text") or draft.get("body") or str(draft)
-        page.set_content(render("Проект ответа · не отправлен",
+        display("draft",render("Проект ответа · не отправлен",
             "<pre>"+text(body)[:2500]+"</pre>"
             "<p class='small'>Рабочая почта НЕ подключалась. Это обезличенный тест исходного письма.</p>"))
         page.wait_for_timeout(5000)
         verified=sum(p.get("status")=="verified_price_and_card" for p in report["products"])
         report["verified_marketplace_cards"]=verified
         report["full_client_demo_ready"]=verified==2 and False # no real mailbox or Kimi API
-        page.set_content(render("Итог серверного испытания",
+        display("summary",render("Итог серверного испытания",
             "<p>Реальный VPS-браузер: <strong>запущен</strong></p>"
             "<p>Проверенные живые цены: <strong>"+str(verified)+"/2</strong></p>"
             "<p>CSV / DOCX: <strong>разобраны</strong></p>"
