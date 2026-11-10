@@ -75,6 +75,11 @@ def click_continue(page, expected_stage):
     if btn.count()!=1 or not btn.is_enabled():
         return fail("missing_or_disabled_continue",stage=expected_stage)
     try:
+        cookie=page.get_by_role("button",name="Соглашаюсь с условиями",exact=True)
+        if cookie.count()==1 and cookie.is_visible():
+            cookie.click(timeout=4000)
+            page.wait_for_timeout(350)
+            OUT["cookie_banner_dismissed"]=True
         btn.scroll_into_view_if_needed(timeout=2500)
         btn.click(timeout=9500)
         page.wait_for_timeout(750)
