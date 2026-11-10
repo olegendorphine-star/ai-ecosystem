@@ -5,6 +5,8 @@ on:
     paths:
       - 'tools/fl003_client_demo.py'
       - 'tools/fl003_screencast.py'
+      - 'tools/fl003_render_panels.py'
+      - 'tests/fixtures/fl003_gmail_real_message_sanitized.eml'
       - 'tools/fl003_yandex_marketplace_search.py'
       - 'tests/test_fl003_client_demo.py'
       - '.github/workflows/fl003-client-demo.yml'
@@ -24,7 +26,7 @@ jobs:
       - name: Test synthetic email, attachment and fail-closed shopping
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/fl003_client_demo.py tools/fl003_screencast.py tools/fl003_yandex_marketplace_search.py
+          python3 -m py_compile tools/fl003_client_demo.py tools/fl003_screencast.py tools/fl003_render_panels.py tools/fl003_yandex_marketplace_search.py
           python3 -m unittest discover -s tests -p 'test_fl003_client_demo.py' -v
           python3 tools/fl003_client_demo.py --offline
 
@@ -98,6 +100,16 @@ jobs:
           assert all(c['live_price_verified'] is False for m in d['marketplaces'] for c in m['candidates'])
           print('YANDEX_SEARCH_CANDIDATES', [(m['marketplace'],len(m['candidates'])) for m in d['marketplaces']])
           PY
+      - name: Render factual Yandex/Gmail frames as PNG before VPS Chromium recording
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/fl003-render-venv"
+          "$RUNNER_TEMP/fl003-render-venv/bin/pip" install --disable-pip-version-check --quiet pillow==12.0.0
+          PYTHONPATH=tools "$RUNNER_TEMP/fl003-render-venv/bin/python" tools/fl003_render_panels.py \
+            --search-json "$RUNNER_TEMP/fl003-yandex-index.json" \
+            --mail-eml tests/fixtures/fl003_gmail_real_message_sanitized.eml \
+            --out-dir "$RUNNER_TEMP/fl003-panels"
+          test "$(find "$RUNNER_TEMP/fl003-panels" -type f -name '*.png' | wc -l)" -eq 7
       - name: Record real server Chromium browser with anonymized email
         env:
           HOST: ${{ secrets.AVITO_SERVER_HOST }}
@@ -107,7 +119,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}")
-          tar -czf - tools/fl003_client_demo.py tools/fl003_screencast.py tools/fl003_yandex_marketplace_search.py -C "$RUNNER_TEMP" fl003-yandex-index.json | ssh "${ssh_args[@]}" "$USER@$HOST" 'install -d -m 700 "$HOME/.fl003-screencast" && tar -xzf - -C "$HOME/.fl003-screencast"'
+          tar -czf - tools/fl003_client_demo.py tools/fl003_screencast.py tools/fl003_yandex_marketplace_search.py tests/fixtures/fl003_gmail_real_message_sanitized.eml -C "$RUNNER_TEMP" fl003-yandex-index.json fl003-panels | ssh "${ssh_args[@]}" "$USER@$HOST" 'install -d -m 700 "$HOME/.fl003-screencast" && tar -xzf - -C "$HOME/.fl003-screencast"'
           # No font in Git or downloadable artifact: install permissively licensed
           # DejaVu into private VPS runtime, to avoid blank Cyrillic captions.
           test -r /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
@@ -119,7 +131,7 @@ jobs:
           root="$HOME/.fl003-screencast"
           output="$root/output/$FL003_RUN_ID"
           umask 077
-          env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" "$root/tools/fl003_screencast.py" --output-dir "$output" --search-json "$root/fl003-yandex-index.json"
+          env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" "$root/tools/fl003_screencast.py" --output-dir "$output" --search-json "$root/fl003-yandex-index.json" --mail-eml "$root/tests/fixtures/fl003_gmail_real_message_sanitized.eml" --panel-dir "$root/fl003-panels"
           test -s "$output/fl003-actual-vps-browser.webm"
           test -s "$output/report.json"
           REMOTE
@@ -135,7 +147,7 @@ jobs:
           ssh "${ssh_args[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-output.tgz"
           set -euo pipefail
           cd "$HOME/.fl003-screencast/output/$FL003_RUN_ID"
-          tar -czf - fl003-actual-vps-browser.webm report.json
+          tar -czf - fl003-actual-vps-browser.webm report.json frame_intro.png frame_mail.png
           REMOTE
           tar -xzf "$RUNNER_TEMP/fl003-output.tgz" -C "$RUNNER_TEMP/fl003-recording"
           test -s "$RUNNER_TEMP/fl003-recording/fl003-actual-vps-browser.webm"
