@@ -6,6 +6,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from fl003_client_demo import create_synthetic_mail, parse_mail, draft_reply, run, best_price
 
 class ClientDemoTests(unittest.TestCase):
+    def test_real_docx_attachment_is_parsed_without_ocr(self):
+        d = parse_mail(create_synthetic_mail())
+        docx = next(a for a in d["attachments"] if a["file"]=="brief.docx")
+        self.assertEqual(docx["status"], "parsed_docx")
+        self.assertIn("7 календарных дней", docx["summary"])
+        self.assertIn("Нужна гарантия", docx["summary"])
+
+    def test_docx_requirements_reach_draft(self):
+        mail=parse_mail(create_synthetic_mail())
+        shop={"products":[{"marketplace":"Ozon","source_url":"https://www.ozon.ru/product/test/",
+                           "price_rub":None,"status":"site_access_or_human_login_required"}]}
+        result=draft_reply(mail,shop)
+        self.assertIn("7 календарных дней",result["text"])
+        self.assertFalse(result["sent"])
+
     def test_real_csv_attachment_is_decoded(self):
         d = parse_mail(create_synthetic_mail())
         self.assertEqual(d["structured_requirements"][0]["quantity"], 2)
