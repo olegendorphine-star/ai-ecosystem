@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/fl-private-inbox-readonly-20261110.yml'
+# One-time owner-approved read-only check of newest marketing-client response, 2026-11-10.
 permissions:
   contents: read
 jobs:
