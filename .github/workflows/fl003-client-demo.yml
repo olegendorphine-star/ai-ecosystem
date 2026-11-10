@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'tools/fl003_client_demo.py'
+      - 'tools/fl003_screencast.py'
       - 'tests/test_fl003_client_demo.py'
       - '.github/workflows/fl003-client-demo.yml'
   workflow_dispatch:
@@ -77,6 +78,47 @@ jobs:
           print("VPS_DEMO_SHOPPING_STATUS", [p["status"] for p in d["shopping"]["products"]])
           print("VPS_DEMO_FULL_CLIENT_DEMO_READY", d["client_facing_full_demo_ready"])
           PY
+      - name: Record real server Chromium browser with anonymized email
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ssh_args=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/fl003-ssh/known_hosts" -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/fl003-ssh/key" -p "${PORT:-22}")
+          tar -czf - tools/fl003_client_demo.py tools/fl003_screencast.py | ssh "${ssh_args[@]}" "$USER@$HOST" 'install -d -m 700 "$HOME/.fl003-screencast" && tar -xzf - -C "$HOME/.fl003-screencast"'
+          ssh "${ssh_args[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-video-summary.json"
+          set -euo pipefail
+          root="$HOME/.fl003-screencast"
+          output="$root/output/$FL003_RUN_ID"
+          umask 077
+          env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" "$root/tools/fl003_screencast.py" --output-dir "$output"
+          test -s "$output/fl003-actual-vps-browser.webm"
+          test -s "$output/report.json"
+          REMOTE
+          python3 - "$RUNNER_TEMP/fl003-video-summary.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1],encoding='utf8'))
+          assert d['external_messages_sent']==0
+          print('FL003_REAL_VPS_SCREENCAST', d['video'])
+          print('FL003_VERIFIED_MARKETPLACE_CARDS',d['verified'])
+          print('FL003_MAIL_ATTACHMENT_STATES',d['mail_attachments'])
+          PY
+          install -d "$RUNNER_TEMP/fl003-recording"
+          ssh "${ssh_args[@]}" "$USER@$HOST" "env FL003_RUN_ID=$RUN_ID bash -s" <<'REMOTE' > "$RUNNER_TEMP/fl003-output.tgz"
+          set -euo pipefail
+          cd "$HOME/.fl003-screencast/output/$FL003_RUN_ID"
+          tar -czf - fl003-actual-vps-browser.webm report.json
+          REMOTE
+          tar -xzf "$RUNNER_TEMP/fl003-output.tgz" -C "$RUNNER_TEMP/fl003-recording"
+          test -s "$RUNNER_TEMP/fl003-recording/fl003-actual-vps-browser.webm"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fl003-real-vps-browser-screencast
+          path: ${{ runner.temp }}/fl003-recording/
+          retention-days: 7
+          if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fl003-synthetic-evidence
