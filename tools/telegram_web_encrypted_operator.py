@@ -1067,7 +1067,21 @@ def read_verified_username_chat(page, command: dict) -> dict:
         if verified is not True:
             return {"status": "username_identity_not_verified"}
         page.wait_for_timeout(900)
-        messages = normalize_messages(page.evaluate(MESSAGES_JS, {"peer": peer, "limit": limit}), limit)
+        messages = normalize_messages(
+            page.evaluate(MESSAGES_JS, {"peer": peer, "limit": limit}), limit)
+        # History sometimes arrives after Web K has selected and mounted a
+        # previously inactive conversation. Give it bounded time, but never
+        # take bubbles from another chat or conclude that empty means no reply.
+        for _ in range(6):
+            if messages:
+                break
+            if page.evaluate(
+                    "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)",
+                    peer) is not True:
+                return {"status": "chat_changed_during_read"}
+            page.wait_for_timeout(650)
+            messages = normalize_messages(
+                page.evaluate(MESSAGES_JS, {"peer": peer, "limit": limit}), limit)
         if not messages:
             return {"status": "chat_history_not_visible"}
         if page.evaluate(
