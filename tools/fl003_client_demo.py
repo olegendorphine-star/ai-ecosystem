@@ -27,7 +27,7 @@ CARD_SOURCES = (
     {"marketplace": "Avito", "url": "https://www.avito.ru/sankt-peterburg/tovary_dlya_kompyutera/besprovodnaya_mysh_logitech_m185_8049018171", "expected": "m185"},
 )
 ALLOWED_HOSTS = {"www.ozon.ru", "ozon.ru", "www.avito.ru", "avito.ru", "m.avito.ru"}
-GATE_WORDS = ("проверьте, что вы человек", "доступ ограничен", "подозрительная активность", "капча", "captcha", "access denied", "access blocked", "attention required", "доступ запрещён")
+GATE_WORDS = ("нужна небольшая проверка браузера", "пройти проверку", "страница не загрузилась из-за проблем с ip", "проверьте, что вы человек", "доступ ограничен", "подозрительная активность", "капча", "captcha", "access denied", "access blocked", "attention required", "доступ запрещён")
 
 
 def now_utc() -> str:
@@ -151,8 +151,11 @@ def inspect_card(page, source: dict) -> dict:
         title = page.title()[:180]
         result["title"] = title
         text = page.locator("body").inner_text(timeout=4000)[:7000]
-        if result["http_status"] in (401, 403, 429) or any(word in text.lower() for word in GATE_WORDS):
+        if result["http_status"] in (401, 403, 429, 439) or any(word in text.lower() for word in GATE_WORDS):
             result["status"] = "site_access_or_human_login_required"
+            return result
+        if result["http_status"] is None or result["http_status"] >= 400:
+            result["status"] = "http_error_not_a_verified_product_page"
             return result
         expected = source["expected"].lower()
         products = product_jsonld(page)
