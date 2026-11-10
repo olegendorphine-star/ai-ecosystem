@@ -58,4 +58,5 @@ jobs:
           print("EDIT_FORM_FIELDS",d.get("edit_form_fields",[]))
           print("EDIT_FORM_EXCERPT",d.get("edit_form_excerpt",""))
           print("MANAGEMENT_STATUS",d.get("management_status",""))
+          print("MANAGEMENT_UI",d.get("management_ui",{}))
           PY
