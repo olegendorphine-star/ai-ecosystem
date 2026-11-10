@@ -39,6 +39,16 @@ try:
         return {pageHost:location.hostname,fields,btns,dialogs:document.querySelectorAll('[role=dialog]').length,
            words:(document.body?.innerText||'').slice(-1400)};
      }""")
+     continue_btn=p.get_by_role("button",name="Продолжить",exact=True)
+     if continue_btn.count()==1 and continue_btn.is_enabled():
+      continue_btn.click(timeout=8000);p.wait_for_timeout(600)
+      out["step2"]=p.evaluate("""()=>{
+         const visible=e=>!!(e.getBoundingClientRect().width&&e.getBoundingClientRect().height);
+         const fields=Array.from(document.querySelectorAll('input,textarea,select')).filter(x=>visible(x)&&!['hidden','password','file'].includes(x.type||'')).slice(-18)
+          .map(e=>({tag:e.tagName,id:e.id||'',name:e.name||'',length:String(e.value||'').length,placeholder:(e.placeholder||'').slice(0,75)}));
+         const buttons=Array.from(document.querySelectorAll('button')).filter(visible).map(x=>(x.innerText||'').trim()).filter(Boolean).slice(-15);
+         return {fields,buttons,stepText:(document.body?.innerText||'').slice(0,900)};
+      }""")
      out["pages"]=len(b.context.pages)
 finally:
  b.close()
