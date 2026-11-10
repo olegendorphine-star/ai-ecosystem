@@ -15,6 +15,12 @@ on:
 permissions:
   contents: read
 
+# Serialize production deploys. Without this, an older queued push can
+# finish after a newer push and silently downgrade the resident operator.
+concurrency:
+  group: telegram-owner-vps-production-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy_no_credentials:
     runs-on: ubuntu-latest
