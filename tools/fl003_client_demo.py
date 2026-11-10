@@ -254,7 +254,8 @@ def run(offline=False) -> dict:
             "telegram_connected": False, "private_mailbox_connected": False,
             "kimi_api_called": False,
             "external_write_actions": 0, "external_messages_sent": 0,
-            "client_facing_full_demo_ready": bool(shop["full_comparison_verified"] and not offline)}
+            "product_comparison_verified": bool(shop["full_comparison_verified"] and not offline),
+            "client_facing_full_demo_ready": False}
 
 
 def main() -> int:
