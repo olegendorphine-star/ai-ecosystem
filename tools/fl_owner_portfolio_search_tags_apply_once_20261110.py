@@ -43,7 +43,7 @@ try:
      node=p.locator("a.admn").nth(index)
      section=node.evaluate("(e)=>e.parentElement?.parentElement?.innerText||''")
      params=node.get_attribute("data-function-params") or ""
-     digits=re.findall(r"\\d{1,8}",params)
+     digits=re.findall(r"\d{1,8}",params)
      if name not in section or len(digits)<2 or digits[-1]!=identifier:
       v["status"]="wrong_category_guard";break
      node.click(timeout=9000)
