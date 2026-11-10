@@ -175,11 +175,11 @@ jobs:
               *) echo TG_FL003_BLOCKED_UNEXPECTED_OWNER_OPERATOR; exit 1 ;;
             esac
             case "$current2" in
-              e6eeca2888ae23258bb0aed0e55a37d398012e3e|e2ccf4bf1d903fc7b9d3d7d28e1a895a77ba99a9) ;;
+              e6eeca2888ae23258bb0aed0e55a37d398012e3e|e2ccf4bf1d903fc7b9d3d7d28e1a895a77ba99a9|584be8dff00007bbfd8abc8af06a7477d6a3631c) ;;
               *) echo TG_FL003_BLOCKED_UNEXPECTED_WEB_OPERATOR; exit 1 ;;
             esac
             case "$current3" in
-              e6eeca2888ae23258bb0aed0e55a37d398012e3e|e2ccf4bf1d903fc7b9d3d7d28e1a895a77ba99a9) ;;
+              e6eeca2888ae23258bb0aed0e55a37d398012e3e|e2ccf4bf1d903fc7b9d3d7d28e1a895a77ba99a9|584be8dff00007bbfd8abc8af06a7477d6a3631c) ;;
               *) echo TG_FL003_BLOCKED_UNEXPECTED_APP_WEB_OPERATOR; exit 1 ;;
             esac
           fi
