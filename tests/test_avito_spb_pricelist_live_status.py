@@ -160,5 +160,59 @@ class AvitoLiveStatusTests(unittest.TestCase):
         self.assertNotIn("chita_confirmed_active", report)
         self.assertFalse(m.upload_check({"status": "success"}, {"items": []})["chita_in_current_items"])
 
+
+    def test_full_four_city_seo_feed_and_moscow_pricelist(self):
+        data = (Path(__file__).resolve().parents[1] /
+                "docs" / "avito-feed.xml").read_bytes()
+        state = m.feed_check(data)
+        self.assertTrue(state["four_ads"])
+        self.assertTrue(state["seo_titles_ready"])
+        self.assertTrue(state["four_price_lists"])
+        self.assertTrue(state["expected_ids_cities"])
+        self.assertTrue(all(state.values()))
+
+    def test_old_import_started_before_seo_never_confirms(self):
+        rows = [{"ad_id": stable, "section": {"slug": "success_published"}}
+                for stable in ("ai-assistant-memory-moscow-001",
+                               "ai-assistant-memory-spb-001",
+                               "ai-assistant-memory-surgut-001",
+                               "ai-assistant-memory-chita-001")]
+        old = m.upload_check({
+            "upload_id": 631723180, "status": "success",
+            "started_at": "2026-11-10T09:50:03Z",
+        }, {"items": rows})
+        self.assertFalse(old["import_started_after_seo"])
+        self.assertTrue(old["four_items_success_published"])
+        self.assertFalse(old["seo_import_four_items_verified"])
+
+    def test_new_successful_import_four_item_confirmation(self):
+        entries = [{"ad_id": stable, "section": {"slug": "success_published"}}
+                   for stable in ("ai-assistant-memory-moscow-001",
+                                  "ai-assistant-memory-spb-001",
+                                  "ai-assistant-memory-surgut-001",
+                                  "ai-assistant-memory-chita-001")]
+        imported = m.upload_check({
+            "upload_id": 631999001, "status": "success",
+            "started_at": "2026-11-11T09:50:03Z",
+        }, {"items": entries})
+        self.assertTrue(imported["seo_import_four_items_verified"])
+        entries[2]["section"]["slug"] = "error_content"
+        rejected = m.upload_check({
+            "upload_id": 631999001, "status": "success",
+            "started_at": "2026-11-11T09:50:03Z",
+        }, {"items": entries})
+        self.assertFalse(rejected["seo_import_four_items_verified"])
+
+    def test_new_processing_import_cannot_count_as_success(self):
+        rows = [{"ad_id": stable, "section": {"slug": "success_published"}}
+                for stable in ("ai-assistant-memory-moscow-001",
+                               "ai-assistant-memory-spb-001",
+                               "ai-assistant-memory-surgut-001",
+                               "ai-assistant-memory-chita-001")]
+        v = m.upload_check({"status": "processing",
+                            "started_at": "2026-11-11T12:50:03Z"}, {"items": rows})
+        self.assertTrue(v["four_items_success_published"])
+        self.assertFalse(v["seo_import_four_items_verified"])
+
 if __name__ == "__main__":
     unittest.main()

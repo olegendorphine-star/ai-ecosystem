@@ -52,27 +52,47 @@ def http(url: str, *, auth: str | None = None, body: bytes | None = None) -> tup
 
 
 def feed_check(xml: bytes) -> dict[str, Any]:
+    """Check full four-city SEO feed before accessing the Avito API."""
     root = ET.fromstring(xml)
     ads = root.findall("Ad")
-    if len(ads) < 2:
-        return {"two_ads": False, "spb_three_prices": False, "moscow_has_no_price_list": False,
-                "all_original_images": False, "free_package": False}
-    mos, spb = ads[:2]
-    price_vals = [x.text for x in spb.findall("./PriceList/Service/ServicePrice")]
+    expected = (
+        ("ai-assistant-memory-moscow-001", "Москва",
+         "Автоматизация бизнеса с ИИ — аудит и внедрение"),
+        ("ai-assistant-memory-spb-001", "Санкт-Петербург",
+         "ИИ-ассистент для бизнеса и базы знаний"),
+        ("ai-assistant-memory-surgut-001", "Сургут",
+         "ИИ-ассистент для бизнеса — настройка"),
+        ("ai-assistant-memory-chita-001", "Чита",
+         "ИИ-ассистент для бизнеса и документов"),
+    )
+    def prices(ad: Any) -> list[str | None]:
+        return [s.findtext("ServicePrice")
+                for s in ad.findall("./PriceList/Service")]
+    matched = len(ads) == len(expected)
+    expected_ids_cities = matched and all(
+        (ad.findtext("Id"), ad.findtext("Address")) == (ident, city)
+        for ad, (ident, city, _) in zip(ads, expected))
+    titles = [ad.findtext("Title", "") for ad in ads]
+    image_lists = [
+        [im.attrib.get("url") for im in ad.findall("./Images/Image")]
+        for ad in ads]
     return {
-        "two_ads": len(ads) >= 2,  # backward-compatible: original Moscow/SPb pair still exists
-        "spb_three_prices": price_vals == ["5000", "30000", "150000"],
-        "moscow_has_no_price_list": mos.find("PriceList") is None,
-        "all_original_images": (
-            len(mos.findall("./Images/Image")) == 6
-            and len(spb.findall("./Images/Image")) == 6
-        ),
-        "free_package": all(ad.findtext("ListingFee") == "Package"
-                            and ad.findtext("AdStatus") == "Free"
-                            and ad.findtext("Price") == "5000" for ad in ads),
-        "ids_stable": mos.findtext("AvitoId") == "8347570435"
-            and mos.findtext("Id") == "ai-assistant-memory-moscow-001"
-            and spb.findtext("Id") == "ai-assistant-memory-spb-001",
+        "four_ads": matched,
+        "expected_ids_cities": expected_ids_cities,
+        "seo_titles_ready": matched and all(
+            ad.findtext("Title") == title
+            for ad, (_, _, title) in zip(ads, expected)),
+        "unique_titles": len(set(titles)) == 4 and all(titles),
+        "four_price_lists": matched and all(
+            prices(ad) == ["5000", "30000", "150000"] for ad in ads),
+        "all_original_images": matched and all(
+            len(urls) == 6 and urls == image_lists[0] for urls in image_lists),
+        "free_package": matched and all(
+            ad.findtext("ListingFee") == "Package"
+            and ad.findtext("AdStatus") == "Free"
+            and ad.findtext("Price") == "5000" for ad in ads),
+        "ids_stable": expected_ids_cities
+            and ads[0].findtext("AvitoId") == "8347570435",
     }
 
 
@@ -157,8 +177,36 @@ def upload_check(current: Any, items: Any) -> dict[str, Any]:
         chita_id = None
     allowed_sections = {"success_published", "processing", "error_params",
                         "error_payment", "error_content", "removed_complete", "pending"}
+    # An import started before the SEO feed deployment cannot verify SEO.
+    seo_live_since = datetime(2026, 11, 10, 10, 19, 9, tzinfo=timezone.utc)
+    started_raw = current.get("started_at") if isinstance(current, dict) else None
+    started = None
+    if isinstance(started_raw, str):
+        try:
+            parsed = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                started = parsed.astimezone(timezone.utc)
+        except ValueError:
+            pass
+    import_after_seo = started is not None and started > seo_live_since
+    expected_ids = ("ai-assistant-memory-moscow-001",
+                    "ai-assistant-memory-spb-001",
+                    "ai-assistant-memory-surgut-001",
+                    "ai-assistant-memory-chita-001")
+    all_four_success = all(
+        (row := by_stable_id(stable)) is not None
+        and isinstance(row.get("section"), dict)
+        and row["section"].get("slug") == "success_published"
+        for stable in expected_ids)
+    # Reports processing/queued as NOT confirmed even if sections look green.
+    seo_import_verified = bool(import_after_seo and
+        status in ("success", "completed", "finished") and all_four_success)
     return {"upload_id": upload_id,
             "upload_status": status if status in allowed_statuses else "unknown",
+            "upload_started_at_utc": started.isoformat() if started else None,
+            "import_started_after_seo": import_after_seo,
+            "four_items_success_published": all_four_success,
+            "seo_import_four_items_verified": seo_import_verified,
             "spb_in_current_items": spb is not None,
             "spb_section": slug if isinstance(slug, str) and slug in allowed_sections else "unknown",
             "chita_in_current_items": chita is not None,
