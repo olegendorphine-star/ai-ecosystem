@@ -39,6 +39,8 @@ jobs:
           assert r['indexed_price_examples'][0]['price_rub']==799
           assert r['verified_current_prices']==0
           assert r['requires_owner_captcha'] is False
+          assert 'ручное участие владельца' not in r['draft_reply']['text']
+          assert 'Ручная капча не требуется' in r['draft_reply']['text']
           assert len(r['mail']['attachments'])==2
           assert len(owner_note(r))<=300
           print('FL003_AUTONOMOUS_OFFLINE_TESTS_OK')
