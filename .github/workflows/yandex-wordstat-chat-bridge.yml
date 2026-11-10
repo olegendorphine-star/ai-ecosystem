@@ -1,0 +1,60 @@
+name: Wordstat — owner-only API bridge
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    paths:
+      - 'tools/yandex_wordstat_bridge.py'
+      - 'tests/test_yandex_wordstat_bridge.py'
+      - '.github/workflows/yandex-wordstat-chat-bridge.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: wordstat-owner-bridge
+  cancel-in-progress: false
+
+jobs:
+  offline_tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate Python and tests without network calls
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_yandex_wordstat_bridge.py' -v
+          python3 -m py_compile tools/yandex_wordstat_bridge.py
+
+  wordstat:
+    if: >-
+      github.event.issue.number == 162 &&
+      github.event.comment.user.login == 'olegendorphine-star' &&
+      startsWith(github.event.comment.body, 'WORDSTAT_BRIDGE_COMMAND_V1 ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Offline validation (never calls Wordstat)
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_yandex_wordstat_bridge.py' -v
+          python3 -m py_compile tools/yandex_wordstat_bridge.py
+      - name: Run restricted read-only request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          YANDEX_WORDSTAT_API_KEY: ${{ secrets.yandex_api }}
+          YANDEX_WORDSTAT_FOLDER_ID: ${{ secrets.YANDEX_WORDSTAT_FOLDER_ID }}
+          # Intentionally disabled. Separate reviewed change needed for billed GetTop.
+          WORDSTAT_ALLOW_BILLABLE: 'false'
+        run: |
+          set -euo pipefail
+          python3 tools/yandex_wordstat_bridge.py
