@@ -72,8 +72,15 @@ DIALOGS_JS = r"""limit => {
   }).filter(d => d.peer_id !== null && !!d.title);
 }"""
 
-MESSAGES_JS = r"""limit => {
-  const bubbles = [...document.querySelectorAll('#column-center .bubble[data-mid]')];
+MESSAGES_JS = r"""({peer,limit}) => {
+  const app = window.appImManager;
+  const active = app?.chat?.bubbles?.chatInner;
+  // The page can contain multiple mounted chat views during transitions.
+  // Only the live chatInner belonging to the selected peer may be read.
+  if (Number(app?.chat?.peerId) !== peer || app?.chat?.setPeerPromise ||
+      !active?.isConnected || typeof active?.querySelectorAll !== 'function')
+    return [];
+  const bubbles = [...active.querySelectorAll('.bubble[data-mid]')];
   return bubbles.slice(-limit).map(bubble => {
     const mid = Number(bubble.getAttribute('data-mid'));
     const text = (bubble.querySelector('.message [data-message-text-source]')?.textContent
@@ -938,7 +945,10 @@ def wait_for_chat_dom_transition(page, peer_id: int, previous_peer, old_bubbles)
     """
     changed_peer = str(previous_peer) != str(peer_id)
     selected_js = "(peer) => String(window.appImManager?.chat?.peerId) === String(peer)"
-    detached_js = "(nodes) => nodes.every(node => !node.isConnected)"
+    detached_js = (
+        "(nodes) => { const inner = window.appImManager?.chat?.bubbles?.chatInner;"
+        " return !!inner?.isConnected &&"
+        " nodes.every(node => !inner.contains(node)); }")
     for _ in range(24):
         if page.evaluate(selected_js, peer_id) is True:
             if not changed_peer or old_bubbles.evaluate(detached_js) is True:
@@ -1057,7 +1067,7 @@ def read_verified_username_chat(page, command: dict) -> dict:
         if verified is not True:
             return {"status": "username_identity_not_verified"}
         page.wait_for_timeout(900)
-        messages = normalize_messages(page.evaluate(MESSAGES_JS, limit), limit)
+        messages = normalize_messages(page.evaluate(MESSAGES_JS, {"peer": peer, "limit": limit}), limit)
         if not messages:
             return {"status": "chat_history_not_visible"}
         if page.evaluate(
@@ -1159,7 +1169,7 @@ def execute_on_page(page, command: dict) -> dict:
     if action == "web_chat_message":
         return send_approved_existing_chat_message(page, command)
     messages = normalize_messages(
-        page.evaluate(MESSAGES_JS, p.get("limit", 10)),
+        page.evaluate(MESSAGES_JS, {"peer": peer_id, "limit": p.get("limit", 10)}),
         p.get("limit", 10))
     # An empty scrape after switching is not proof that a previously
     # contacted person never answered. Keep the check explicitly inconclusive.

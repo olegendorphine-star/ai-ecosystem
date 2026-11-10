@@ -217,6 +217,16 @@ class UIHelpers(unittest.TestCase):
 
 
 class WebReadTransitionSafety(unittest.TestCase):
+    def test_message_selection_is_bound_to_active_chat_inner(self):
+        self.assertIn("Number(app?.chat?.peerId) !== peer", web.MESSAGES_JS)
+        self.assertIn("active.querySelectorAll('.bubble[data-mid]')", web.MESSAGES_JS)
+        self.assertNotIn("document.querySelectorAll('#column-center .bubble[data-mid]')",
+                         web.MESSAGES_JS)
+        source = path.read_text()
+        self.assertIn("!inner.contains(node)", source)
+        self.assertIn('{"peer": peer, "limit": limit}', source)
+        self.assertIn('{"peer": peer_id, "limit": p.get("limit", 10)}', source)
+
     def test_previous_chat_bubbles_must_detach(self):
         page = mock.Mock()
         page.evaluate.return_value = True
