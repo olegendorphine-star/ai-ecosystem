@@ -49,6 +49,17 @@ try:
          const buttons=Array.from(document.querySelectorAll('button')).filter(visible).map(x=>(x.innerText||'').trim()).filter(Boolean).slice(-15);
          return {fields,buttons,stepText:(document.body?.innerText||'').slice(0,900)};
       }""")
+      next2=p.get_by_role("button",name="Продолжить",exact=True)
+      if next2.count()==1 and next2.is_enabled():
+       next2.click(timeout=8000);p.wait_for_timeout(700)
+       out["step3"]=p.evaluate("""()=>{
+         const vis=x=>!!(x.getBoundingClientRect().width&&x.getBoundingClientRect().height);
+         const fields=Array.from(document.querySelectorAll('input,textarea,select')).filter(vis).filter(x=>!['hidden','password','file'].includes(x.type||'')).slice(-18)
+           .map(e=>({tag:e.tagName,id:e.id||'',name:e.name||'',valueLength:String(e.value||'').length,
+             valueStart:(e.value||'').slice(0,55)}));
+         const buttons=Array.from(document.querySelectorAll('button')).filter(vis).map(x=>({text:(x.innerText||'').trim().slice(0,50),disabled:x.disabled})).filter(x=>x.text).slice(-15);
+         const text=(document.body?.innerText||'');return {fields,buttons,tail:text.slice(-900)};
+       }""")
      out["pages"]=len(b.context.pages)
 finally:
  b.close()
