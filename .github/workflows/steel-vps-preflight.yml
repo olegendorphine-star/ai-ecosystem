@@ -1,0 +1,46 @@
+name: Steel Browser - owner VPS read-only capacity preflight
+on:
+  push:
+    branches: [feature/steel-browser-pilot-20261111]
+    paths:
+      - 'tools/steel_vps_preflight.py'
+      - '.github/workflows/steel-vps-preflight.yml'
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate Python source
+        run: python3 -m py_compile tools/steel_vps_preflight.py
+      - name: Read-only SSH capacity check on existing owner VPS
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          SSH_KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER" && test -n "$SSH_KEY_B64" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          printf '%s' "$SSH_KEY_B64" | base64 -d > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ssh/key" "$RUNNER_TEMP/ssh/known_hosts"
+          cat tools/steel_vps_preflight.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/ssh/key" -p "${PORT:-22}" "$USER@$HOST" 'python3 -' \
+          | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d["schema"]=="ai.steel.vps.preflight.v1"
+          assert d["read_only"] is True
+          print("STEEL_VPS_PREFLIGHT",json.dumps(d,sort_keys=True))
+          '
