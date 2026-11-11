@@ -31,25 +31,25 @@ jobs:
           try:
            r=subprocess.run(cmd,input="import json,urllib.request,urllib.error,datetime,subprocess\nout={\"schema\":\"gii.server.readonly-routes.v1\",\"at\":datetime.datetime.now(datetime.timezone.utc).isoformat(),\"requests\":[]}\nurls=[\"http://127.0.0.1:20242/quicktunnel\",\"http://127.0.0.1:18768/\",\"http://127.0.0.1:18768/sonar/tasks\",\"http://127.0.0.1:18768/admin\",\"http://127.0.0.1:18768/evaluator/tasks.json\",\"http://127.0.0.1:18768/static/../evaluator/tasks.json\"]\nfor u in urls:\n row={\"url\":u}\n try:\n  with urllib.request.urlopen(u,timeout=5) as r:\n   b=r.read(100000);row[\"status\"]=r.status\n   try:\n    j=json.loads(b)\n    if \"/sonar/tasks\" in u:row.update({\"count\":j.get(\"count\"),\"schema\":j.get(\"schema\"),\"task_fields\":sorted(set().union(*(t.keys() for t in j.get(\"tasks\",[]))))})\n    else:row[\"json\"]=j\n   except Exception:row[\"body_bytes\"]=len(b)\n except urllib.error.HTTPError as e:row[\"status\"]=e.code\n except Exception as e:row[\"error\"]=type(e).__name__\n out[\"requests\"].append(row)\nr=subprocess.run([\"systemctl\",\"list-units\",\"--all\",\"--plain\",\"--no-legend\",\"gii*\"],capture_output=True,text=True,timeout=5);out[\"gii_units\"]=r.stdout\nprint(json.dumps(out,ensure_ascii=False))\n",capture_output=True,text=True,timeout=70)
            print(r.stdout)
- if r.returncode==0:
-  import json,urllib.request,urllib.error,datetime
-  report=json.loads(r.stdout);hostname=report["requests"][0].get("json",{}).get("hostname","")
-  if not hostname.endswith(".trycloudflare.com") or "/" in hostname:raise SystemExit("invalid_tunnel_hostname")
-  external={"schema":"gii.external-runner-readonly.v1","at":datetime.datetime.now(datetime.timezone.utc).isoformat(),"base_url":"https://"+hostname,"client":"GitHub hosted runner, outside VPS","results":[]}
-  for path in ["/health","/sonar/tasks","/admin","/evaluator/tasks.json"]:
-   item={"path":path}
-   try:
-    with urllib.request.urlopen(external["base_url"]+path,timeout=12) as response:
-     raw=response.read(100000);item["status"]=response.status
-     try:
-      data=json.loads(raw)
-      if path=="/sonar/tasks":item.update(count=data.get("count"),schema=data.get("schema"),task_fields=sorted(set().union(*(t.keys() for t in data.get("tasks",[])))))
-      elif path=="/health":item["json"]=data
-     except ValueError:item["body_bytes"]=len(raw)
-   except urllib.error.HTTPError as error:item["status"]=error.code
-   except Exception as error:item["error"]=type(error).__name__
-   external["results"].append(item)
-  print(json.dumps(external))
+           if r.returncode==0:
+            import json,urllib.request,urllib.error,datetime
+            report=json.loads(r.stdout);hostname=report["requests"][0].get("json",{}).get("hostname","")
+            if not hostname.endswith(".trycloudflare.com") or "/" in hostname:raise SystemExit("invalid_tunnel_hostname")
+            external={"schema":"gii.external-runner-readonly.v1","at":datetime.datetime.now(datetime.timezone.utc).isoformat(),"base_url":"https://"+hostname,"client":"GitHub hosted runner, outside VPS","results":[]}
+            for path in ["/health","/sonar/tasks","/admin","/evaluator/tasks.json"]:
+             item={"path":path}
+             try:
+              with urllib.request.urlopen(external["base_url"]+path,timeout=12) as response:
+               raw=response.read(100000);item["status"]=response.status
+               try:
+                data=json.loads(raw)
+                if path=="/sonar/tasks":item.update(count=data.get("count"),schema=data.get("schema"),task_fields=sorted(set().union(*(t.keys() for t in data.get("tasks",[])))))
+                elif path=="/health":item["json"]=data
+               except ValueError:item["body_bytes"]=len(raw)
+             except urllib.error.HTTPError as error:item["status"]=error.code
+             except Exception as error:item["error"]=type(error).__name__
+             external["results"].append(item)
+            print(json.dumps(external))
            if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode)
            sys.exit(r.returncode)
           finally:
