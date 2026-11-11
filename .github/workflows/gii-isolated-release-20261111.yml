@@ -5,11 +5,11 @@ on:
 permissions:
   contents: read
 jobs:
-  inventory:
+  maintenance:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
-      - name: Maintain isolated Gii release only
+      - name: Gii-only external technical acceptance
         env:
           KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
           KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
@@ -18,21 +18,41 @@ jobs:
           SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
         run: |
           python3 - <<'PY'
-          import os,base64,subprocess,sys
-          root=os.environ["RUNNER_TEMP"]+"/gii-ro"
-          os.makedirs(root,mode=0o700,exist_ok=True)
+          import os,base64,subprocess,sys,json,urllib.request,urllib.error,datetime
+          root=os.environ["RUNNER_TEMP"]+"/gii-only-maintenance";os.makedirs(root,mode=0o700,exist_ok=True)
           key=root+"/key";known=root+"/known_hosts"
           for name,value in [(key,base64.b64decode(os.environ["KEY_B64"])),(known,os.environ["KNOWN_HOSTS"].encode())]:
            fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
            with os.fdopen(fd,"wb") as f:f.write(value)
           port=os.environ.get("SERVER_PORT") or "22"
-          if not port.isdigit():raise SystemExit("invalid_port")
           cmd=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile="+known,"-o","IdentitiesOnly=yes","-i",key,"-p",port,os.environ["SERVER_USER"]+"@"+os.environ["SERVER_HOST"],"python3 -"]
+          def ssh(script):
+           done=subprocess.run(cmd,input=script,capture_output=True,text=True,timeout=65)
+           if done.returncode:raise RuntimeError("gii_remote_step_failed")
+           return done.stdout
           try:
-           r=subprocess.run(cmd,input="import os,json,subprocess,urllib.request,time,datetime,hashlib,zipfile,shutil,base64,sqlite3,tempfile,io,sys\nfrom pathlib import Path\nroot=Path.home()/\"gii-work\";release=root/\"releases/sonar-1.2.0-rc2\"\nif (root/\".gii-scope\").read_text().strip()!=\"GII-ONLY-20261111\":raise RuntimeError(\"scope_mismatch\")\nedge_script=\"import sys\\nsys.path.insert(0,\"+repr(str(release/\"gii-website\"))+\")\\nimport staging_edge as edge\\nedge.UPSTREAM_PORT=18769\\nclass Handler(edge.Handler):\\n def do_GET(self):\\n  if self.path.split('?',1)[0]=='/':\\n   self._route_label='root'\\n   self.send_response(303);self.send_header('Location','/sonar');self.send_header('Content-Length','0');self.send_header('Connection','close');self.end_headers();self.close_connection=True;return\\n  return self.handle_public()\\nedge.Server(('127.0.0.1',18770),Handler).serve_forever()\\n\"\n(root/\"runtime/start_edge.py\").write_text(edge_script)\nsubprocess.run([\"systemctl\",\"--user\",\"restart\",\"gii-work-edge.service\"],capture_output=True,check=True,timeout=15)\nsubprocess.run([\"systemctl\",\"--user\",\"start\",\"gii-work-tunnel.service\"],capture_output=True,check=True,timeout=15)\nfor i in range(30):\n try:\n  with urllib.request.urlopen(\"http://127.0.0.1:20243/quicktunnel\",timeout=2) as r:hostname=json.load(r)[\"hostname\"]\n  if hostname.endswith(\".trycloudflare.com\"):break\n except Exception:time.sleep(0.5)\nelse:raise RuntimeError(\"tunnel_not_ready\")\nbase=\"https://\"+hostname;(root/\"public-endpoint.txt\").write_text(base+\"\\n\")\nbackup=json.loads((root/\"control/latest-backup.json\").read_text());backup_path=Path(backup[\"directory\"])/\"gii.sqlite3\"\nif not backup_path.resolve().is_relative_to((root/\"backups\").resolve()):raise RuntimeError(\"backup_scope_mismatch\")\ncredentials=json.loads((root/\"control/external-run.json\").read_text())\nwith tempfile.TemporaryDirectory(prefix=\"gii-export-restore-\",dir=str(root/\"backups\")) as tmp:\n restore=Path(tmp);shutil.copy2(backup_path,restore/\"gii.sqlite3\")\n sys.path.insert(0,str(release/\"gii-website\"));import app\n app.DATA=restore;app.init();status=[]\n env={\"REQUEST_METHOD\":\"GET\",\"PATH_INFO\":\"/sonar/export/\"+credentials[\"run_id\"],\"QUERY_STRING\":\"\",\"HTTP_X_GII_SONAR_TOKEN\":credentials[\"token\"],\"HTTP_HOST\":\"gii-restore.invalid\",\"wsgi.input\":io.BytesIO(b\"\"),\"CONTENT_LENGTH\":\"0\"}\n raw=b\"\".join(app.App()(env,lambda s,h:status.append(int(s.split()[0]))))\n exported=json.loads(raw)\n original=json.loads((root/\"control/external-smoke.json\").read_text())[\"export\"]\n if status!=[200] or exported[\"response\"][\"response\"]!=original[\"response\"][\"response\"] or exported[\"journal_receipt\"]!=original[\"journal_receipt\"]:raise RuntimeError(\"restored_export_mismatch\")\n restore_export={\"status\":200,\"schema\":exported[\"schema\"],\"response_exact_equal\":True,\"receipt_equal\":True}\nservices={}\nfor u in [\"gii-work-app.service\",\"gii-work-edge.service\",\"gii-work-tunnel.service\",\"gii-work-backup.timer\"]:\n r=subprocess.run([\"systemctl\",\"--user\",\"show\",u,\"--property=Id,ActiveState,SubState,UnitFileState\"],capture_output=True,text=True,timeout=5);services[u]=r.stdout\nstate={\"schema\":\"gii.work.activated.v1\",\"at\":datetime.datetime.now(datetime.timezone.utc).isoformat(),\"base_url\":base,\"site_url\":base+\"/sonar\",\"application\":\"0.2.1\",\"sonar\":\"1.2.0-rc2\",\"release_sha256\":\"227a27d75d36ab49f49df7c00fbeb52968bb1df4074721e4605eaf1da5350726\",\"source_commit\":\"9276616043628b6a2820c71f54334367440c6144\",\"new_database\":str(root/\"data/sonar-1.2/gii.sqlite3\"),\"technical_control_runs\":1,\"real_model_calls\":0,\"old_Gii_databases\":\"untouched_not_read_permission_denied\",\"personal_kimi_accessed\":False,\"existing_system_services_changed\":False,\"restored_export\":restore_export,\"services\":services,\"boot_persistence\":\"user units enabled, linger=no; requires user manager after reboot\",\"public_endpoint\":\"temporary_quick_tunnel_not_permanent_DNS\",\"runtime_edge_sha256\":hashlib.sha256(edge_script.encode()).hexdigest()}\n(root/\"control/current-state.json\").write_text(json.dumps(state,indent=2)+\"\\n\")\npackage=root/\"control/Gii_Work_Activated_2026-11-11.zip\"\nfiles=[]\nfor name in [\"deployment.json\",\"external-smoke.json\",\"latest-backup.json\",\"current-state.json\"]:files.append((root/\"control\"/name,\"control/\"+name))\nfiles.extend((p,\"backup/\"+p.relative_to(backup_path.parent).as_posix()) for p in backup_path.parent.rglob(\"*\") if p.is_file())\nfor p in (root/\"logs/release-checks\").rglob(\"*\"):\n if p.is_file():files.append((p,\"server-checks/\"+p.relative_to(root/\"logs/release-checks\").as_posix()))\nfor name in [\"start_edge.py\",\"backup.py\"]:files.append((root/\"runtime\"/name,\"runtime/\"+name))\nfor name in [\"gii-work-app.service\",\"gii-work-edge.service\",\"gii-work-tunnel.service\",\"gii-work-backup.service\",\"gii-work-backup.timer\"]:files.append((Path.home()/\".config/systemd/user\"/name,\"units/\"+name))\nfiles.append((release/\"manifest.json\",\"release-manifest.json\"))\nsecrets_to_exclude=[credentials[\"token\"].encode(),credentials[\"challenge\"].encode()]\nenv=dict(x.split(\"=\",1) for x in (root/\"runtime.env\").read_text().splitlines() if \"=\" in x);secrets_to_exclude.append(env[\"GII_RUN_ISSUER_TOKEN\"].encode())\nsums=[]\nwith zipfile.ZipFile(package,\"w\",zipfile.ZIP_DEFLATED) as archive:\n for path,name in files:\n  content=path.read_bytes()\n  if any(secret in content for secret in secrets_to_exclude):raise RuntimeError(\"credential_in_archive_surface\")\n  archive.writestr(name,content);sums.append(hashlib.sha256(content).hexdigest()+\"  \"+name)\n archive.writestr(\"SHA256SUMS\",\"\\n\".join(sums)+\"\\n\")\nraw=package.read_bytes()\ncert=\"-----BEGIN CERTIFICATE-----\\nMIID3jCCAkagAwIBAgIUTWSanKXGQp1Si6u1jameFOr5h14wDQYJKoZIhvcNAQEL\\nBQAwKTEnMCUGA1UEAwweR2lpIGRlcGxveW1lbnQgYmFja3VwIHRyYW5zZmVyMB4X\\nDTI2MTExMTEwNDYyNVoXDTI2MTExMzEwNTEyNVowKTEnMCUGA1UEAwweR2lpIGRl\\ncGxveW1lbnQgYmFja3VwIHRyYW5zZmVyMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A\\nMIIBigKCAYEAtyQ42m1KSJJBx0aiSv7TyFFUdaFTJdLWFAvS0Fi/tAlrhoPzMnDM\\nZBou3bEQtX4lZRh0p8QH0mtwbRYaBzlOFzFHRTmloS1rDmI8MMz7Yvi4FjHiFxqB\\no+OtHNZMOnJrDc6Lp3oxXTi4IXzRm2eGxmId1yyqmsOG4UYX+oxLWoogbRAeda4Q\\nYvIgtlXKA2qs3bk7w4qRvYBdS8BTafJiqhIrycz5QKPPiPnvRxBKhd4b71oOGMO1\\npk/XLvcibdxn86gulTZPPae/bPyVjprLjYuR518LVgzS6dgjXmDP2HRD22ZSJmdR\\nyLYv6Hl3/NAVQUN336XMq/nuFYDhLXIEoj1g8ZlmRTaAoZHMjSVW6RCn3DSt8pg5\\n0JHG+cRC1NZe7/9bWkn9t2vyn6zciPcZApCqT+TMlHpAJPJa8Uth7Ri79bGSq+Lj\\nfXHdR2kEyfcCbOsiE9rqYrHjefeNDp7kdwI/wmCyARqwXYMoBG9kXGrsX3FHBlZF\\n523yfAtLzSZbAgMBAAEwDQYJKoZIhvcNAQELBQADggGBACK93ZIVsZiTsP6H9t+Z\\na67nX0uEBAGRjFO60XRyiNPH+wxIso+PqUlGHQCmyB1CbaM40JYWQseEYlejpKSB\\nkl1bz5Fa8+VdaufRxTJPEe2BeIBr5XpeW4B14vgsg7yC58s1l1YGB6gtHX5Bg98g\\nxX/Yl0Lp+IiPybu/6F7KIOkbgjHIy8TIroK6GNGmW6rzInQM+nDtPNAld5Q0PgV7\\n3IiZb+0RuzwjZvf5YSarA4t2HbbAm+0P6y24Pqe1LCSL6veFxjy3SUpbmfn5GVx6\\n3lBZnn0Pl4CBmn5oU4Db/fQcohtAg5QDBrgF4SOkOSHTLTLPOTlWAsFCidzC6x/e\\nnqi+JXLS206vuJD2en8iteGsowWfaY0+APmCOPb3/Q84AQZGYqvrBMa6Cghln146\\n1E4QyORHCyTAHJFUoEzRyRGzdmxenpVcqnyAznIcUlymV611Z7FYyC9NvLGWbTak\\ndi+RLyG1OuLs41YHvDVEiPkJwJD3OXTAH/v8a3++iOHMeA==\\n-----END CERTIFICATE-----\"\nfd,w=os.pipe();os.write(w,cert.encode());os.close(w)\ntry:\n encrypted=subprocess.run([\"openssl\",\"cms\",\"-encrypt\",\"-binary\",\"-outform\",\"DER\",\"-aes256\",\"/dev/fd/\"+str(fd)],input=raw,capture_output=True,pass_fds=(fd,),check=True,timeout=15).stdout\nfinally:os.close(fd)\nprint(json.dumps({\"schema\":\"gii.work.activated.encrypted-package.v1\",\"state\":state,\"archive_sha256\":hashlib.sha256(raw).hexdigest(),\"archive_bytes\":len(raw),\"ciphertext_b64\":base64.b64encode(encrypted).decode(),\"ciphertext_sha256\":hashlib.sha256(encrypted).hexdigest()}))\n",capture_output=True,text=True,timeout=70)
-           print(r.stdout)
-           if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode)
-           sys.exit(r.returncode)
+           state=json.loads(ssh("import json\nfrom pathlib import Path\nprint((Path.home()/'gii-work/control/current-state.json').read_text())\n"));base=state["base_url"]
+           report={"schema":"gii.final-http.v1","base_url":base,"at":datetime.datetime.now(datetime.timezone.utc).isoformat(),"client":"independent GitHub hosted runner","checks":[],"model_calls":0}
+           for path,expected in [("/health",200),("/sonar/tasks",200),("/sonar",200),("/",200),("/admin",404),("/evaluator/tasks.json",404)]:
+            try:
+             response=urllib.request.urlopen(base+path,timeout=15)
+            except urllib.error.HTTPError as error:response=error
+            with response:
+             raw=response.read(200000);item={"path":path,"status":response.status,"expected":expected,"passed":response.status==expected,"final_url":response.url}
+            if path=="/health":item["body"]=json.loads(raw)
+            if path in ("/sonar","/"):item["html"]=b"<!doctype html" in raw.lower()
+            report["checks"].append(item)
+            if not item["passed"]:raise RuntimeError("final_http_failed")
+           req=urllib.request.Request(base+"/sonar/run",data=json.dumps({"task_id":"sonar-1.1-contradictions-01","mode":"text_control"}).encode(),headers={"Content-Type":"application/json","Origin":base},method="POST")
+           try:
+            response=urllib.request.urlopen(req,timeout=15)
+           except urllib.error.HTTPError as error:response=error
+           with response:status=response.status
+           if status!=403:raise RuntimeError("issuer_not_enforced")
+           report["unauthenticated_run_rejected"]=status
+           saved=json.dumps(report)
+           ssh("from pathlib import Path\n(Path.home()/'gii-work/control/final-http.json').write_text("+repr(saved)+")\n")
+           print(saved)
           finally:
            os.unlink(key);os.unlink(known)
           
