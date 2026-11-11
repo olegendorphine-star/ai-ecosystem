@@ -30,7 +30,12 @@ PUBLIC_FIELD_NAMES = {
     "ServiceTitle", "ServiceStartingPrice", "Title", "Description",
     "Images", "Price", "Address", "ListingFee", "AdStatus",
 }
-CATEGORY_TERMS = ("программирование", "настройка crm", "it, дизайн, тексты", "деловые услуги")
+# Prefer the dedicated AI-services leaf over the legacy programming/CRM branch.
+# The tree is read-only metadata; no category is changed by this inventory.
+CATEGORY_TERMS = (
+    "ии-решения", "нейросети", "работа с ии", "искусственный интеллект",
+    "программирование", "настройка crm", "it, дизайн, тексты", "деловые услуги",
+)
 
 
 @dataclass(frozen=True)
@@ -85,7 +90,11 @@ def find_category_slug(tree: Any) -> str | None:
             slug = value.get("slug")
             if isinstance(slug, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,120}", slug):
                 if any(term in name for term in CATEGORY_TERMS):
-                    score = (4 if "программирование" in name else
+                    score = (10 if "ии-решения" in name else
+                             9 if "работа с ии" in name else
+                             8 if "нейросети" in name else
+                             7 if "искусственный интеллект" in name else
+                             4 if "программирование" in name else
                              3 if "crm" in name else
                              2 if "it, дизайн" in name else 1)
                     matches.append((score, slug))

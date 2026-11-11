@@ -48,6 +48,12 @@ class TestAvitoProfileInventory(unittest.TestCase):
             {"name": "Программирование, настройка CRM", "slug": "programming-crm"},
         ]}
         self.assertEqual(app.find_category_slug(tree), "programming-crm")
+        ai_tree = {"nodes": [
+            {"name": "Программирование, настройка CRM", "slug": "programming-crm"},
+            {"name": "ИИ-решения, нейросети", "slug": "ai-solutions"},
+            {"name": "Деловые услуги", "slug": "business-services"},
+        ]}
+        self.assertEqual(app.find_category_slug(ai_tree), "ai-solutions")
         self.assertIsNone(app.find_category_slug([{"name": "Other", "slug": "other"}]))
 
     def test_public_fields_whitelist_never_leaks_contact(self):
