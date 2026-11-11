@@ -29,27 +29,8 @@ jobs:
           if not port.isdigit():raise SystemExit("invalid_port")
           cmd=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile="+known,"-o","IdentitiesOnly=yes","-i",key,"-p",port,os.environ["SERVER_USER"]+"@"+os.environ["SERVER_HOST"],"python3 -"]
           try:
-           r=subprocess.run(cmd,input="import json,urllib.request,urllib.error,datetime,subprocess\nout={\"schema\":\"gii.server.readonly-routes.v1\",\"at\":datetime.datetime.now(datetime.timezone.utc).isoformat(),\"requests\":[]}\nurls=[\"http://127.0.0.1:20242/quicktunnel\",\"http://127.0.0.1:18768/\",\"http://127.0.0.1:18768/sonar/tasks\",\"http://127.0.0.1:18768/admin\",\"http://127.0.0.1:18768/evaluator/tasks.json\",\"http://127.0.0.1:18768/static/../evaluator/tasks.json\"]\nfor u in urls:\n row={\"url\":u}\n try:\n  with urllib.request.urlopen(u,timeout=5) as r:\n   b=r.read(100000);row[\"status\"]=r.status\n   try:\n    j=json.loads(b)\n    if \"/sonar/tasks\" in u:row.update({\"count\":j.get(\"count\"),\"schema\":j.get(\"schema\"),\"task_fields\":sorted(set().union(*(t.keys() for t in j.get(\"tasks\",[]))))})\n    else:row[\"json\"]=j\n   except Exception:row[\"body_bytes\"]=len(b)\n except urllib.error.HTTPError as e:row[\"status\"]=e.code\n except Exception as e:row[\"error\"]=type(e).__name__\n out[\"requests\"].append(row)\nr=subprocess.run([\"systemctl\",\"list-units\",\"--all\",\"--plain\",\"--no-legend\",\"gii*\"],capture_output=True,text=True,timeout=5);out[\"gii_units\"]=r.stdout\nprint(json.dumps(out,ensure_ascii=False))\n",capture_output=True,text=True,timeout=70)
+           r=subprocess.run(cmd,input="import json,subprocess,shlex,datetime,os,stat\nout={\"schema\":\"gii.server.config-readonly.v1\",\"at\":datetime.datetime.now(datetime.timezone.utc).isoformat(),\"services\":{},\"release_files\":{}}\nfor u in [\"gii-web.service\",\"gii-lab.service\",\"gii-lab-edge.service\",\"gii-lab-tunnel.service\",\"gii-sonar-staging.service\",\"gii-sonar-staging-edge.service\",\"gii-sonar-staging-tunnel.service\"]:\n r=subprocess.run([\"systemctl\",\"show\",u,\"--property=WorkingDirectory,User,ExecStart,Environment,ActiveState\"],capture_output=True,text=True,timeout=5)\n d={}\n for line in r.stdout.splitlines():\n  k,_,v=line.partition(\"=\")\n  if k==\"Environment\":\n   try:d[\"allowed_environment\"]={x.split(\"=\",1)[0]:x.split(\"=\",1)[1] for x in shlex.split(v) if \"=\" in x and x.split(\"=\",1)[0] in (\"GII_DATA\",\"GII_BASE_URL\")}\n   except ValueError:d[\"allowed_environment\"]={\"error\":\"parse_failed\"}\n  else:d[k]=v\n out[\"services\"][u]=d\nfor p in [\"/opt/gii-sonar-staging/release\",\"/opt/gii-sonar-staging/manifest.json\",\"/opt/gii-sonar-staging/SHA256SUMS\"]:\n try:\n  s=os.lstat(p)\n  if stat.S_ISDIR(s.st_mode):out[\"release_files\"][p]={\"names\":sorted(os.listdir(p))[:100]}\n  else:out[\"release_files\"][p]={\"bytes\":s.st_size}\n except FileNotFoundError:out[\"release_files\"][p]={\"status\":\"absent\"}\n except PermissionError:out[\"release_files\"][p]={\"status\":\"permission_denied\"}\nr=subprocess.run([\"systemctl\",\"list-timers\",\"--all\",\"--no-legend\",\"gii*\"],capture_output=True,text=True,timeout=5);out[\"gii_timers\"]=r.stdout\nprint(json.dumps(out,ensure_ascii=False))\n",capture_output=True,text=True,timeout=70)
            print(r.stdout)
-           if r.returncode==0:
-            import json,urllib.request,urllib.error,datetime
-            report=json.loads(r.stdout);hostname=report["requests"][0].get("json",{}).get("hostname","")
-            if not hostname.endswith(".trycloudflare.com") or "/" in hostname:raise SystemExit("invalid_tunnel_hostname")
-            external={"schema":"gii.external-runner-readonly.v1","at":datetime.datetime.now(datetime.timezone.utc).isoformat(),"base_url":"https://"+hostname,"client":"GitHub hosted runner, outside VPS","results":[]}
-            for path in ["/health","/sonar/tasks","/admin","/evaluator/tasks.json"]:
-             item={"path":path}
-             try:
-              with urllib.request.urlopen(external["base_url"]+path,timeout=12) as response:
-               raw=response.read(100000);item["status"]=response.status
-               try:
-                data=json.loads(raw)
-                if path=="/sonar/tasks":item.update(count=data.get("count"),schema=data.get("schema"),task_fields=sorted(set().union(*(t.keys() for t in data.get("tasks",[])))))
-                elif path=="/health":item["json"]=data
-               except ValueError:item["body_bytes"]=len(raw)
-             except urllib.error.HTTPError as error:item["status"]=error.code
-             except Exception as error:item["error"]=type(error).__name__
-             external["results"].append(item)
-            print(json.dumps(external))
            if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode)
            sys.exit(r.returncode)
           finally:
