@@ -5,6 +5,7 @@ No tokens, IPs, cookies, unredacted Ray IDs, or HTML are printed. Do not
 change headers to imitate clients or route traffic through other networks.
 """
 import json
+import os
 import pathlib
 import socket
 import ssl
@@ -83,6 +84,7 @@ def main():
     if TOKEN_PATH.is_file() and not TOKEN_PATH.is_symlink() and (TOKEN_PATH.stat().st_mode&0o077)==0:
         token=TOKEN_PATH.read_text().strip()
     out={"schema":"fh.access.diagnostics.v1","read_only":True,"secret_printed":False,
+         "proxy_env_schemes":sorted([key for key in urllib.request.getproxies().keys() if key in ("http","https","all")]),
          "dns":{s:dns_summary(s) for s in ("freelancehunt.com","www.freelancehunt.com","api.freelancehunt.com")},
          "tests":[parse_response(*test,token) for test in TESTS]}
     print(json.dumps(out,ensure_ascii=False,sort_keys=True))
