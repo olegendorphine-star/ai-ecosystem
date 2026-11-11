@@ -24,3 +24,19 @@
 ## Следующий этап
 
 Разработать надёжный read-only сбор проектов на VPS с дедупликацией, scoring по ИИ-автоматизации и журналом лидов. Только после проверки профиля, прав и реального объявления — отдельный at-most-once модуль отправки откликов, тестируемый на одном конкретном заказе, с проверкой статуса отправки.
+
+## Browser access investigation — 11.11.2026
+
+Verified using owner VPS and a separate GitHub-hosted runner. Working VPS Chromium/SSH and valid API token do **not** imply access to Freelancehunt's website.
+
+- VPS GET/HEAD `https://freelancehunt.com/` and GET to `/profile/login`, `/my/freelancer`, `/my/skills`: **HTTP 403** with Cloudflare `Server` and `Cf-Ray`, branded `Sorry, you have been blocked` HTML.
+- `https://www.freelancehunt.com/` also 403. Browser on VPS returned the same 403 (earlier run #42904190980).
+- VPS `https://freelancehunt.com/cdn-cgi/trace` 200; authorized `GET /v2/my/profile` 200; unrelated public HTTPS control 200. DNS resolves; no configured HTTP(S) proxy on VPS.
+- Separate GitHub-hosted runner GET homepage: same Cloudflare HTTP 403.
+- Latest proof: https://github.com/olegendorphine-star/ai-ecosystem/actions/runs/42955745846 .
+- This establishes Cloudflare-layer blocking of web requests, **not** which exact rule/IP/ASN/browser condition caused it. No Cloudflare error 1020 observed.
+- Official editor links are `https://freelancehunt.com/my/freelancer` (About), `https://freelancehunt.com/my/skills` (specialization), `https://freelancehunt.com/my/personal` (personal details); official Help Center: https://help-ua.freelancehunt.com/uk/profil/kliuchovi-nalashtuvannia . Prior `/my/profile` is **not** the documented edit link.
+
+**Approved resolution path:** Freelancehunt site's owner must evaluate the blocked Cloudflare event using Ray ID and UTC time, and permit the VPS/network or describe an officially supported remote access path. Another option is an owner-authorized browser on an already permitted network with secure on-device authorization; not yet implemented. Do not use proxy/IP rotation, CAPTCHA bypass or undocumented profile-update requests. No external communications without explicit owner's permission.
+
+**Result:** website profile still unmodified. Only the official API's read operations have been verified.
