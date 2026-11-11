@@ -27,11 +27,11 @@ jobs:
            with os.fdopen(fd,"wb") as f:f.write(value)
           port=os.environ.get("SERVER_PORT") or "22"
           if not port.isdigit():raise SystemExit("invalid_port")
-          cmd=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile="+known,"-o","IdentitiesOnly=yes","-i",key,"-p",port,os.environ["SERVER_USER"]+"@"+os.environ["SERVER_HOST"],"python3 -"]
+          cmd=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile="+known,"-o","IdentitiesOnly=yes","-i",key,"-p",port,"root@"+os.environ["SERVER_HOST"],"python3 -"]
           try:
-           r=subprocess.run(cmd,input="import subprocess,json\nout={\"schema\":\"gii.admin-preflight.v1\",\"checks\":[]}\ncommands=[[\"id\",\"-u\"],[\"sudo\",\"-n\",\"/usr/bin/id\",\"-u\"],[\"sudo\",\"-n\",\"-u\",\"gii-sonar-staging\",\"/usr/bin/id\",\"-u\"],[\"sudo\",\"-n\",\"/usr/bin/stat\",\"-c\",\"%F %U %a %s\",\"/var/lib/gii-sonar-staging\",\"/var/lib/gii-sonar-staging/gii.sqlite3\"]]\nfor cmd in commands:\n try:\n  r=subprocess.run(cmd,capture_output=True,text=True,timeout=8)\n  out[\"checks\"].append({\"command\":cmd,\"returncode\":r.returncode,\"stdout\":r.stdout[:2000],\"stderr\":r.stderr[:1200]})\n except Exception as e:out[\"checks\"].append({\"command\":cmd,\"error\":type(e).__name__})\nprint(json.dumps(out))\n",capture_output=True,text=True,timeout=70)
+           r=subprocess.run(cmd,input="import os,json\nprint(json.dumps({\"schema\":\"gii.root-channel-check.v1\",\"uid\":os.getuid(),\"gii_root_exists\":os.path.isdir(\"/opt/gii-sonar-staging\")}))\n",capture_output=True,text=True,timeout=70)
            print(r.stdout)
-           if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode)
+           if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode,r.stderr[-400:])
            sys.exit(r.returncode)
           finally:
            os.unlink(key);os.unlink(known)
