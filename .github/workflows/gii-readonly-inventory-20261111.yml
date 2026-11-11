@@ -27,11 +27,11 @@ jobs:
            with os.fdopen(fd,"wb") as f:f.write(value)
           port=os.environ.get("SERVER_PORT") or "22"
           if not port.isdigit():raise SystemExit("invalid_port")
-          cmd=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile="+known,"-o","IdentitiesOnly=yes","-i",key,"-p",port,"root@"+os.environ["SERVER_HOST"],"python3 -"]
+          cmd=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile="+known,"-o","IdentitiesOnly=yes","-i",key,"-p",port,os.environ["SERVER_USER"]+"@"+os.environ["SERVER_HOST"],"python3 -"]
           try:
-           r=subprocess.run(cmd,input="import os,json\nprint(json.dumps({\"schema\":\"gii.root-channel-check.v1\",\"uid\":os.getuid(),\"gii_root_exists\":os.path.isdir(\"/opt/gii-sonar-staging\")}))\n",capture_output=True,text=True,timeout=70)
+           r=subprocess.run(cmd,input="import os,json,subprocess,socket\nout={\"schema\":\"gii.user-deploy-feasibility.v1\",\"uid\":os.getuid(),\"home\":os.path.expanduser(\"~\"),\"home_writable\":os.access(os.path.expanduser(\"~\"),os.W_OK),\"checks\":[],\"ports\":{}}\nfor cmd in [[\"systemctl\",\"--user\",\"is-system-running\"],[\"loginctl\",\"show-user\",str(os.getuid()),\"--property=Linger\"]]:\n try:\n  r=subprocess.run(cmd,capture_output=True,text=True,timeout=5);out[\"checks\"].append({\"command\":cmd,\"returncode\":r.returncode,\"stdout\":r.stdout[:500],\"stderr\":r.stderr[:500]})\n except Exception as e:out[\"checks\"].append({\"command\":cmd,\"error\":type(e).__name__})\nfor port in [18769,18770,20243]:\n s=socket.socket()\n try:s.bind((\"127.0.0.1\",port));out[\"ports\"][str(port)]=\"available\"\n except OSError:out[\"ports\"][str(port)]=\"unavailable\"\n finally:s.close()\nprint(json.dumps(out))\n",capture_output=True,text=True,timeout=70)
            print(r.stdout)
-           if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode,r.stderr[-400:])
+           if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode)
            sys.exit(r.returncode)
           finally:
            os.unlink(key);os.unlink(known)
