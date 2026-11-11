@@ -5,11 +5,11 @@ on:
 permissions:
   contents: read
 jobs:
-  maintenance:
+  inventory:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 3
     steps:
-      - name: Gii-only external technical acceptance
+      - name: Maintain isolated Gii release only
         env:
           KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
           KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
@@ -18,41 +18,21 @@ jobs:
           SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
         run: |
           python3 - <<'PY'
-          import os,base64,subprocess,sys,json,urllib.request,urllib.error,datetime
-          root=os.environ["RUNNER_TEMP"]+"/gii-only-maintenance";os.makedirs(root,mode=0o700,exist_ok=True)
+          import os,base64,subprocess,sys
+          root=os.environ["RUNNER_TEMP"]+"/gii-ro"
+          os.makedirs(root,mode=0o700,exist_ok=True)
           key=root+"/key";known=root+"/known_hosts"
           for name,value in [(key,base64.b64decode(os.environ["KEY_B64"])),(known,os.environ["KNOWN_HOSTS"].encode())]:
            fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
            with os.fdopen(fd,"wb") as f:f.write(value)
           port=os.environ.get("SERVER_PORT") or "22"
+          if not port.isdigit():raise SystemExit("invalid_port")
           cmd=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile="+known,"-o","IdentitiesOnly=yes","-i",key,"-p",port,os.environ["SERVER_USER"]+"@"+os.environ["SERVER_HOST"],"python3 -"]
-          def ssh(script):
-           done=subprocess.run(cmd,input=script,capture_output=True,text=True,timeout=65)
-           if done.returncode:raise RuntimeError("gii_remote_step_failed")
-           return done.stdout
           try:
-           state=json.loads(ssh("import json\nfrom pathlib import Path\nprint((Path.home()/'gii-work/control/current-state.json').read_text())\n"));base=state["base_url"]
-           report={"schema":"gii.final-http.v1","base_url":base,"at":datetime.datetime.now(datetime.timezone.utc).isoformat(),"client":"independent GitHub hosted runner","checks":[],"model_calls":0}
-           for path,expected in [("/health",200),("/sonar/tasks",200),("/sonar",200),("/",200),("/admin",404),("/evaluator/tasks.json",404)]:
-            try:
-             response=urllib.request.urlopen(base+path,timeout=15)
-            except urllib.error.HTTPError as error:response=error
-            with response:
-             raw=response.read(200000);item={"path":path,"status":response.status,"expected":expected,"passed":response.status==expected,"final_url":response.url}
-            if path=="/health":item["body"]=json.loads(raw)
-            if path in ("/sonar","/"):item["html"]=b"<!doctype html" in raw.lower()
-            report["checks"].append(item)
-            if not item["passed"]:raise RuntimeError("final_http_failed")
-           req=urllib.request.Request(base+"/sonar/run",data=json.dumps({"task_id":"sonar-1.1-contradictions-01","mode":"text_control"}).encode(),headers={"Content-Type":"application/json","Origin":base},method="POST")
-           try:
-            response=urllib.request.urlopen(req,timeout=15)
-           except urllib.error.HTTPError as error:response=error
-           with response:status=response.status
-           if status!=403:raise RuntimeError("issuer_not_enforced")
-           report["unauthenticated_run_rejected"]=status
-           saved=json.dumps(report)
-           ssh("from pathlib import Path\n(Path.home()/'gii-work/control/final-http.json').write_text("+repr(saved)+")\n")
-           print(saved)
+           r=subprocess.run(cmd,input="import os,json,subprocess\nresult={\"schema\":\"gii.autostart-configuration.v1\",\"scope\":\"current Gii SSH account user manager only; no Kimi services or files\"}\nr=subprocess.run([\"loginctl\",\"--no-ask-password\",\"enable-linger\",str(os.getuid())],capture_output=True,text=True,timeout=10)\nresult[\"enable_linger_returncode\"]=r.returncode\nresult[\"diagnostic\"]=r.stderr[:500]\ns=subprocess.run([\"loginctl\",\"show-user\",str(os.getuid()),\"--property=Linger\"],capture_output=True,text=True,timeout=5)\nresult[\"linger\"]=s.stdout.strip()\nresult[\"reboot_test_performed\"]=False\nprint(json.dumps(result))\n",capture_output=True,text=True,timeout=70)
+           print(r.stdout)
+           if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode)
+           sys.exit(r.returncode)
           finally:
            os.unlink(key);os.unlink(known)
           
