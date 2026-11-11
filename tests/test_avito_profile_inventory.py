@@ -54,6 +54,8 @@ class TestAvitoProfileInventory(unittest.TestCase):
             {"name": "Деловые услуги", "slug": "business-services"},
         ]}
         self.assertEqual(app.find_category_slug(ai_tree), "ai-solutions")
+        self.assertEqual(app.find_category_match(ai_tree), ("ai-solutions", True))
+        self.assertEqual(app.find_category_match(tree), ("programming-crm", False))
         self.assertIsNone(app.find_category_slug([{"name": "Other", "slug": "other"}]))
 
     def test_public_fields_whitelist_never_leaks_contact(self):
@@ -101,6 +103,8 @@ class TestAvitoProfileInventory(unittest.TestCase):
             with patch.object(app, "call", side_effect=fake) as calls:
                 report = app.inventory()
         self.assertTrue(report["pricelist_observed_in_fields"])
+        self.assertFalse(report["ai_category_selected"])
+        self.assertFalse(report["ai_category_fields_verified"])
         self.assertEqual(calls.call_count, 6)
         out = json.dumps(report)
         for secret in ("PRIVATE_TOKEN", "secret@example.com", "https://private", "9999"):
