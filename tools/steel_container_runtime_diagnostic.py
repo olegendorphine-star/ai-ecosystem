@@ -27,6 +27,11 @@ def docker_failure_kind(message):
     return "other_failure"
 
 
+
+
+def _sudo_check(argv):
+    return command(["sudo", "-n"] + argv, timeout=8)[0] == 0
+
 def inspect():
     result={"schema":"ai.steel.vps.runtime.v1","read_only":True,"docker":{},"podman":{},
             "rootless":{},"privilege":{}}
@@ -53,6 +58,8 @@ def inspect():
         result["privilege"]["docker_system_service_active"]=command(["systemctl","is-active","docker"])[0]==0
         result["privilege"]["docker_user_service_active"]=command(["systemctl","--user","is-active","docker"])[0]==0
     result["privilege"]["is_root"]=os.geteuid()==0
+    result["privilege"]["sudo_noninteractive_works"]=(shutil.which("sudo") is not None and _sudo_check(["true"]))
+    result["privilege"]["sudo_docker_info_allowed"]=(shutil.which("sudo") is not None and _sudo_check(["docker","info","--format","{{.ServerVersion}}"]))
     return result
 
 
