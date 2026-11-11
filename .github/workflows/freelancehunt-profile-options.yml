@@ -1,0 +1,35 @@
+name: Freelancehunt - profile API method discovery (read-only)
+on:
+  push:
+    branches: [feature/freelancehunt-api-probe-20261111]
+    paths:
+      - '.github/workflows/freelancehunt-profile-options.yml'
+      - 'tools/freelancehunt_profile_options.py'
+permissions: {contents: read}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Python syntax
+        run: python3 -m py_compile tools/freelancehunt_profile_options.py
+      - name: Authorized OPTIONS through VPS, no profile writes
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          printf '%s' "$KEY" | base64 -d > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$KNOWN" > "$RUNNER_TEMP/ssh/known"
+          chmod 600 "$RUNNER_TEMP/ssh/key" "$RUNNER_TEMP/ssh/known"
+          cat tools/freelancehunt_profile_options.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/ssh/known" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/ssh/key" \
+            -p "${PORT:-22}" "$USER@$HOST" 'python3 -'
