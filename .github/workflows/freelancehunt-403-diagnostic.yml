@@ -41,3 +41,18 @@ jobs:
           assert o["schema"]=="fh.access.diagnostics.v1" and o["read_only"] and not o["secret_printed"]
           print("FH_DIAGNOSTIC",json.dumps(o,sort_keys=True))
           '
+      - name: Compare separate GitHub-hosted network (GET only)
+        run: |
+          python3 - <<'PY'
+          import urllib.request, urllib.error
+          req=urllib.request.Request("https://freelancehunt.com/",headers={"User-Agent":"FreelancehuntOwnerNetworkAudit/1.0"},method="GET")
+          try:
+              with urllib.request.urlopen(req,timeout=15) as r:
+                  print("FH_GITHUB_EGRESS_HTTP",r.status)
+                  print("FH_GITHUB_CLOUDFLARE", "cloudflare" in (r.headers.get("Server") or "").lower())
+          except urllib.error.HTTPError as e:
+              print("FH_GITHUB_EGRESS_HTTP",e.code)
+              print("FH_GITHUB_CLOUDFLARE", "cloudflare" in (e.headers.get("Server") or "").lower())
+          except Exception:
+              print("FH_GITHUB_EGRESS_ERROR", "network_error")
+          PY
