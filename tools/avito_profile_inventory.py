@@ -79,9 +79,9 @@ def call(path: str, *, token: str | None = None, oauth_form: bytes | None = None
         return Result(None)
 
 
-def find_category_slug(tree: Any) -> str | None:
-    """Prefer the service leaf. Do not output private data from the tree."""
-    matches: list[tuple[int, str]] = []
+def find_category_match(tree: Any) -> tuple[str | None, bool]:
+    """Return selected slug and whether its name explicitly denotes AI services."""
+    matches: list[tuple[int, str, bool]] = []
     def walk(value: Any, depth: int = 0) -> None:
         if depth > 20:
             return
@@ -97,7 +97,7 @@ def find_category_slug(tree: Any) -> str | None:
                              4 if "программирование" in name else
                              3 if "crm" in name else
                              2 if "it, дизайн" in name else 1)
-                    matches.append((score, slug))
+                    matches.append((score, slug, any(term in name for term in ("ии-решения", "нейросети", "искусственный интеллект"))))
             for child in value.values():
                 if isinstance(child, (dict, list)):
                     walk(child, depth + 1)
@@ -105,7 +105,13 @@ def find_category_slug(tree: Any) -> str | None:
             for child in value:
                 walk(child, depth + 1)
     walk(tree)
-    return max(matches, default=(0, None))[1]
+    winner = max(matches, default=(0, "", False))
+    return (winner[1] or None, winner[2])
+
+
+def find_category_slug(tree: Any) -> str | None:
+    """Compatibility wrapper for existing callers."""
+    return find_category_match(tree)[0]
 
 
 def allowed_field_names(payload: Any) -> list[str]:
@@ -177,13 +183,16 @@ def inventory() -> dict[str, Any]:
         summary["autoload_enabled"] = profile.get("autoload_enabled") is True
     tree = results["category_tree"].data
     if results["category_tree"].status == 200:
-        slug = find_category_slug(tree)
+        slug, is_ai = find_category_match(tree)
         summary["category_leaf_discovered"] = bool(slug)
+        summary["ai_category_selected"] = is_ai
+        summary["ai_category_fields_verified"] = False
         if slug:
             fields = call(f"/autoload/v1/user-docs/node/{slug}/fields", token=token)
             summary["category_fields_http"] = fields.status
             if fields.status == 200:
                 supported = allowed_field_names(fields.data)
+                summary["ai_category_fields_verified"] = is_ai
                 summary["category_fields_observed"] = supported
                 summary["pricelist_observed_in_fields"] = "PriceList" in supported
     return summary
