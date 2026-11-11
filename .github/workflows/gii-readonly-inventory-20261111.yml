@@ -1,0 +1,39 @@
+name: Gii bounded read-only inventory 2026-11-11
+on:
+  push:
+    branches: ["gii/read-only-inventory-20261111"]
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read only fixed Gii paths and service state
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          python3 - <<'PY'
+          import os,base64,subprocess,sys
+          root=os.environ["RUNNER_TEMP"]+"/gii-ro"
+          os.makedirs(root,mode=0o700,exist_ok=True)
+          key=root+"/key";known=root+"/known_hosts"
+          for name,value in [(key,base64.b64decode(os.environ["KEY_B64"])),(known,os.environ["KNOWN_HOSTS"].encode())]:
+           fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+           with os.fdopen(fd,"wb") as f:f.write(value)
+          port=os.environ.get("SERVER_PORT") or "22"
+          if not port.isdigit():raise SystemExit("invalid_port")
+          cmd=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile="+known,"-o","IdentitiesOnly=yes","-i",key,"-p",port,os.environ["SERVER_USER"]+"@"+os.environ["SERVER_HOST"],"python3 -"]
+          try:
+           r=subprocess.run(cmd,input="import os,json,stat,subprocess,urllib.request,datetime\nout={\"schema\":\"gii.server.readonly-inventory.v1\",\"at\":datetime.datetime.now(datetime.timezone.utc).isoformat(),\"uid\":os.getuid(),\"hostname\":os.uname().nodename,\"paths\":{},\"services\":{},\"health\":{}}\npaths=[\"/opt/gii-website\",\"/opt/gii-lab\",\"/opt/gii-sonar-staging\",\"/var/lib/gii-website/gii.sqlite3\",\"/var/lib/gii-lab/data/gii.sqlite3\",\"/var/lib/gii-sonar-staging/gii.sqlite3\",\"/var/lib/gii-sonar-staging/public-endpoint.txt\"]\nfor p in paths:\n try:\n  s=os.lstat(p);out[\"paths\"][p]={\"exists\":True,\"symlink\":stat.S_ISLNK(s.st_mode),\"directory\":stat.S_ISDIR(s.st_mode),\"size\":s.st_size,\"mode\":oct(stat.S_IMODE(s.st_mode))}\n  if p.endswith(\"/public-endpoint.txt\") and stat.S_ISREG(s.st_mode) and s.st_size<2048:\n   value=open(p).read().strip()\n   if value.startswith(\"https://\") and len(value)<512:out[\"paths\"][p][\"public_url\"]=value\n except FileNotFoundError:out[\"paths\"][p]={\"exists\":False}\n except PermissionError:out[\"paths\"][p]={\"status\":\"permission_denied\"}\nfor u in [\"gii-web.service\",\"gii-website.service\",\"gii-sonar-staging.service\",\"gii-sonar-staging-edge.service\",\"gii-sonar-staging-tunnel.service\"]:\n try:\n  r=subprocess.run([\"systemctl\",\"show\",u,\"--property=Id,LoadState,ActiveState,SubState,User,WorkingDirectory,FragmentPath\"],capture_output=True,text=True,timeout=5);out[\"services\"][u]=r.stdout.strip()\n except Exception as e:out[\"services\"][u]={\"error\":type(e).__name__}\nfor port in [8765,18765,18767,18768]:\n try:\n  with urllib.request.urlopen(\"http://127.0.0.1:\"+str(port)+\"/health\",timeout=3) as r:\n   raw=r.read(2048)\n   try:body=json.loads(raw)\n   except Exception:body={\"json\":False}\n   out[\"health\"][str(port)]={\"status\":r.status,\"body\":{k:body[k] for k in [\"status\",\"version\",\"mode\",\"sonar_version\"] if k in body}}\n except Exception as e:out[\"health\"][str(port)]={\"error\":type(e).__name__}\nprint(json.dumps(out,ensure_ascii=False))\n",capture_output=True,text=True,timeout=70)
+           print(r.stdout)
+           if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode)
+           sys.exit(r.returncode)
+          finally:
+           os.unlink(key);os.unlink(known)
+          
+          PY
