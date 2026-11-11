@@ -1,0 +1,42 @@
+name: Steel Browser - container engine diagnosis
+on:
+  push:
+    branches: [feature/steel-browser-pilot-20261111]
+    paths:
+      - 'tools/steel_container_runtime_diagnostic.py'
+      - '.github/workflows/steel-container-runtime-diagnostic.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Check Python syntax
+        run: python3 -m py_compile tools/steel_container_runtime_diagnostic.py
+      - name: Check existing VPS engine without changing it
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER" && test -n "$KEY_B64" && test -n "$KNOWN"
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          printf '%s' "$KEY_B64" | base64 -d > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$KNOWN" > "$RUNNER_TEMP/ssh/known"
+          chmod 600 "$RUNNER_TEMP/ssh/key" "$RUNNER_TEMP/ssh/known"
+          cat tools/steel_container_runtime_diagnostic.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/ssh/known" -o IdentitiesOnly=yes \
+            -o LogLevel=ERROR -i "$RUNNER_TEMP/ssh/key" -p "${PORT:-22}" \
+            "$USER@$HOST" 'python3 -' | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d["schema"]=="ai.steel.vps.runtime.v1" and d["read_only"] is True
+          print("STEEL_RUNTIME",json.dumps(d,sort_keys=True))
+          '
