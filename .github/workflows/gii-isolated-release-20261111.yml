@@ -1,0 +1,39 @@
+name: Gii isolated release maintenance 2026-11-11
+on:
+  push:
+    branches: ["gii/isolated-release-20261111"]
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Maintain isolated Gii release only
+        env:
+          KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          SERVER_HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          SERVER_USER: ${{ secrets.AVITO_SERVER_USER }}
+          SERVER_PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          python3 - <<'PY'
+          import os,base64,subprocess,sys
+          root=os.environ["RUNNER_TEMP"]+"/gii-ro"
+          os.makedirs(root,mode=0o700,exist_ok=True)
+          key=root+"/key";known=root+"/known_hosts"
+          for name,value in [(key,base64.b64decode(os.environ["KEY_B64"])),(known,os.environ["KNOWN_HOSTS"].encode())]:
+           fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+           with os.fdopen(fd,"wb") as f:f.write(value)
+          port=os.environ.get("SERVER_PORT") or "22"
+          if not port.isdigit():raise SystemExit("invalid_port")
+          cmd=["ssh","-F","/dev/null","-4","-T","-o","BatchMode=yes","-o","ConnectTimeout=15","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile="+known,"-o","IdentitiesOnly=yes","-i",key,"-p",port,os.environ["SERVER_USER"]+"@"+os.environ["SERVER_HOST"],"python3 -"]
+          try:
+           r=subprocess.run(cmd,input="import os,json,subprocess,stat\nfrom pathlib import Path\nroot=Path.home()/\"gii-work\"\nmarker=root/\".gii-scope\"\nif root.exists() and (not marker.is_file() or marker.read_text().strip()!=\"GII-ONLY-20261111\"):raise SystemExit(\"existing_directory_not_owned_by_this_Gii_install\")\nroot.mkdir(mode=0o700,exist_ok=True)\nif not marker.exists():marker.write_text(\"GII-ONLY-20261111\\n\");marker.chmod(0o600)\nfor name in [\"releases\",\"incoming\",\"data\",\"backups\",\"logs\",\"control\",\"transport\"]:\n (root/name).mkdir(mode=0o700,exist_ok=True)\nkey=root/\"transport/release-key.pem\";cert=root/\"transport/release-cert.pem\"\nif not key.exists():\n old=os.umask(0o077)\n try:\n  r=subprocess.run([\"openssl\",\"req\",\"-x509\",\"-newkey\",\"rsa:3072\",\"-nodes\",\"-subj\",\"/CN=Gii-only release transfer\",\"-days\",\"2\",\"-keyout\",str(key),\"-out\",str(cert)],capture_output=True,timeout=30)\n  if r.returncode:raise RuntimeError(\"transport_key_generation_failed\")\n finally:os.umask(old)\nkey.chmod(0o600);cert.chmod(0o644)\nbinary=Path(\"/opt/gii-sonar-staging/bin/cloudflared\")\nprint(json.dumps({\"schema\":\"gii.isolated.bootstrap.v1\",\"root\":str(root),\"certificate\":cert.read_text(),\"cloudflared_executable\":os.access(binary,os.X_OK),\"scope\":\"Gii only; existing services/data untouched\",\"user_manager\":\"available\",\"linger\":\"not_changed\"}))\n",capture_output=True,text=True,timeout=70)
+           print(r.stdout)
+           if r.returncode:print("SSH_CONNECTION_FAILED",r.returncode)
+           sys.exit(r.returncode)
+          finally:
+           os.unlink(key);os.unlink(known)
+          
+          PY
