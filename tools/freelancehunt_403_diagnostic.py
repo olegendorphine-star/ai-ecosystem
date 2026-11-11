@@ -34,7 +34,7 @@ def dns_summary(domain):
     except Exception:
         return {"resolved": False}
 
-def parse_response(label, method, url, use_auth, token):
+def parse_response(label, url, method, use_auth, token):
     req_headers = {"Accept": "text/html,application/json",
                    "User-Agent": "FreelancehuntOwnerNetworkAudit/1.0"}
     if use_auth:
