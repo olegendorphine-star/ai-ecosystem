@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,11 +27,11 @@ def comment(cmd=None, user=b.OWNER):
 
 
 def xml_source(spb_prices=("5000", "30000", "150000")):
-    prices = "".join("<Service><ServicePrice>" + p + "</ServicePrice></Service>" for p in spb_prices)
-    images = "<Images>" + "<Image url='https://example.org/img.jpg'/>" * 6 + "</Images>"
-    return ("<Ads><Ad><Id>ai-assistant-memory-moscow-001</Id>" + images + "</Ad>"
-            "<Ad><Id>ai-assistant-memory-spb-001</Id>"
-            "<PriceList>" + prices + "</PriceList>" + images + "</Ad></Ads>").encode()
+    root = ET.parse(Path(__file__).resolve().parents[1] / "docs/avito-feed.xml").getroot()
+    spb = root.findall("Ad")[1]
+    for node, value in zip(spb.findall("./PriceList/Service/ServicePrice"), spb_prices):
+        node.text = value
+    return ET.tostring(root)
 
 
 class ValidationTests(unittest.TestCase):
@@ -119,7 +120,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_feed_bad_price(self):
         flags = b.check_feed_xml(xml_source(spb_prices=("5000", "35000", "150000")))
-        self.assertFalse(flags["spb_three_prices"])
+        self.assertFalse(flags["four_price_lists"])
 
     def test_ping_does_not_call_network(self):
         with patch.object(b, "request", side_effect=AssertionError("unexpected network")):

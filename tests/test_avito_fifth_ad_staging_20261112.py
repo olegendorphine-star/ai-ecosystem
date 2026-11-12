@@ -8,8 +8,9 @@ STAGED = ROOT / "reference/avito-feed-five-ads-staging-2026-11-12.xml"
 
 class FifthAvitoAdTest(unittest.TestCase):
     def test_preserve_existing_and_add_one(self):
-        old = ET.parse(LIVE).getroot().findall("Ad")
+        old = ET.parse(ROOT / "reference/avito-seo-proposal-2026-11-10.xml").getroot().findall("Ad")
         new = ET.parse(STAGED).getroot().findall("Ad")
+        self.assertEqual(LIVE.read_bytes(), STAGED.read_bytes())
         self.assertEqual(len(old), 4)
         self.assertEqual(len(new), 5)
         for previous, current in zip(old, new):

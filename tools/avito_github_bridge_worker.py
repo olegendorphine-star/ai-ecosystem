@@ -161,22 +161,12 @@ def get_issue_comments() -> list[Any]:
 
 
 def check_feed_xml(raw: bytes) -> dict[str, Any]:
-    root = ET.fromstring(raw)
-    ads = root.findall("Ad")
-    mos = next((x for x in ads if x.findtext("Id") == "ai-assistant-memory-moscow-001"), None)
-    spb = next((x for x in ads if x.findtext("Id") == "ai-assistant-memory-spb-001"), None)
-    prices = ([x.text for x in spb.findall("./PriceList/Service/ServicePrice")]
-              if spb is not None else [])
-    return {
-        "two_ads": len(ads) == 2,
-        "moscow_present": mos is not None,
-        "spb_present": spb is not None,
-        "spb_three_prices": prices == ["5000", "30000", "150000"],
-        "moscow_without_pricelist": mos is not None and mos.find("PriceList") is None,
-        "images_six_each": mos is not None and spb is not None and
-            len(mos.findall("./Images/Image")) == 6 and
-            len(spb.findall("./Images/Image")) == 6,
-    }
+    # Public-only and authenticated checks share the same reviewed feed schema.
+    try:
+        from avito_spb_pricelist_live_status import feed_check
+    except ModuleNotFoundError:
+        from tools.avito_spb_pricelist_live_status import feed_check
+    return feed_check(raw)
 
 
 def sanitize_live_api_report(raw: dict[str, Any]) -> dict[str, Any]:
@@ -186,8 +176,17 @@ def sanitize_live_api_report(raw: dict[str, Any]) -> dict[str, Any]:
     safe: dict[str, Any] = {
         "result": "checked",
         "price_list_visible_on_public_ad": "unverified",
-        "oauth_ok": raw.get("oauth_ok") is True,
+        "oauth_ok": raw.get("oauth_ok") if type(raw.get("oauth_ok")) is bool else None,
     }
+    if raw.get("api_check_status") in {
+        "skipped_feed_unavailable", "skipped_invalid_xml", "skipped_feed_mismatch",
+        "skipped_credentials_missing", "oauth_attempted", "checked"
+    }:
+        safe["api_check_status"] = raw["api_check_status"]
+        if raw["api_check_status"].startswith("skipped_"):
+            safe["result"] = "skipped"
+    if type(raw.get("feed_ad_count")) is int:
+        safe["feed_ad_count"] = raw["feed_ad_count"]
     if type(raw.get("public_feed_http")) is int:
         safe["public_feed_http"] = raw["public_feed_http"]
     if isinstance(raw.get("public_feed"), dict):

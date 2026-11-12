@@ -52,7 +52,11 @@ def http(url: str, *, auth: str | None = None, body: bytes | None = None) -> tup
 
 
 def feed_check(xml: bytes) -> dict[str, Any]:
-    """Check full four-city SEO feed before accessing the Avito API."""
+    """Validate four protected core ads and the optional reviewed fifth ad.
+
+    Legacy four_* flags describe the core cohort, not the total ad count.
+    Unknown additions and duplicate IDs remain invalid.
+    """
     root = ET.fromstring(xml)
     ads = root.findall("Ad")
     expected = (
@@ -68,7 +72,22 @@ def feed_check(xml: bytes) -> dict[str, Any]:
     def prices(ad: Any) -> list[str | None]:
         return [s.findtext("ServicePrice")
                 for s in ad.findall("./PriceList/Service")]
-    matched = len(ads) == len(expected)
+    all_ads = ads
+    fifth_id = "automation-excel-reports-krasnoyarsk-001"
+    extra = [a for a in all_ads if a.findtext("Id") == fifth_id]
+    ads = [a for a in all_ads if a.findtext("Id") != fifth_id]
+    image_base = "https://olegendorphine-star.github.io/ai-ecosystem/images/avito/"
+    fifth_valid = not extra or (len(extra) == 1 and all(
+        extra[0].findtext(key) == value for key, value in {
+            "Address": "Красноярск", "Price": "3000", "ListingFee": "Package",
+            "AdStatus": "Free", "Place": "Удалённо",
+            "Title": "Автоматизация Excel и Google Таблиц — отчёты",
+        }.items()) and [im.get("url") for im in extra[0].findall("./Images/Image")] ==
+        [image_base + name for name in ("01_cover.png", "04_business.png", "05_how_it_works.png")]
+        and extra[0].find("PriceList") is None and bool(ads)
+        and all(extra[0].findtext(k) == ads[0].findtext(k) for k in
+                ("Category", "ServiceType", "ServiceSubtype", "ServiceSubspecies", "Specialty", "WorkingWithAI")))
+    matched = len(ads) == len(expected) and len(all_ads) in (4, 5)
     expected_ids_cities = matched and all(
         (ad.findtext("Id"), ad.findtext("Address")) == (ident, city)
         for ad, (ident, city, _) in zip(ads, expected))
@@ -77,6 +96,10 @@ def feed_check(xml: bytes) -> dict[str, Any]:
         [im.attrib.get("url") for im in ad.findall("./Images/Image")]
         for ad in ads]
     return {
+        "root_valid": root.tag == "Ads" and root.get("formatVersion") == "3",
+        "no_paid_extras": all(not any(ad.find(k) is not None for k in
+                              ("Promo", "Promotion", "PaidServices", "VAS")) for ad in all_ads),
+        "reviewed_additions_valid": fifth_valid,
         "four_ads": matched,
         "expected_ids_cities": expected_ids_cities,
         "seo_titles_ready": matched and all(
@@ -225,26 +248,32 @@ def inspect() -> dict[str, Any]:
     feed_http, raw = http(FEED)
     summary["public_feed_http"] = feed_http
     if feed_http != 200 or not isinstance(raw, bytes):
+        summary["api_check_status"] = "skipped_feed_unavailable"
         return summary
     try:
         summary["public_feed"] = feed_check(raw)
     except ET.ParseError:
         summary["public_feed"] = {"xml_parse_ok": False}
+        summary["api_check_status"] = "skipped_invalid_xml"
         return summary
     if not all(summary["public_feed"].values()):
+        summary["api_check_status"] = "skipped_feed_mismatch"
         return summary
+    summary["feed_ad_count"] = len(ET.fromstring(raw).findall("Ad"))
     cid, secret = os.environ.get("AVITO_CLIENT_ID"), os.environ.get("AVITO_CLIENT_SECRET")
     if not cid or not secret:
-        summary["oauth_ok"] = False
+        summary["api_check_status"] = "skipped_credentials_missing"
         return summary
     form = urllib.parse.urlencode({"grant_type": "client_credentials",
                                    "client_id": cid, "client_secret": secret}).encode()
     auth_code, payload = http(API + "/token/", body=form)
+    summary["api_check_status"] = "oauth_attempted"
     token = payload.get("access_token") if isinstance(payload, dict) else None
     summary["oauth_ok"] = auth_code == 200 and isinstance(token, str) and bool(token)
     if not summary["oauth_ok"]:
         summary["oauth_http"] = auth_code
         return summary
+    summary["api_check_status"] = "checked"
     checks = [
         ("active_items", "/core/v1/items?status=active&per_page=99&page=1"),
         ("current_upload", "/autoload/v4/uploads/current"),

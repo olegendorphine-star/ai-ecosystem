@@ -13,7 +13,7 @@ class RolloutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.current = ET.parse(LIVE).getroot()
-        cls.ads = cls.current.findall("Ad")
+        cls.ads = cls.current.findall("Ad")[:4]
         cls.reference = ET.parse(MOSCOW_REFERENCE).getroot().find("Ad")
 
     def test_original_two_ads_preserved(self):
