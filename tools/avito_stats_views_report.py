@@ -12,7 +12,7 @@ def summarize(payload):
     items=result.get("items") if isinstance(result,dict) else None
     if not isinstance(items,list):
         raise ValueError("Missing result.items")
-    report={str(k):{"city":v,"days":0,"views":0} for k,v in CITIES.items()}
+    report={str(k):{"city":v,"days":0,"views":0,"daily":{}} for k,v in CITIES.items()}
     for item in items:
         if not isinstance(item,dict):
             raise ValueError("Malformed item")
@@ -39,6 +39,7 @@ def summarize(payload):
             seen.add(day)
             report[str(ident)]["days"]+=1
             report[str(ident)]["views"]+=views
+            report[str(ident)]["daily"][day]=views
     return report
 
 
@@ -72,9 +73,15 @@ def main():
         summary=summarize(data)
     except ValueError:
         print("UNSUPPORTED_RESPONSE_SCHEMA");return 1
-    print(json.dumps({"period":{"from":start.isoformat(),"to":end.isoformat()},
+    output={"period":{"from":start.isoformat(),"to":end.isoformat()},
           "source":"avito_stats_v1","stats_http":status,"views_by_listing":summary,
-          "contacts":None,"impressions":None,"writes":0,"charges_rub":0},ensure_ascii=False))
+          "contacts":None,"impressions":None,"writes":0,"charges_rub":0}
+    if os.getenv("AVITO_STATS_REPORT_FILE"):
+        from pathlib import Path
+        dest=Path(os.environ["AVITO_STATS_REPORT_FILE"])
+        dest.parent.mkdir(parents=True,exist_ok=True)
+        dest.write_text(json.dumps(output,ensure_ascii=False,sort_keys=True)+"\\n",encoding="utf-8")
+    print(json.dumps(output,ensure_ascii=False))
     return 0
 
 if __name__=="__main__":
