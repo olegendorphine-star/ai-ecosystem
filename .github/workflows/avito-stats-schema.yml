@@ -9,6 +9,7 @@ on:
     branches: ['main']
     paths:
       - '.github/workflows/avito-stats-schema.yml'
+      - 'tools/avito_stats_schema_probe.py'
   workflow_dispatch:
     inputs:
       approve_readonly:
