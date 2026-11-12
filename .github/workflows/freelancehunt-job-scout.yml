@@ -1,0 +1,38 @@
+name: Freelancehunt - one-off read-only job scout
+on:
+  push:
+    branches: [feature/freelancehunt-api-probe-20261111]
+    paths:
+      - 'tools/freelancehunt_public_job_scout.py'
+      - '.github/workflows/freelancehunt-job-scout.yml'
+permissions:
+  contents: read
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Syntax check
+        run: python3 -m py_compile tools/freelancehunt_public_job_scout.py
+      - name: Read-only scan from owner VPS (no account changes)
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          SSH_KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER" && test -n "$SSH_KEY_B64" && test -n "$KNOWN"
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          printf '%s' "$SSH_KEY_B64" | base64 -d > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$KNOWN" > "$RUNNER_TEMP/ssh/known"
+          chmod 600 "$RUNNER_TEMP/ssh/key" "$RUNNER_TEMP/ssh/known"
+          cat tools/freelancehunt_public_job_scout.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/ssh/known" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -i "$RUNNER_TEMP/ssh/key" \
+            -p "${PORT:-22}" "$USER@$HOST" 'python3 -'
