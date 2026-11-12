@@ -2,7 +2,7 @@
 """Read-only Avito stats response shape inspection, without logging business data."""
 import json
 import os
-from tools.avito_stats_access_probe import request, stats_path, IDS
+from avito_stats_access_probe import request, stats_path, IDS
 from datetime import date, timedelta
 
 SAFE_KEYS = frozenset(("result","results","items","data","stats","statistics",
