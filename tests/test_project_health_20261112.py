@@ -1,5 +1,7 @@
 """Current production feed, failure classification and auth regressions."""
 import copy
+import datetime as dt
+import json
 from pathlib import Path
 import unittest
 import xml.etree.ElementTree as ET
@@ -75,6 +77,18 @@ class ProjectHealthTests(unittest.TestCase):
                 result = live.inspect()
         self.assertFalse(result["oauth_ok"])
         self.assertEqual(result["api_check_status"], "oauth_attempted")
+
+    def test_only_actual_api_checks_consume_cooldown(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        def comment(detail):
+            return {"user": {"login": "github-actions[bot]"}, "body": bridge.RESULT_PREFIX + json.dumps({
+                "schema": bridge.RESULT_SCHEMA, "action": "check_live_avito_api",
+                "checked_at": now.isoformat(), "detail": detail})}
+        skipped = comment({"result": "checked", "feed_integrity_ok": False, "oauth_ok": False})
+        self.assertFalse(bridge.has_recent_api_check([skipped], now))
+        actual = comment({"result": "checked", "feed_integrity_ok": True,
+                          "oauth_ok": True, "http": {"active_items": 429}})
+        self.assertTrue(bridge.has_recent_api_check([actual], now))
 
     def test_regions_uses_key_folder_without_legacy_override_or_paid_call(self):
         with patch.object(wordstat, "request_json", return_value={"regions": []}) as api:

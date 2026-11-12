@@ -256,6 +256,12 @@ def has_recent_api_check(comments: list[Any], now: dt.datetime) -> bool:
                 continue
             if payload.get("detail", {}).get("result") == "cooldown":
                 continue
+            detail = payload.get("detail", {})
+            # A feed rejection happens before any account API request. Preserve
+            # cooldown for real checks, including errors, but not skipped work.
+            if (detail.get("result") == "skipped" or
+                    (detail.get("feed_integrity_ok") is False and not detail.get("http"))):
+                continue
             checked = parsed_time(payload.get("checked_at"))
             if dt.timedelta(0) <= now - checked < dt.timedelta(seconds=API_READ_COOLDOWN_SEC):
                 return True
