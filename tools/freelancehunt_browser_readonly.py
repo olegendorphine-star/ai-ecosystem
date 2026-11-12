@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 FH=Path.home()/".freelancehunt-agent"
 FL=Path.home()/".fl-agent"
-URLS={"home":"https://freelancehunt.com/","editor":"https://freelancehunt.com/my/profile","login":"https://freelancehunt.com/login"}
+URLS={"home":"https://freelancehunt.com/","editor":"https://freelancehunt.com/my/freelancer","skills":"https://freelancehunt.com/my/skills","login":"https://freelancehunt.com/profile/login"}
 def probe():
  report={"schema":"fh.browser.readonly.v1","status":"error","fl_cookies_used":False,"write_actions":False,"pages":{}}
  b=None
