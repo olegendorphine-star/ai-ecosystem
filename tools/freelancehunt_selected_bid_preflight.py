@@ -3,7 +3,7 @@
 import json,pathlib,urllib.request,urllib.error
 TOK=pathlib.Path.home()/".freelancehunt-agent/token"
 BASE="https://api.freelancehunt.com/v2"
-IDS=("1663966","1664046")
+IDS=("1662783","1662903","1664154")
 def get(path,token):
  r=urllib.request.Request(BASE+path,headers={"Authorization":"Bearer "+token,"Accept":"application/json","Accept-Language":"ru"},method="GET")
  try:
