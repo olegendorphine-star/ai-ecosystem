@@ -1,0 +1,32 @@
+name: Avito four-city feed audit — offline
+on:
+  pull_request:
+    paths:
+      - 'docs/avito-feed.xml'
+      - 'tools/avito_offline_feed_audit.py'
+      - 'tests/test_avito_offline_feed_audit.py'
+      - '.github/workflows/avito-offline-feed-audit.yml'
+  push:
+    branches: ['main']
+    paths:
+      - 'docs/avito-feed.xml'
+      - 'tools/avito_offline_feed_audit.py'
+      - 'tests/test_avito_offline_feed_audit.py'
+      - '.github/workflows/avito-offline-feed-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -p 'test_avito_offline_feed_audit.py' -v
+      - name: Audit current XML without network
+        run: python3 tools/avito_offline_feed_audit.py --feed docs/avito-feed.xml
