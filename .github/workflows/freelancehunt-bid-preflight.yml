@@ -1,0 +1,35 @@
+name: Freelancehunt - selected bid preflight read only
+on:
+  push:
+    branches: [feature/freelancehunt-api-probe-20261111]
+    paths:
+      - 'tools/freelancehunt_selected_bid_preflight.py'
+      - '.github/workflows/freelancehunt-bid-preflight.yml'
+permissions: {contents: read}
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Validate source
+        run: python3 -m py_compile tools/freelancehunt_selected_bid_preflight.py
+      - name: Check project and existing bids through authenticated read-only API on VPS
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          SSH_KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          printf '%s' "$SSH_KEY" | base64 -d > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$KNOWN" > "$RUNNER_TEMP/ssh/known"
+          chmod 600 "$RUNNER_TEMP/ssh/key" "$RUNNER_TEMP/ssh/known"
+          cat tools/freelancehunt_selected_bid_preflight.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/ssh/known" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/ssh/key" -p "${PORT:-22}" "$USER@$HOST" 'python3 -'

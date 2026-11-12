@@ -1,0 +1,23 @@
+name: Freelancehunt - API connectivity (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Offline unit tests
+        run: python -m unittest discover -s tests -p test_freelancehunt_probe.py
+      - name: Check Freelancehunt API (no writes)
+        env:
+          FREELANCEHUNT_API_TOKEN: ${{ secrets.FREELANCEHUNT_API_TOKEN }}
+        run: python tools/freelancehunt_probe.py

@@ -1,0 +1,128 @@
+name: Freelancehunt - encrypted token installation on VPS
+
+on:
+  push:
+    branches: [feature/freelancehunt-api-probe-20261111]
+    paths:
+      - '.github/workflows/freelancehunt-vps-install.yml'
+      - 'ops/freelancehunt-token-sealed.b64'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freelancehunt-vps-token-install
+  cancel-in-progress: false
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Configure pinned SSH identity
+        env:
+          SSH_KEY_B64: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          SSH_KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY_B64" && test -n "$SSH_KNOWN_HOSTS"
+          test -n "$HOST" && test -n "$USER"
+          install -d -m 700 "$RUNNER_TEMP/fh-ssh"
+          printf '%s' "$SSH_KEY_B64" | base64 -d > "$RUNNER_TEMP/fh-ssh/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/fh-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/fh-ssh/key" "$RUNNER_TEMP/fh-ssh/known_hosts"
+          port="${PORT:-22}"
+          test "$port" -ge 1 && test "$port" -le 65535
+          echo "FH_SSH_READY" 
+      - name: Generate encryption public key on VPS or install sealed token
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-22}"
+          opts=(-F /dev/null -4 -T -o BatchMode=yes -o ConnectTimeout=15
+                -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes 
+                -o "UserKnownHostsFile=$RUNNER_TEMP/fh-ssh/known_hosts"
+                -o IdentitiesOnly=yes -o LogLevel=ERROR
+                -i "$RUNNER_TEMP/fh-ssh/key" -p "$port")
+          target="$USER@$HOST"
+          if [ ! -f ops/freelancehunt-token-sealed.b64 ]; then
+            ssh "${opts[@]}" "$target" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          d="$HOME/.freelancehunt-agent"
+          mkdir -p -m 700 "$d"
+          chmod 700 "$d"
+          test ! -L "$d"
+          if [ -e "$d/token" ]; then
+            echo FH_TOKEN_ALREADY_INSTALLED
+            exit 0
+          fi
+          if [ ! -e "$d/install-key.pem" ]; then
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$d/install-key.pem" 2>/dev/null
+          fi
+          chmod 600 "$d/install-key.pem"
+          echo FH_PUBLIC_KEY_START
+          openssl pkey -in "$d/install-key.pem" -pubout
+          echo FH_PUBLIC_KEY_END
+          REMOTE
+          else
+            # Only sealed RSA-OAEP ciphertext enters CI. Plaintext never does.
+            test "$(wc -c < ops/freelancehunt-token-sealed.b64)" -le 2048
+            base64 -d ops/freelancehunt-token-sealed.b64 | wc -c | awk '{if($1 != 384) exit 1}'
+            base64 -d ops/freelancehunt-token-sealed.b64 | ssh "${opts[@]}" "$target" 'umask 077; mkdir -p -m 700 "$HOME/.freelancehunt-agent"; cat > "$HOME/.freelancehunt-agent/payload.enc"; chmod 600 "$HOME/.freelancehunt-agent/payload.enc"'
+            ssh "${opts[@]}" "$target" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          d="$HOME/.freelancehunt-agent"
+          key="$d/install-key.pem"
+          sealed="$d/payload.enc"
+          token="$d/token"
+          test ! -L "$d" && test -f "$key" && test ! -L "$key"
+          test -f "$sealed" && test ! -L "$sealed"
+          if [ -e "$token" ]; then
+            rm -f "$sealed"
+            echo FH_TOKEN_ALREADY_INSTALLED
+            exit 0
+          fi
+          trap 'rm -f "$d/token.tmp" "$sealed"' EXIT
+          openssl pkeyutl -decrypt -inkey "$key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$sealed" -out "$d/token.tmp" 2>/dev/null
+          python3 - "$d/token.tmp" <<'CHECK'
+          import pathlib, re, sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          if not re.fullmatch(rb'[A-Za-z0-9_-]{32,256}',raw): sys.exit(2)
+          CHECK
+          chmod 600 "$d/token.tmp"
+          mv "$d/token.tmp" "$token"
+          rm -f "$key" "$sealed"
+          echo FH_TOKEN_STORED_PRIVATE
+          python3 - "$token" <<'CHECK'
+          import json, pathlib, sys, urllib.request, urllib.error
+          token=pathlib.Path(sys.argv[1]).read_text().strip()
+          for path in ("/v2/my/profile","/v2/projects"):
+              req=urllib.request.Request("https://api.freelancehunt.com"+path,
+                  headers={"Authorization":"Bearer "+token,"Accept":"application/json","User-Agent":"ai-ecosystem-probe/1.0"},method="GET")
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as r:
+                      body=json.loads(r.read(500000))
+                      print("FH_API_"+("PROFILE" if path.endswith("profile") else "PROJECTS")+"_HTTP_"+str(r.status))
+                      if not isinstance(body,dict) or "data" not in body:
+                          print("FH_API_INVALID_RESPONSE")
+              except urllib.error.HTTPError as e:
+                  print("FH_API_HTTP_"+str(e.code))
+                  sys.exit(3)
+              except Exception:
+                  print("FH_API_NETWORK_OR_PARSE_ERROR")
+                  sys.exit(4)
+          print("FH_API_CONNECTED_READONLY")
+          CHECK
+          REMOTE
+          fi
