@@ -1,0 +1,343 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Ads formatVersion="3">
+  <Ad>
+    <Id>ai-assistant-memory-moscow-001</Id>
+    <AvitoId>8347570435</AvitoId>
+    <Category>Предложение услуг</Category>
+    <ServiceType>Деловые услуги</ServiceType>
+    <ServiceSubtype>IT, дизайн, тексты</ServiceSubtype>
+    <ServiceSubspecies>Программирование, настройка CRM</ServiceSubspecies>
+    <Specialty>Программирование</Specialty>
+    <WhatServices>Работа и разработка ИИ, нейронных сетей</WhatServices>
+    <Specialisation>Разработка чат-ботов</Specialisation>
+    <Place>Удалённо</Place>
+    <WorkWithContract>Нет</WorkWithContract>
+    <Consultations>Есть</Consultations>
+    <Prepayment>Нет</Prepayment>
+    <TechnicalSupport>Да</TechnicalSupport>
+    <WorkingWithAI>Да</WorkingWithAI>
+    <ContactMethod>По телефону и в сообщениях</ContactMethod>
+    <Address>Москва</Address>
+    <ListingFee>Package</ListingFee>
+    <Title>Автоматизация бизнеса с ИИ — аудит и внедрение</Title>
+    <Description>Автоматизация бизнеса с ИИ под вашу задачу: документы, отчёты, повторяющиеся операции, аналитика и работа с информацией. Аудит одного процесса — от 5 000 ₽. Настройка ИИ-ассистента — от 30 000 ₽. Комплексное внедрение — от 150 000 ₽. Работаем удалённо.
+
+Что получает компания
+— Разбираем, где сотрудники теряют время на поиск информации, ручные отчёты и повторные действия.
+— Выделяем процессы, которые разумно передать ИИ, а где нужен контроль человека.
+— По согласованию создаём ИИ-ассистента с доступом к выбранным документам, задачам и источникам данных.
+— Готовим сводки, типовые документы, расчёты и сигналы по пропущенным задачам.
+— Проверяем возможность интеграции с почтой, облачным диском, CRM или 1С и согласовываем права до подключения.
+
+Форматы и стоимость
+1. Аудит одного процесса — от 5 000 ₽: карта проблем, приоритеты, конкретный план улучшения. Это не стоимость готового бота.
+2. Настройка ИИ-ассистента — от 30 000 ₽: согласованные функции, проверка результата и инструкция.
+3. Автоматизация и внедрение ИИ — от 150 000 ₽: архитектура, интеграции и проверка процессов по отдельному техническому заданию.
+
+Пример собственной разработки: автоматизировали работу с объявлениями через официальный API Авито и контроль статусов публикации. Сложные подключения сначала проверяем — не обещаем функции без испытаний.
+
+Работаем по этапам: бриф → предложение и смета → настройка → испытание на реальной задаче → передача. API, сервер и подписки согласовываются отдельно.
+
+Напишите в чат Авито: чем занимается компания, какой процесс хотите улучшить и какими сервисами пользуетесь. Предложим реалистичный первый шаг.</Description>
+    <Images>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/01_cover.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/02_audit.jpg"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/03_assistant.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/04_business.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/05_how_it_works.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/06_results.png"/>
+    </Images>
+    <Price>5000</Price>
+    <PriceList>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Аудит бизнеса и поиск точек роста</ServiceTitle>
+        <ServicePrice>5000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Настройка персонального ИИ-ассистента</ServiceTitle>
+        <ServicePrice>30000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Внедрение ИИ-экосистемы для бизнеса</ServiceTitle>
+        <ServicePrice>150000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+    </PriceList>
+    <AllowEmail>Да</AllowEmail>
+    <AdStatus>Free</AdStatus>
+  </Ad>
+  <Ad>
+    <Id>ai-assistant-memory-spb-001</Id>
+    <Category>Предложение услуг</Category>
+    <ServiceType>Деловые услуги</ServiceType>
+    <ServiceSubtype>IT, дизайн, тексты</ServiceSubtype>
+    <ServiceSubspecies>Программирование, настройка CRM</ServiceSubspecies>
+    <Specialty>Программирование</Specialty>
+    <WhatServices>Работа и разработка ИИ, нейронных сетей</WhatServices>
+    <Specialisation>Разработка чат-ботов</Specialisation>
+    <Place>Удалённо</Place>
+    <WorkWithContract>Нет</WorkWithContract>
+    <Consultations>Есть</Consultations>
+    <Prepayment>Нет</Prepayment>
+    <TechnicalSupport>Да</TechnicalSupport>
+    <WorkingWithAI>Да</WorkingWithAI>
+    <ContactMethod>По телефону и в сообщениях</ContactMethod>
+    <Address>Санкт-Петербург</Address>
+    <ListingFee>Package</ListingFee>
+    <Title>ИИ-ассистент для бизнеса и базы знаний</Title>
+    <Description>ИИ-ассистент по документам и базе знаний компании: быстрый поиск информации, сводки, ответы по внутренним материалам и контроль рабочих задач. Аудит — от 5 000 ₽, настройка ассистента — от 30 000 ₽, комплексная система — от 150 000 ₽. Работаем удалённо.
+
+Когда это полезно
+— Документы распределены между папками, почтой и облачным диском.
+— Менеджеры повторно ищут одни и те же сведения.
+— Руководителю нужны краткие отчёты и сигналы об упущенных задачах.
+— У сотрудников много ручных операций, которые можно частично автоматизировать.
+
+Что можем подготовить
+1. Аудит информации и одного процесса — от 5 000 ₽: карта источников, узких мест и план улучшений. Эта цена не означает разработку готовой системы.
+2. Персональный или корпоративный ИИ-ассистент — от 30 000 ₽: настройка согласованных функций поиска, сводок и помощи с документами, тестирование и инструкция.
+3. ИИ-экосистема для бизнеса — от 150 000 ₽: интеграции с рабочими сервисами, аналитика, регламент действий, доступы и приёмка по техническому заданию.
+
+Используем подход «источники → права → проверка ответа → полезное действие». Сначала оцениваем качество исходных данных и доступность API. Подключение CRM, 1С, почты и других систем возможно в отдельно согласованном объёме.
+
+Наш технический пример — официальная интеграция с Авито для автозагрузки объявлений и контроля их статусов.
+
+Работа по этапам, без скрытых подписок: бриф → смета → настройка → проверка → передача. Расходы на сторонние сервисы и сопровождение согласовываются заранее.
+
+Напишите в чат Авито, где сейчас хранятся документы и какую информацию сотрудники ищут чаще всего. Начнём с одной конкретной задачи.</Description>
+    <Images>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/01_cover.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/02_audit.jpg"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/03_assistant.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/04_business.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/05_how_it_works.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/06_results.png"/>
+    </Images>
+    <Price>5000</Price>
+    <PriceList>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Аудит бизнеса и поиск точек роста</ServiceTitle>
+        <ServicePrice>5000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Настройка персонального ИИ-ассистента</ServiceTitle>
+        <ServicePrice>30000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Внедрение ИИ-экосистемы для бизнеса</ServiceTitle>
+        <ServicePrice>150000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+    </PriceList>
+    <AllowEmail>Да</AllowEmail>
+    <AdStatus>Free</AdStatus>
+  </Ad>
+<Ad>
+    <Id>ai-assistant-memory-surgut-001</Id>
+    <Category>Предложение услуг</Category>
+    <ServiceType>Деловые услуги</ServiceType>
+    <ServiceSubtype>IT, дизайн, тексты</ServiceSubtype>
+    <ServiceSubspecies>Программирование, настройка CRM</ServiceSubspecies>
+    <Specialty>Программирование</Specialty>
+    <WhatServices>Работа и разработка ИИ, нейронных сетей</WhatServices>
+    <Specialisation>Разработка чат-ботов</Specialisation>
+    <Place>Удалённо</Place>
+    <WorkWithContract>Нет</WorkWithContract>
+    <Consultations>Есть</Consultations>
+    <Prepayment>Нет</Prepayment>
+    <TechnicalSupport>Да</TechnicalSupport>
+    <WorkingWithAI>Да</WorkingWithAI>
+    <ContactMethod>По телефону и в сообщениях</ContactMethod>
+    <Address>Сургут</Address>
+    <ListingFee>Package</ListingFee>
+    <Title>ИИ-ассистент для бизнеса — настройка</Title>
+    <Description>Настройка ИИ-ассистента для бизнеса в Сургуте: поиск по рабочим документам, отчёты, порядок в информации и контроль поручений. Аудит одной задачи — от 5 000 ₽, персональный ИИ-ассистент — от 30 000 ₽. Работаем дистанционно, местный офис не заявляем.
+
+Что решаем
+— Документы и переписка разбросаны по разным папкам и сервисам.
+— Много времени уходит на повторные отчёты, поиск сведений и сверку данных.
+— Руководителю важно вовремя замечать просроченные задачи и несостыковки.
+— Нужно связать доступные рабочие сервисы, не теряя контроль над полномочиями.
+
+Три уровня работы
+1. Аудит одного процесса — от 5 000 ₽: фиксируем проблему, источники данных, карту потерь и план улучшений.
+2. Настройка ИИ-ассистента — от 30 000 ₽: согласуем функции, обучаем работе с вашими материалами в допустимом контуре, тестируем и передаём инструкции.
+3. Комплексная автоматизация — от 150 000 ₽: проектируем интеграции и рабочие процессы по отдельному ТЗ.
+
+Можем оценить связку с почтой, календарём, облачными документами, CRM и 1С. Подключение зависит от доступных интерфейсов, качества данных и согласованных прав.
+
+Практический собственный пример — автоматизация объявлений через официальный API Авито и контроль статусов без ручной проверки каждой карточки.
+
+Цена 5 000 ₽ относится к аудиту, а не к готовому боту. Подписки, сервер, API и сопровождение учитываются отдельно после согласования.
+
+Напишите в чат Авито, какой процесс сейчас занимает больше всего времени. Предложим объём первого этапа и результат, который можно проверить.</Description>
+    <Images>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/01_cover.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/02_audit.jpg"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/03_assistant.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/04_business.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/05_how_it_works.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/06_results.png"/>
+    </Images>
+    <Price>5000</Price>
+    <PriceList>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Аудит бизнеса и поиск точек роста</ServiceTitle>
+        <ServicePrice>5000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Персональный ИИ-ассистент — настройка</ServiceTitle>
+        <ServicePrice>30000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Внедрение ИИ-экосистемы для бизнеса</ServiceTitle>
+        <ServicePrice>150000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+    </PriceList>
+    <AllowEmail>Да</AllowEmail>
+    <AdStatus>Free</AdStatus>
+  </Ad>
+<Ad>
+    <Id>ai-assistant-memory-chita-001</Id>
+    <Category>Предложение услуг</Category>
+    <ServiceType>Деловые услуги</ServiceType>
+    <ServiceSubtype>IT, дизайн, тексты</ServiceSubtype>
+    <ServiceSubspecies>Программирование, настройка CRM</ServiceSubspecies>
+    <Specialty>Программирование</Specialty>
+    <WhatServices>Работа и разработка ИИ, нейронных сетей</WhatServices>
+    <Specialisation>Разработка чат-ботов</Specialisation>
+    <Place>Удалённо</Place>
+    <WorkWithContract>Нет</WorkWithContract>
+    <Consultations>Есть</Consultations>
+    <Prepayment>Нет</Prepayment>
+    <TechnicalSupport>Да</TechnicalSupport>
+    <WorkingWithAI>Да</WorkingWithAI>
+    <ContactMethod>По телефону и в сообщениях</ContactMethod>
+    <Address>Чита</Address>
+    <ListingFee>Package</ListingFee>
+    <Title>ИИ-ассистент для бизнеса и документов</Title>
+    <Description>ИИ-ассистент для малого бизнеса в Чите: помогает работать с документами, искать нужные сведения, готовить сводки и держать задачи под контролем. Аудит — от 5 000 ₽, настройка ИИ-ассистента — от 30 000 ₽, комплексная интеграция — от 150 000 ₽. Удалённо.
+
+Для каких задач
+— Систематизация файлов и информации из разных источников.
+— Подготовка типовых писем, рабочих отчётов и сравнений.
+— Контроль поручений и сроков в согласованной системе.
+— Поиск повторных операций, которые можно автоматизировать.
+— Анализ возможностей подключения почты, диска, CRM и 1С.
+
+Что входит в этапы
+Аудит от 5 000 ₽: разбираем одну задачу, готовим карту проблем и план первого улучшения. Готовый ИИ-ассистент в эту стоимость не входит.
+
+Настройка ассистента от 30 000 ₽: согласуем функции, источники информации и правила доступа, настраиваем, тестируем на практических примерах и передаём инструкцию.
+
+Внедрение ИИ в бизнес от 150 000 ₽: проектирование и интеграции по отдельному техническому заданию, с согласованной приёмкой.
+
+Не продаём стандартного чат-бота вместо решения вашей задачи. Проверяем ограничения сервисов до обещаний. Наш действующий технический пример — официальный API Авито для работы с объявлениями и проверки статусов.
+
+Работаем дистанционно, без заявления о местном офисе. Стоимость внешних сервисов, серверов и сопровождения фиксируем отдельно.
+
+Напишите в сообщения Авито, какие документы или задачи чаще всего отнимают время. Предложим конкретное начало без лишних функций.</Description>
+    <Images>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/01_cover.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/02_audit.jpg"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/03_assistant.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/04_business.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/05_how_it_works.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/06_results.png"/>
+    </Images>
+    <Price>5000</Price>
+    <PriceList>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Аудит бизнеса и поиск точек роста</ServiceTitle>
+        <ServicePrice>5000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Персональный ИИ-ассистент — настройка</ServiceTitle>
+        <ServicePrice>30000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+      <Service>
+        <ServiceName>Своя услуга</ServiceName>
+        <ServiceTitle>Внедрение ИИ-экосистемы для бизнеса</ServiceTitle>
+        <ServicePrice>150000</ServicePrice>
+        <ServiceStartingPrice>Да</ServiceStartingPrice>
+        <ServicePriceType>за услугу</ServicePriceType>
+      </Service>
+    </PriceList>
+    <AllowEmail>Да</AllowEmail>
+    <AdStatus>Free</AdStatus>
+  </Ad>
+<Ad>
+    <Id>automation-excel-reports-krasnoyarsk-001</Id>
+    <Category>Предложение услуг</Category>
+    <ServiceType>Деловые услуги</ServiceType>
+    <ServiceSubtype>IT, дизайн, тексты</ServiceSubtype>
+    <ServiceSubspecies>Программирование, настройка CRM</ServiceSubspecies>
+    <Specialty>Программирование</Specialty>
+    <WhatServices>Работа и разработка ИИ, нейронных сетей</WhatServices>
+    <Place>Удалённо</Place>
+    <WorkWithContract>Нет</WorkWithContract>
+    <Consultations>Есть</Consultations>
+    <Prepayment>Нет</Prepayment>
+    <TechnicalSupport>Да</TechnicalSupport>
+    <WorkingWithAI>Да</WorkingWithAI>
+    <ContactMethod>По телефону и в сообщениях</ContactMethod>
+    <Address>Красноярск</Address>
+    <ListingFee>Package</ListingFee>
+    <Title>Автоматизация Excel и Google Таблиц — отчёты</Title>
+    <Description>Автоматизация таблиц и регулярных отчётов для бизнеса. Если вы каждый день переносите данные из Excel, CSV или Google Таблиц, объединяете файлы и вручную готовите сводки — разработаю проверяемое решение под ваш процесс. Работаю удалённо.
+
+Что можно автоматизировать:
+— Объединение нескольких Excel и CSV в единый отчёт.
+— Расчёт показателей, проверку формул и формирование сводных таблиц.
+— Регулярную подготовку отчётов по расписанию.
+— Перенос данных между таблицами и сервисами через доступные API.
+— Отправку готового отчёта в согласованный канал, если подключение поддерживается.
+
+Что получите: рабочий файл, скрипт или настроенный процесс, тест на предоставленных примерах, инструкцию и критерии проверки результата.
+
+Стоимость: от 3 000 ₽ за небольшую задачу с таблицей; от 7 000 ₽ за регулярный автоматический отчёт. Интеграции, внешние API, подписки и сопровождение оцениваются отдельно. Цена зависит от структуры данных и объёма.
+
+Использую Python, Excel, Google Sheets и API. Доступы запрашиваются только после согласования; сначала достаточно обезличенного примера файла.
+
+Напишите в сообщения: какие файлы есть, что приходится делать вручную и как должен выглядеть итоговый отчёт. Предложу конкретный первый этап.</Description>
+    <Images>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/01_cover.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/04_business.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/05_how_it_works.png"/>
+    </Images>
+    <Price>3000</Price>
+    <AllowEmail>Да</AllowEmail>
+    <AdStatus>Free</AdStatus>
+  </Ad>
+</Ads>
