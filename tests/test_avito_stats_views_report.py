@@ -7,6 +7,8 @@ class ViewsTests(unittest.TestCase):
             {"date":"2026-11-10","views":3},{"date":"2026-11-11","views":0}]}]}})
         self.assertEqual(result["8347570435"]["views"],3)
         self.assertEqual(result["8347570435"]["days"],2)
+        self.assertEqual(result["8347570435"]["daily"]["2026-11-11"],0)
+        self.assertEqual(result["8414224003"]["daily"],{})
         self.assertEqual(result["8414224003"]["days"],0)
     def test_missing_not_zero(self):
         with self.assertRaises(ValueError):
