@@ -14,7 +14,7 @@ permissions:
   contents: read
 jobs:
   stats_probe:
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.approve_readonly == true && github.ref == 'refs/heads/main') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'RUN_ONCE_AVITO_STATS_READONLY_2026_11_12') }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.approve_readonly == true && github.ref == 'refs/heads/main') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'RUN_ONCE_AVITO_STATS_READONLY_2026_11_12')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
