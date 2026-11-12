@@ -203,10 +203,9 @@ def call_wordstat(command: dict, api_key: str, folder_id: str,
         return {"status": "not_configured", "missing": "api_key"}
     auth = "Api-Key " + api_key
     if command["action"] == "regions":
-        # The official REST example also supports a POST without a folder ID.
-        # Include it when available, but avoid requiring a second secret
-        # just for the free connection check.
-        payload = {"folderId": folder_id} if folder_id else {}
+        # Like GetTop, this bridge uses a service-account API key. Search API
+        # resolves its folder automatically; ignore the legacy folder override.
+        payload = {}
         result = request_json(YANDEX_BASE + "getRegionsTree", auth,
                               payload, method="POST")
         if not isinstance(result, dict) or not isinstance(result.get("regions"), list):

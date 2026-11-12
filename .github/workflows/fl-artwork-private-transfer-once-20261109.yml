@@ -7,7 +7,6 @@ permissions:
 jobs:
   transfer:
     if: ${{ false }}
-    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:

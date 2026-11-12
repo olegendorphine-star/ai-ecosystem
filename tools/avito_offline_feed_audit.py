@@ -28,8 +28,11 @@ def audit(xml_data: bytes) -> dict:
         if not ident or ident in seen:
             issues.append("missing_or_duplicate_id")
         seen.add(ident)
+        if any(ad.find(k) is not None for k in ("Promo", "Promotion", "PaidServices", "VAS")):
+            issues.append("unexpected_paid_extras")
         city = ad.findtext("Address", "").strip()
-        if EXPECTED.get(ident) != city:
+        fifth = ident == "automation-excel-reports-krasnoyarsk-001"
+        if ("Красноярск" if fifth else EXPECTED.get(ident)) != city:
             issues.append("unexpected_id_or_city")
         prices = []
         for el in ad.findall("./PriceList/Service/ServicePrice"):
@@ -37,11 +40,16 @@ def audit(xml_data: bytes) -> dict:
                 prices.append(int((el.text or "").strip()))
             except ValueError:
                 issues.append("invalid_service_price")
-        if prices != EXPECTED_PRICES:
+        if prices != ([] if fifth else EXPECTED_PRICES):
             issues.append("unexpected_price_tiers")
         image_count = len(ad.findall("./Images/Image"))
-        if image_count != 6:
+        if image_count != (3 if fifth else 6):
             issues.append("unexpected_image_count")
+        if fifth and any(ad.findtext(k) != v for k, v in {
+            "Price": "3000", "ListingFee": "Package", "AdStatus": "Free",
+            "Title": "Автоматизация Excel и Google Таблиц — отчёты",
+        }.items()):
+            issues.append("invalid_reviewed_fifth_ad")
         category = {key: ad.findtext(key, "") for key in (
             "Category", "ServiceType", "ServiceSubtype",
             "ServiceSubspecies", "Specialty", "WorkingWithAI")}
@@ -50,7 +58,8 @@ def audit(xml_data: bytes) -> dict:
             "category": category, "image_count": image_count,
             "price_tiers_rub": prices,
         })
-    if set(seen) != set(EXPECTED) or len(records) != len(EXPECTED):
+    optional = {"automation-excel-reports-krasnoyarsk-001"}
+    if not set(EXPECTED).issubset(seen) or seen - set(EXPECTED) - optional or len(records) not in (4, 5):
         issues.append("expected_exactly_four_known_ads")
     return {
         "schema": "avito.offline-feed-audit.v1",
