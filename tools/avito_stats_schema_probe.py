@@ -8,8 +8,8 @@ from datetime import date, timedelta
 SAFE_KEYS = frozenset(("result","results","items","data","stats","statistics",
  "metrics","date","dateFrom","dateTo","itemId","itemID","itemIds","id",
  "views","contacts","favorites","impressions","value","values","count",
- "total","grouping","period","periods","errors","error","message","status"))
-MAX_DEPTH=5
+ "total","grouping","period","periods","type","name","date","metric","group","errors","error","message","status"))
+MAX_DEPTH=9
 
 def shape(value, depth=0):
     if depth>=MAX_DEPTH:
