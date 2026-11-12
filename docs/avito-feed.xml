@@ -297,4 +297,47 @@
     <AllowEmail>Да</AllowEmail>
     <AdStatus>Free</AdStatus>
   </Ad>
+<Ad>
+    <Id>automation-excel-reports-krasnoyarsk-001</Id>
+    <Category>Предложение услуг</Category>
+    <ServiceType>Деловые услуги</ServiceType>
+    <ServiceSubtype>IT, дизайн, тексты</ServiceSubtype>
+    <ServiceSubspecies>Программирование, настройка CRM</ServiceSubspecies>
+    <Specialty>Программирование</Specialty>
+    <WhatServices>Работа и разработка ИИ, нейронных сетей</WhatServices>
+    <Place>Удалённо</Place>
+    <WorkWithContract>Нет</WorkWithContract>
+    <Consultations>Есть</Consultations>
+    <Prepayment>Нет</Prepayment>
+    <TechnicalSupport>Да</TechnicalSupport>
+    <WorkingWithAI>Да</WorkingWithAI>
+    <ContactMethod>По телефону и в сообщениях</ContactMethod>
+    <Address>Красноярск</Address>
+    <ListingFee>Package</ListingFee>
+    <Title>Автоматизация Excel и Google Таблиц — отчёты</Title>
+    <Description>Автоматизация таблиц и регулярных отчётов для бизнеса. Если вы каждый день переносите данные из Excel, CSV или Google Таблиц, объединяете файлы и вручную готовите сводки — разработаю проверяемое решение под ваш процесс. Работаю удалённо.
+
+Что можно автоматизировать:
+— Объединение нескольких Excel и CSV в единый отчёт.
+— Расчёт показателей, проверку формул и формирование сводных таблиц.
+— Регулярную подготовку отчётов по расписанию.
+— Перенос данных между таблицами и сервисами через доступные API.
+— Отправку готового отчёта в согласованный канал, если подключение поддерживается.
+
+Что получите: рабочий файл, скрипт или настроенный процесс, тест на предоставленных примерах, инструкцию и критерии проверки результата.
+
+Стоимость: от 3 000 ₽ за небольшую задачу с таблицей; от 7 000 ₽ за регулярный автоматический отчёт. Интеграции, внешние API, подписки и сопровождение оцениваются отдельно. Цена зависит от структуры данных и объёма.
+
+Использую Python, Excel, Google Sheets и API. Доступы запрашиваются только после согласования; сначала достаточно обезличенного примера файла.
+
+Напишите в сообщения: какие файлы есть, что приходится делать вручную и как должен выглядеть итоговый отчёт. Предложу конкретный первый этап.</Description>
+    <Images>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/01_cover.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/04_business.png"/>
+      <Image url="https://olegendorphine-star.github.io/ai-ecosystem/images/avito/05_how_it_works.png"/>
+    </Images>
+    <Price>3000</Price>
+    <AllowEmail>Да</AllowEmail>
+    <AdStatus>Free</AdStatus>
+  </Ad>
 </Ads>
