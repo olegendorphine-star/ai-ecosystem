@@ -1,7 +1,7 @@
 {
   "account_mutations": 0,
   "active_items": {
-    "active_page_count": 4,
+    "active_page_count": 5,
     "chita_candidate_active": true,
     "chita_public_ad_id": 8414224003,
     "chita_public_url": "https://www.avito.ru/chita/predlozheniya_uslug/ii-assistent_dlya_biznesa_i_dokumentov_8414224003",
@@ -11,9 +11,10 @@
     "spb_public_url": "https://www.avito.ru/sankt-peterburg/predlozheniya_uslug/ii-assistent_dlya_biznesa_i_bazy_znaniy_8477159401",
     "surgut_active": true
   },
+  "api_check_status": "checked",
   "autoload_posts": 0,
   "charges_rub": 0,
-  "checked_at_utc": "2026-11-11T13:29:24+00:00",
+  "checked_at_utc": "2026-11-12T13:32:14+00:00",
   "chita_confirmed_active": true,
   "current_items_check": "read",
   "current_upload": {
@@ -25,10 +26,11 @@
     "seo_import_four_items_verified": true,
     "spb_in_current_items": true,
     "spb_section": "success_published",
-    "upload_id": 632336895,
-    "upload_started_at_utc": "2026-11-11T09:50:05+00:00",
+    "upload_id": 632987528,
+    "upload_started_at_utc": "2026-11-12T09:50:05+00:00",
     "upload_status": "success"
   },
+  "feed_ad_count": 5,
   "http": {
     "active_items": 200,
     "current_items": 200,
@@ -44,6 +46,9 @@
     "four_price_lists": true,
     "free_package": true,
     "ids_stable": true,
+    "no_paid_extras": true,
+    "reviewed_additions_valid": true,
+    "root_valid": true,
     "seo_titles_ready": true,
     "unique_titles": true
   },
