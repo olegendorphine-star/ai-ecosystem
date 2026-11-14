@@ -36,7 +36,8 @@ try:
         .filter(e=>e.offsetParent!==null).map(e=>({tag:e.tagName.toLowerCase(),id:e.id||'',name:e.getAttribute('name')||'',
          placeholder:(e.getAttribute('placeholder')||'').slice(0,70),
          type:(e.getAttribute('type')||'').slice(0,20),
-         text:(e.innerText||e.getAttribute('value')||'').trim().slice(0,75)})).slice(0,20);
+         text:(e.innerText||e.getAttribute('value')||'').trim().slice(0,75),
+         class:(e.className||'').toString().slice(0,110),form:(e.closest('form')?.id||'').slice(0,50),near:(e.parentElement?.parentElement?.innerText||'').trim().slice(0,135),maxlength:e.getAttribute('maxlength')||'',disabled:!!e.disabled})).slice(0,20);
       return {title:h,vacancy:/Ссылка на вакансию/i.test(seg),already:/вы откликнулись|ваш отклик отправлен|редактировать отклик|отклик уже отправлен/i.test(seg),
         closed:/вакансия закрыта|вакансия завершена|исполнитель определен|исполнитель выбран/i.test(seg),
         pay:/купить отклики|оплатить отклик|платн.*отклик/i.test(seg),
