@@ -1,0 +1,38 @@
+name: Telegram - one-time public encryption key probe
+on:
+  push:
+    branches: [feature/tg-job-search-20261114]
+    paths: ['.github/workflows/tg-job-bridge-public-key-20261114.yml']
+permissions:
+  contents: read
+jobs:
+  key:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Retrieve existing Telegram bridge PUBLIC key, no message access
+        env:
+          SSH_KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS" && test -n "$HOST" && test -n "$USER"
+          install -d -m 700 "$RUNNER_TEMP/tg-ssh"
+          printf '%s' "$SSH_KEY" | base64 --decode > "$RUNNER_TEMP/tg-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/tg-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/tg-ssh/key" "$RUNNER_TEMP/tg-ssh/known_hosts"
+          key="$(ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tg-ssh/known_hosts" \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            -i "$RUNNER_TEMP/tg-ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+            '"$HOME/.telegram-agent/bin/telegram-python" "$HOME/.telegram-agent/app/tools/telegram_secure_bridge.py" public-key')"
+          printf '%s\n' "$key" | python3 -c '
+          import sys,re
+          k=sys.stdin.read().strip()
+          assert re.fullmatch(r"[A-Za-z0-9_-]{43}", k)
+          print("TG_OWNER_PUBLIC_X25519",k)
+          '
