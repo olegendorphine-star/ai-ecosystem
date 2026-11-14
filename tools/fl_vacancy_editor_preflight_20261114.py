@@ -4,7 +4,7 @@ import json,sys,tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 ROOT=Path.home()/".fl-agent";sys.path.insert(0,str(ROOT))
-from fl_rootless_owner_desktop import Browser,ALLOWED_PAGES,is_fl_url
+from fl_rootless_owner_desktop import Browser,ALLOWED_PAGES,is_fl_url,LOGIN
 JOBS=[
  ("5528153","Редактор-корректор текстовых материалов","https://www.fl.ru/projects/5528153/redaktor-korrektor-tekstovyih-materialov.html"),
  ("5528141","Специалист по рерайтингу текстов","https://www.fl.ru/projects/5528141/spetsialist-po-reraytingu-tekstov.html"),
@@ -16,10 +16,10 @@ try:
  with tempfile.TemporaryDirectory(prefix="fl-vacancy-editor-preflight-",dir=ROOT) as td:
   b.open(Path(td));p=b.page
   r=p.goto(ALLOWED_PAGES["settings"],wait_until="domcontentloaded",timeout=20000)
-  s=p.evaluate("""()=>({
-     owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').trim().toLowerCase()==='olegendorphine@gmail.com'),
+  s=p.evaluate("""(expected)=>({
+     owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').trim().toLowerCase()===expected),
      settings:(document.body?.innerText||'').includes('Основные настройки')
-  })""")
+  })""", LOGIN)
   out["owner_verified"]=bool(r and r.status==200 and is_fl_url(p.url) and s["owner"] and s["settings"])
   if out["owner_verified"]:
    for id,title,url in JOBS:
