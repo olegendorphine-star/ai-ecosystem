@@ -14,27 +14,14 @@
   "api_check_status": "checked",
   "autoload_posts": 0,
   "charges_rub": 0,
-  "checked_at_utc": "2026-11-13T13:28:56+00:00",
-  "chita_confirmed_active": true,
-  "current_items_check": "read",
-  "current_upload": {
-    "chita_avito_id": 8414224003,
-    "chita_in_current_items": true,
-    "chita_section": "success_published",
-    "four_items_success_published": true,
-    "import_started_after_seo": true,
-    "seo_import_four_items_verified": true,
-    "spb_in_current_items": true,
-    "spb_section": "success_published",
-    "upload_id": 633605275,
-    "upload_started_at_utc": "2026-11-13T09:50:03+00:00",
-    "upload_status": "success"
-  },
+  "checked_at_utc": "2026-11-14T13:12:10+00:00",
+  "chita_confirmed_active": false,
   "feed_ad_count": 5,
+  "fifth_check_status": "not_checked",
+  "fifth_confirmed_active": false,
   "http": {
     "active_items": 200,
-    "current_items": 200,
-    "current_upload": 200
+    "current_upload": null
   },
   "messages_read": 0,
   "messages_sent": 0,
