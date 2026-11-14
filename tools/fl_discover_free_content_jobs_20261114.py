@@ -30,7 +30,7 @@ try:
   b.open(Path(tmp));p=b.page
   r=p.goto(ALLOWED_PAGES["settings"],wait_until="domcontentloaded",timeout=20000)
   sign=p.evaluate("""(expected) => ({
-   owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').trim().toLowerCase()===expected),
+   owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').trim().toLowerCase().split('@')[0]===expected),
    settings:(document.body?.innerText||'').includes('Основные настройки')
   })""", LOGIN)
   out["owner_verified"]=bool(r and r.status==200 and is_fl_url(p.url) and sign["settings"] and sign["owner"])
