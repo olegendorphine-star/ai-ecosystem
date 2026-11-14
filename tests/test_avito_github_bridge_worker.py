@@ -286,5 +286,26 @@ class ValidationTests(unittest.TestCase):
         invalid["active_items"]["chita_public_url"] = "https://other.example/chita/test_8531999999"
         self.assertFalse(b.sanitize_live_api_report(invalid)["chita_confirmed_active"])
 
+
+    def test_sanitize_fifth_exact_id_and_no_private_data(self):
+        raw = {
+            "fifth_confirmed_active": True,
+            "fifth_check_status": "confirmed",
+            "fifth_public_ad_id": 9000012345,
+            "fifth_public_url": "https://www.avito.ru/krasnoyarsk/uslugi/report_9000012345",
+            "current_upload": {"fifth_in_current_items": True,
+                               "fifth_section": "success_published",
+                               "fifth_avito_id": 9000012345, "phone": "PRIVATE"},
+            "other_private": "PRIVATE"
+        }
+        safe = b.sanitize_live_api_report(raw)
+        self.assertTrue(safe["fifth_confirmed_active"])
+        self.assertEqual(safe["fifth_public_ad_id"], 9000012345)
+        self.assertNotIn("PRIVATE", json.dumps(safe))
+        raw["fifth_public_url"] = "https://attacker.test/krasnoyarsk/report_9000012345"
+        self.assertFalse(b.sanitize_live_api_report(raw)["fifth_confirmed_active"])
+        raw["fifth_public_url"] = "https://www.avito.ru/krasnoyarsk/report_9000012344"
+        self.assertFalse(b.sanitize_live_api_report(raw)["fifth_confirmed_active"])
+
 if __name__ == "__main__":
     unittest.main()
