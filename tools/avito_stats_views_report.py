@@ -5,24 +5,29 @@ import os
 from datetime import date, timedelta
 from tools.avito_stats_access_probe import IDS, request, stats_path
 
-CITIES={8347570435:"Москва",8477159401:"Санкт-Петербург",8531755111:"Сургут",8414224003:"Чита"}
+CITIES={8347570435:"Москва",8477159401:"Санкт-Петербург",8531755111:"Сургут",8414224003:"Чита",8378846522:"Красноярск / Excel и отчёты"}
+# Fifth ID independently confirmed active through exact current upload/active API correlation, 2026-11-14.
+REPORT_IDS = IDS + [8378846522]
 
 def summarize(payload):
     result=payload.get("result") if isinstance(payload,dict) else None
     items=result.get("items") if isinstance(result,dict) else None
     if not isinstance(items,list):
         raise ValueError("Missing result.items")
-    report={str(k):{"city":v,"days":0,"views":0,"daily":{}} for k,v in CITIES.items()}
+    report={str(k):{"city":v,"days":0,"views":0,"daily":{},
+                     "response_item_present":False,"contacts":None,"favorites":None} for k,v in CITIES.items()}
     for item in items:
         if not isinstance(item,dict):
             raise ValueError("Malformed item")
         ident=item.get("itemId")
         if str(ident) not in report:
             continue
+        report[str(ident)]["response_item_present"]=True
         stats=item.get("stats")
         if not isinstance(stats,list):
             raise ValueError("Missing stats")
         seen=set()
+        optional={"contacts":[],"favorites":[]}
         for point in stats:
             if not isinstance(point,dict):
                 raise ValueError("Malformed point")
@@ -40,6 +45,14 @@ def summarize(payload):
             report[str(ident)]["days"]+=1
             report[str(ident)]["views"]+=views
             report[str(ident)]["daily"][day]=views
+            # Optional aggregate metrics are reported ONLY when each returned day
+            # includes an unambiguous nonnegative integer. Absent != zero.
+            for field in optional:
+                value=point.get(field)
+                optional[field].append(value if type(value) is int and value>=0 else None)
+        for field, values in optional.items():
+            if values and len(values)==len(stats) and all(v is not None for v in values):
+                report[str(ident)][field]=sum(values)
     return report
 
 
@@ -64,7 +77,7 @@ def main():
     end=date.today()-timedelta(days=1)
     start=end-timedelta(days=6)
     payload={"dateFrom":start.isoformat(),"dateTo":end.isoformat(),
-             "fields":["views","contacts","favorites"],"itemIds":IDS,"periodGrouping":"day"}
+             "fields":["views","contacts","favorites"],"itemIds":REPORT_IDS,"periodGrouping":"day"}
     status,data=request(stats_path("v1",account_id),token=token,payload=payload)
     if status!=200:
         print(json.dumps({"stats_http":status,"report":None}))
