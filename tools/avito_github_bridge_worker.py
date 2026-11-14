@@ -213,6 +213,30 @@ def sanitize_live_api_report(raw: dict[str, Any]) -> dict[str, Any]:
             "success_published", "processing", "error_params", "error_payment",
             "error_content", "removed_complete", "pending"
         } else "unknown"
+    safe["fifth_confirmed_active"] = False
+    safe["fifth_check_status"] = raw.get("fifth_check_status") if raw.get("fifth_check_status") in {
+        "confirmed", "not_checked", "not_in_current_upload",
+        "not_success_published", "no_exact_active_match"
+    } else "not_checked"
+    if isinstance(raw.get("current_upload"), dict):
+        fifth_upload = raw["current_upload"]
+        safe["fifth_in_current_items"] = fifth_upload.get("fifth_in_current_items") is True
+        safe["fifth_section"] = fifth_upload.get("fifth_section") if fifth_upload.get("fifth_section") in {
+            "success_published", "processing", "error_params", "error_payment",
+            "error_content", "removed_complete", "pending"
+        } else "unknown"
+    if raw.get("fifth_confirmed_active") is True:
+        fifth_id, fifth_url = raw.get("fifth_public_ad_id"), raw.get("fifth_public_url")
+        if type(fifth_id) is int and 0 < fifth_id < 1000000000000000 and isinstance(fifth_url, str):
+            parsed = urllib.parse.urlsplit(fifth_url)
+            if (parsed.scheme == "https" and parsed.netloc == "www.avito.ru"
+                    and parsed.path.startswith("/krasnoyarsk/")
+                    and parsed.path.endswith("_" + str(fifth_id))
+                    and ".." not in parsed.path and len(parsed.path) <= 250):
+                safe["fifth_confirmed_active"] = True
+                safe["fifth_public_ad_id"] = fifth_id
+                safe["fifth_public_url"] = "https://www.avito.ru" + parsed.path
+    # Do not expose any other active listing, contact or account metadata.
     # Never equate upload success, a city-only candidate, or HTTP 200
     # with an independently correlated, active Chita advertisement.
     safe["chita_confirmed_active"] = False
