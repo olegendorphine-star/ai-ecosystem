@@ -9,10 +9,7 @@ sys.path.insert(0,str(ROOT))
 from fl_rootless_owner_desktop import Browser,ALLOWED_PAGES,is_fl_url
 
 JOBS=[
- ("5528829","Нужно перевести 3 презентации с английского на русский язык","https://www.fl.ru/projects/5528829/nujno-perevesti-3-prezentatsii-s-angliyskogo-na-russkiy-yazyik.html"),
- ("5528991","Подготовка презентаций и каталога по конвейерному оборудованию","https://www.fl.ru/projects/5528991/podgotovka-prezentatsiy-i-kataloga-po-konveyernomu-oborudovaniyu.html"),
- ("5529079","Презентация для клиентов на модели мото техники","https://www.fl.ru/projects/5529079/prezentatsiya-dlya-klientov-na-modeli-moto-tehniki.html"),
- ("5529095","Нужен Python-разработчик","https://www.fl.ru/projects/5529095/nujen-python-razrabotchik.html")
+ ("5529031","Форматирование (оформление по условиям университета Мастрер Тезиса) и проверка на антиплагиат","https://www.fl.ru/projects/5529031/formatirovanie-oformlenie-po-usloviyam-universiteta-mastrer-tezisa-i-proverka-na-antiplagiat.html")
 ]
 out={"schema":"fl.free.content.preflight.v1","owner_verified":False,"read_only":True,"bids_sent":False,"projects":[]}
 b=Browser()
