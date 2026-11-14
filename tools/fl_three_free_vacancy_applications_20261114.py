@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 ROOT=Path.home()/".fl-agent"
 sys.path.insert(0,str(ROOT))
-from fl_rootless_owner_desktop import Browser,ALLOWED_PAGES,is_fl_url
+from fl_rootless_owner_desktop import Browser,ALLOWED_PAGES,is_fl_url,LOGIN
 
 JOBS=[
  {
@@ -66,10 +66,10 @@ try:
  with tempfile.TemporaryDirectory(prefix="fl-free-editor-applications-",dir=ROOT) as td:
   b.open(Path(td));p=b.page
   a=p.goto(ALLOWED_PAGES["settings"],wait_until="domcontentloaded",timeout=20000)
-  sign=p.evaluate("""()=>({
+  sign=p.evaluate("""(expected)=>({
    settings:(document.body?.innerText||'').includes('Основные настройки'),
-   owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').toLowerCase().trim()==='olegendorphine@gmail.com')
-  })""")
+   owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').toLowerCase().trim()===expected)
+  })""", LOGIN)
   RESULT["owner_verified"]=bool(a and a.status==200 and is_fl_url(p.url) and sign["settings"] and sign["owner"])
   if RESULT["owner_verified"]:
    for job in JOBS:
