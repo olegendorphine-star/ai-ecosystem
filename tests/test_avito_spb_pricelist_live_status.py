@@ -214,5 +214,65 @@ class AvitoLiveStatusTests(unittest.TestCase):
         self.assertTrue(v["four_items_success_published"])
         self.assertFalse(v["seo_import_four_items_verified"])
 
+
+    def test_fifth_requires_exact_upload_id_active_price_and_city(self):
+        xml = (Path(__file__).resolve().parents[1] / "docs" / "avito-feed.xml").read_bytes()
+        fifth_stable = "automation-excel-reports-krasnoyarsk-001"
+        fifth_id = 9000012345
+        def run(imported_id=fifth_id, section="success_published", active_id=fifth_id,
+                price=3000, city="krasnoyarsk", state="success", items_http=200,
+                has_fifth=True):
+            def fake(url, auth=None, body=None):
+                if url == m.FEED:
+                    return 200, xml
+                if url == m.API + "/token/":
+                    return 200, {"access_token": "TEST_ONLY"}
+                if url.startswith(m.API + "/core/v1/items"):
+                    return 200, {"resources": [
+                        {"id": active_id, "price": price, "status": "active",
+                         "url": "https://www.avito.ru/" + city + "/predlozheniya_uslug/report_" + str(active_id) + "?token=SECRET"}]}
+                if url == m.API + "/autoload/v4/uploads/current":
+                    return 200, {"upload_id": 633605275, "status": state,
+                                 "started_at": "2026-11-14T09:50:03Z"}
+                if url == m.API + "/autoload/v4/uploads/current/items":
+                    if items_http != 200:
+                        return items_http, None
+                    items = [{"ad_id": fifth_stable, "avito_id": imported_id,
+                              "section": {"slug": section}}] if has_fifth else []
+                    return 200, {"items": items}
+                raise AssertionError("Unexpected route: " + url)
+            with patch.dict(m.os.environ, {"AVITO_CLIENT_ID": "test", "AVITO_CLIENT_SECRET": "test"}):
+                with patch.object(m, "http", side_effect=fake):
+                    return m.inspect()
+
+        confirmed = run()
+        self.assertTrue(confirmed["fifth_confirmed_active"])
+        self.assertEqual(confirmed["fifth_public_ad_id"], fifth_id)
+        self.assertEqual(confirmed["fifth_public_url"],
+                         "https://www.avito.ru/krasnoyarsk/predlozheniya_uslug/report_9000012345")
+        self.assertNotIn("SECRET", json.dumps(confirmed))
+        self.assertEqual(confirmed["fifth_check_status"], "confirmed")
+        self.assertFalse(run(imported_id=9000099999)["fifth_confirmed_active"])
+        self.assertFalse(run(active_id=9000099999)["fifth_confirmed_active"])
+        self.assertFalse(run(price=5000)["fifth_confirmed_active"])
+        self.assertFalse(run(city="moskva")["fifth_confirmed_active"])
+        self.assertFalse(run(section="error_payment")["fifth_confirmed_active"])
+        self.assertFalse(run(state="processing")["fifth_confirmed_active"])
+        no_row = run(has_fifth=False)
+        self.assertFalse(no_row["fifth_confirmed_active"])
+        self.assertEqual(no_row["fifth_check_status"], "not_in_current_upload")
+        ratelimited = run(items_http=429)
+        self.assertFalse(ratelimited["fifth_confirmed_active"])
+        self.assertEqual(ratelimited["fifth_check_status"], "not_checked")
+
+    def test_fifth_upload_only_is_not_confirmation(self):
+        fifth = {"ad_id": "automation-excel-reports-krasnoyarsk-001",
+                 "avito_id": "9000012345", "section": {"slug": "success_published"}}
+        report = m.upload_check({"status": "success"}, {"items": [fifth]})
+        self.assertTrue(report["fifth_in_current_items"])
+        self.assertEqual(report["fifth_avito_id"], 9000012345)
+        self.assertEqual(report["fifth_section"], "success_published")
+        self.assertNotIn("fifth_confirmed_active", report)
+
 if __name__ == "__main__":
     unittest.main()
