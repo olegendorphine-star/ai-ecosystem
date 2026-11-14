@@ -68,7 +68,7 @@ try:
   a=p.goto(ALLOWED_PAGES["settings"],wait_until="domcontentloaded",timeout=20000)
   sign=p.evaluate("""(expected)=>({
    settings:(document.body?.innerText||'').includes('Основные настройки'),
-   owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').toLowerCase().trim()===expected)
+   owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').toLowerCase().trim().split('@')[0]===expected)
   })""", LOGIN)
   RESULT["owner_verified"]=bool(a and a.status==200 and is_fl_url(p.url) and sign["settings"] and sign["owner"])
   if RESULT["owner_verified"]:
