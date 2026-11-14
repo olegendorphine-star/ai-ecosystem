@@ -188,6 +188,7 @@ def upload_check(current: Any, items: Any) -> dict[str, Any]:
                      and (x.get("id") == stable_id or x.get("ad_id") == stable_id)), None)
     spb = by_stable_id("ai-assistant-memory-spb-001")
     chita = by_stable_id("ai-assistant-memory-chita-001")
+    fifth = by_stable_id("automation-excel-reports-krasnoyarsk-001")
     section = spb.get("section") if isinstance(spb, dict) else None
     slug = section.get("slug") if isinstance(section, dict) else section
     chita_section = chita.get("section") if isinstance(chita, dict) else None
@@ -198,6 +199,14 @@ def upload_check(current: Any, items: Any) -> dict[str, Any]:
         chita_id = int(chita_id)
     if type(chita_id) is not int or not (0 < chita_id < 1000000000000000):
         chita_id = None
+    fifth_section = fifth.get("section") if isinstance(fifth, dict) else None
+    fifth_slug = (fifth_section.get("slug") if isinstance(fifth_section, dict)
+                  else fifth_section)
+    fifth_id = fifth.get("avito_id", fifth.get("avitoId")) if fifth else None
+    if isinstance(fifth_id, str) and fifth_id.isdecimal():
+        fifth_id = int(fifth_id)
+    if type(fifth_id) is not int or not (0 < fifth_id < 1000000000000000):
+        fifth_id = None
     allowed_sections = {"success_published", "processing", "error_params",
                         "error_payment", "error_content", "removed_complete", "pending"}
     # An import started before the SEO feed deployment cannot verify SEO.
@@ -235,7 +244,11 @@ def upload_check(current: Any, items: Any) -> dict[str, Any]:
             "chita_in_current_items": chita is not None,
             "chita_section": (chita_slug if isinstance(chita_slug, str)
                               and chita_slug in allowed_sections else "unknown"),
-            "chita_avito_id": chita_id}
+            "chita_avito_id": chita_id,
+            "fifth_in_current_items": fifth is not None,
+            "fifth_section": (fifth_slug if isinstance(fifth_slug, str)
+                              and fifth_slug in allowed_sections else "unknown"),
+            "fifth_avito_id": fifth_id}
 
 
 def inspect() -> dict[str, Any]:
@@ -314,6 +327,46 @@ def inspect() -> dict[str, Any]:
         and u.get("chita_section") == "success_published"
         and a.get("chita_public_ad_id") == u.get("chita_avito_id")
         and type(a.get("chita_public_ad_id")) is int)
+    # Do not infer a fifth published ad from active_page_count=5 or city/price.
+    # Require exact public ID assigned to its stable feed ID in a successful import,
+    # plus an independently active item with that ID, price and canonical city URL.
+    fifth_id = u.get("fifth_avito_id")
+    active_payload = results.get("active_items", (None, None))[1]
+    active_rows = active_payload.get("resources") if isinstance(active_payload, dict) else None
+    active_rows = active_rows if isinstance(active_rows, list) else []
+    fifth_match = None
+    if type(fifth_id) is int and u.get("fifth_section") == "success_published":
+        for item in active_rows:
+            if (not isinstance(item, dict) or type(item.get("id")) is not int
+                    or item["id"] != fifth_id or item.get("status") != "active"
+                    or item.get("price") != 3000):
+                continue
+            url = item.get("url")
+            if not isinstance(url, str):
+                continue
+            parsed = urllib.parse.urlsplit(url)
+            if (parsed.scheme == "https" and parsed.hostname in ("avito.ru", "www.avito.ru")
+                    and parsed.port is None and parsed.path.startswith("/krasnoyarsk/")
+                    and ".." not in parsed.path and len(parsed.path) <= 250
+                    and parsed.path.endswith("_" + str(fifth_id))):
+                fifth_match = "https://www.avito.ru" + parsed.path
+                break
+    summary["fifth_confirmed_active"] = bool(
+        u.get("upload_status") in ("success", "completed", "finished")
+        and u.get("fifth_in_current_items") is True
+        and fifth_match is not None)
+    if summary["fifth_confirmed_active"]:
+        summary["fifth_public_ad_id"] = fifth_id
+        summary["fifth_public_url"] = fifth_match
+        summary["fifth_check_status"] = "confirmed"
+    elif summary.get("current_items_check") != "read":
+        summary["fifth_check_status"] = "not_checked"
+    elif u.get("fifth_in_current_items") is not True:
+        summary["fifth_check_status"] = "not_in_current_upload"
+    elif u.get("fifth_section") != "success_published":
+        summary["fifth_check_status"] = "not_success_published"
+    else:
+        summary["fifth_check_status"] = "no_exact_active_match"
     return summary
 
 
