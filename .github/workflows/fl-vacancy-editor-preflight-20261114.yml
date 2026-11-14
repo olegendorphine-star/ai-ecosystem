@@ -1,0 +1,42 @@
+name: FL - Vacancy editor preflight read-only
+on:
+  push:
+    branches: [feature/fl-free-content-bids-20261114]
+    paths:
+      - 'tools/fl_vacancy_editor_preflight_20261114.py'
+      - '.github/workflows/fl-vacancy-editor-preflight-20261114.yml'
+permissions: {contents: read}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - run: python3 -m py_compile tools/fl_vacancy_editor_preflight_20261114.py
+      - name: Inspect three eligible text role vacancy forms in FL owner session
+        env:
+          HOST: ${{ secrets.AVITO_SERVER_HOST }}
+          USER: ${{ secrets.AVITO_SERVER_USER }}
+          PORT: ${{ secrets.AVITO_SERVER_SSH_PORT }}
+          KEY: ${{ secrets.AVITO_SERVER_SSH_KEY_B64 }}
+          KNOWN: ${{ secrets.AVITO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER" && test -n "$KEY" && test -n "$KNOWN"
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          printf '%s' "$KEY" | base64 -d > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$KNOWN" > "$RUNNER_TEMP/ssh/known"
+          chmod 600 "$RUNNER_TEMP/ssh/key" "$RUNNER_TEMP/ssh/known"
+          cat tools/fl_vacancy_editor_preflight_20261114.py | ssh -F /dev/null -4 -T \
+            -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/ssh/known" -o IdentitiesOnly=yes \
+            -o LogLevel=ERROR -i "$RUNNER_TEMP/ssh/key" -p "${PORT:-22}" "$USER@$HOST" \
+            'env LD_LIBRARY_PATH="$HOME/.local/usr/lib/x86_64-linux-gnu:$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$HOME/.avito-agent/venv/bin/python" -' \
+          | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d["schema"]=="fl.vacancy.editor.preflight.v1" and d["read_only"] and not d["applications_sent"]
+          print("FL_VACANCY_OWNER",d["owner_verified"])
+          for x in d["jobs"]:print("FL_VACANCY_JOB",json.dumps(x,ensure_ascii=False))
+          '
