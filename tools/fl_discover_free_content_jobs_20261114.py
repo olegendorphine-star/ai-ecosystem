@@ -7,7 +7,7 @@ import json,sys,tempfile,re
 from pathlib import Path
 from urllib.parse import urlsplit
 ROOT=Path.home()/".fl-agent";sys.path.insert(0,str(ROOT))
-from fl_rootless_owner_desktop import Browser,ALLOWED_PAGES,is_fl_url
+from fl_rootless_owner_desktop import Browser,ALLOWED_PAGES,is_fl_url,LOGIN
 
 SOURCES=[
  ("latest","https://www.fl.ru/projects/"),
@@ -29,10 +29,10 @@ try:
  with tempfile.TemporaryDirectory(prefix="fl-owner-content-free-search-",dir=ROOT) as tmp:
   b.open(Path(tmp));p=b.page
   r=p.goto(ALLOWED_PAGES["settings"],wait_until="domcontentloaded",timeout=20000)
-  sign=p.evaluate("""() => ({
-   owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').trim().toLowerCase()==='olegendorphine@gmail.com'),
+  sign=p.evaluate("""(expected) => ({
+   owner:[...document.querySelectorAll('input')].some(e=>(e.value||'').trim().toLowerCase()===expected),
    settings:(document.body?.innerText||'').includes('Основные настройки')
-  })""")
+  })""", LOGIN)
   out["owner_verified"]=bool(r and r.status==200 and is_fl_url(p.url) and sign["settings"] and sign["owner"])
   if out["owner_verified"]:
    entries={}
