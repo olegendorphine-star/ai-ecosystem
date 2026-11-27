@@ -14,7 +14,7 @@
   "api_check_status": "checked",
   "autoload_posts": 0,
   "charges_rub": 0,
-  "checked_at_utc": "2026-11-26T13:40:29+00:00",
+  "checked_at_utc": "2026-11-27T13:37:31+00:00",
   "chita_confirmed_active": true,
   "current_items_check": "read",
   "current_upload": {
@@ -29,8 +29,8 @@
     "seo_import_four_items_verified": true,
     "spb_in_current_items": true,
     "spb_section": "success_published",
-    "upload_id": 641305811,
-    "upload_started_at_utc": "2026-11-26T09:04:02+00:00",
+    "upload_id": 641901743,
+    "upload_started_at_utc": "2026-11-27T09:04:02+00:00",
     "upload_status": "success"
   },
   "feed_ad_count": 5,
